@@ -25,10 +25,32 @@ class targets:
         '''
 
         self.Lxy = Lxy
-        self.target_locs = pos
-        self.target_angles = theta
+        self.locs = pos
+        self.angles = theta
         self.geom = geom
 
     
+    def get_percep_angles(self,loc,angle=0):
+        '''Given the (x,y) coordinate of an observer, loc, return an array of
+        angles corresponding to how the targets are percieved from the position 
+        of the observer when the observer is facing a direction given by angle.
 
-    
+        Parameters
+        ----------
+        loc : (x,y) of floats
+        angle : float
+
+        Returns
+        -------
+        Nx2 ndarray of angles theta_1 < theta_2, unless geom is None, then a 
+        length N ndarray of single theta values instead.
+        '''
+
+        # Get a vector toward each target
+        vecs = self.locs - loc
+
+        if self.geom is None:
+            ##### Point targets #####
+            angles = np.arctan2(vecs[:,1],vecs[:,0])
+            return angles - angle
+            
