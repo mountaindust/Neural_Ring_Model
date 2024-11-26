@@ -7,16 +7,19 @@ import numpy as np
 
 class targets:
 
-    def __init__(self, Lxy=(12,12), pos=np.array([[8,4],[8,8]]), theta=None, geom=None):
-        '''Set up a domain using dimensions Lx, Ly, with LLC at the origin.
-        Create and store information about targets located at (pos_x,pos_y) with 
-        orientation given by theta and geometry given by geom.
+    def __init__(self, pos=None, theta=None, geom=None):
+        '''Set up targets for attraction model.
+        The only thing taken care of here is storage of target locations and 
+        calculation of unbiased, unwarped perception of the targets (angluar 
+        interval) depending on the geometry of the targets.
+
+        Default is two targets located at (15,5) and (15,15) so that an organism 
+        starting at (0,10) is right inbetween them as it moves along the 
+        x-direction.
 
         Parameters
         ----------
-        Lxy : (x,y) of floats
-            length of domain in the x and y direction
-        pos : Nx2 ndarray
+        pos : Nx2 ndarray (default=np.array([[15,5],[15,15]]))
             x,y coordinates of targets
         theta : length N ndarray TODO
             orientation of targets
@@ -24,8 +27,10 @@ class targets:
             geometry of targets
         '''
 
-        self.Lxy = Lxy
-        self.locs = pos
+        if pos is None:
+            self.locs = np.array([[15,5],[15,15]])
+        else:
+            self.locs = pos
         self.angles = theta
         self.geom = geom
 
