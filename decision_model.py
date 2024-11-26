@@ -51,6 +51,6 @@ class targets:
 
         if self.geom is None:
             ##### Point targets #####
-            angles = np.arctan2(vecs[:,1],vecs[:,0])
-            return angles - angle
+            target_angles = np.arctan2(vecs[:,1],vecs[:,0])
+            return target_angles - angle
             
