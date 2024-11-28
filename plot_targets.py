@@ -9,8 +9,8 @@ import decision_model as model
 
 focal_loc = np.array([5,10])
 
-targets = model.Targets(geom_name='circle', r=1)
-focal_angle = np.pi/2
+targets = model.Targets(geom_name='segment', l=1, theta=np.array([0.2,-0.5]))
+focal_angle = -1
 angles = targets.get_percep_angles(focal_loc, focal_angle)
 
 fig = plt.figure(figsize=(12,6))
@@ -42,6 +42,27 @@ elif targets.geom_name == 'circle':
             x = (focal_loc[0],focal_loc[0] + r*np.cos(thetas[ii]))
             y = (focal_loc[1],focal_loc[1] + r*np.sin(thetas[ii]))
             ax1.plot(x,y,'k')
+elif targets.geom_name == 'segment':
+    # plot segment targets
+    for n,pos in enumerate(targets.locs):
+        try:
+            l = targets.l[n]
+        except TypeError:
+            l = targets.l
+        try:
+            theta = targets.theta[n]
+        except TypeError:
+            theta = targets.theta
+        x = (pos[0] - l/2*np.cos(theta), pos[0] + l/2*np.cos(theta))
+        y = (pos[1] - l/2*np.sin(theta), pos[1] + l/2*np.sin(theta))
+        ax1.plot(x,y,'b')
+    # plot perception angles. Requires adding back angle of focal locust
+    for n, thetas in enumerate(angles+focal_angle):
+        r = np.linalg.norm(targets.locs[n,:] - focal_loc)
+        for ii in range(2):
+            x = (focal_loc[0],focal_loc[0] + r*np.cos(thetas[ii]))
+            y = (focal_loc[1],focal_loc[1] + r*np.sin(thetas[ii]))
+            ax1.plot(x,y,'k')
 else:
     raise NotImplementedError("This geometry still TBD")
 
@@ -63,9 +84,17 @@ if targets.geom_name is None:
         if (theta-theta_mesh[idx-1]) < (theta_mesh[idx]-theta):
             p_func[idx-1] = 1
         else:
-            p_func[idx] = 1
-    
+            p_func[idx] = 1    
 elif targets.geom_name == 'circle':
+    p_func = np.zeros(2000)
+    for thetas in angles:
+        for ii in range(2):
+            if thetas[ii] < 0:
+                thetas[ii] += 2*np.pi
+        # step function perception
+        theta_bool = np.logical_and(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
+        p_func[theta_bool] = 1
+elif targets.geom_name == 'segment':
     p_func = np.zeros(2000)
     for thetas in angles:
         for ii in range(2):

@@ -95,7 +95,7 @@ class Targets:
             angles1 = np.arctan2(vecs1[:,1],vecs1[:,0])
             angles2 = np.arctan2(vecs2[:,1],vecs2[:,0])
             # store sorted and return
-            target_angles = np.zeros((len(angles1,2)))
+            target_angles = np.zeros((len(angles1),2))
             one_two = angles1 <= angles2
             target_angles[one_two,:] = np.column_stack([angles1[one_two]-angle,
                                                         angles2[one_two]-angle])
