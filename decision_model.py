@@ -5,7 +5,7 @@ it wants to go based on static targets with certain geometry
 
 import numpy as np
 
-class targets:
+class Targets:
 
     def __init__(self, pos=None, geom_name=None, r=None, l=None, theta=None):
         '''Set up targets for attraction model.
