@@ -10,7 +10,8 @@ import decision_model as model
 focal_loc = np.array([5,10])
 
 targets = model.Targets(geom_name='circle', r=1)
-angles = targets.get_percep_angles(focal_loc)
+focal_angle = np.pi/2
+angles = targets.get_percep_angles(focal_loc, focal_angle)
 
 fig = plt.figure(figsize=(12,6))
 
@@ -20,8 +21,8 @@ ax1 = plt.subplot(121)
 if targets.geom_name is None:
     # delta functions
     ax1.plot(targets.locs[:,0],targets.locs[:,1],'.')
-    # plot perception angles
-    for n, theta in enumerate(angles):
+    # plot geometric angles. Requires adding back angle of focal locust
+    for n, theta in enumerate(angles+focal_angle):
         r = np.linalg.norm(targets.locs[n,:] - focal_loc)
         x = (focal_loc[0],focal_loc[0] + r*np.cos(theta))
         y = (focal_loc[1],focal_loc[1] + r*np.sin(theta))
@@ -34,8 +35,8 @@ elif targets.geom_name == 'circle':
         except TypeError:
             circle = plt.Circle(pos, targets.r, color='b')
         ax1.add_patch(circle)
-    # plot perception angles
-    for n, thetas in enumerate(angles):
+    # plot perception angles. Requires adding back angle of focal locust
+    for n, thetas in enumerate(angles+focal_angle):
         r = np.linalg.norm(targets.locs[n,:] - focal_loc)
         for ii in range(2):
             x = (focal_loc[0],focal_loc[0] + r*np.cos(thetas[ii]))
@@ -44,6 +45,8 @@ elif targets.geom_name == 'circle':
 else:
     raise NotImplementedError("This geometry still TBD")
 
+ax1.arrow(focal_loc[0],focal_loc[1],0.5*np.cos(focal_angle),0.5*np.sin(focal_angle), 
+          width=0.1, head_length=0.25)
 ax1.set_aspect('equal')
 ax1.set_title('Target Geometry')
 
@@ -73,6 +76,7 @@ elif targets.geom_name == 'circle':
         p_func[theta_bool] = 1
 
 ax2.plot(theta_mesh,p_func)
+ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
 ax2.set_rmin(-0.5)
 ax2.set_rmax(1.25)
 ax2.set_rticks([0, 0.5, 1])

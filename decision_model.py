@@ -81,7 +81,8 @@ class Targets:
             else:
                 vecs_length = np.linalg.norm(vecs)
             pm_theta = np.arcsin(self.r/vecs_length)
-            return np.column_stack([target_angles-pm_theta,target_angles+pm_theta])
+            return np.column_stack([target_angles-pm_theta-angle,
+                                    target_angles+pm_theta-angle])
         elif self.geom_name == 'segment':
             # find location of segment endpoints
             diff = np.column_stack([self.l/2*np.cos(self.theta),
@@ -96,9 +97,9 @@ class Targets:
             # store sorted and return
             target_angles = np.zeros((len(angles1,2)))
             one_two = angles1 <= angles2
-            target_angles[one_two,:] = np.column_stack([angles1[one_two],
-                                                        angles2[one_two]])
-            target_angles[~one_two,:] = np.column_stack([angles2[~one_two],
-                                                         angles1[~one_two]])
+            target_angles[one_two,:] = np.column_stack([angles1[one_two]-angle,
+                                                        angles2[one_two]-angle])
+            target_angles[~one_two,:] = np.column_stack([angles2[~one_two]-angle,
+                                                         angles1[~one_two]-angle])
             return target_angles
             
