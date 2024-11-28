@@ -75,12 +75,10 @@ ax1.set_title('Target Geometry')
 ###### Perception Signal Plot ######
 ax2 = plt.subplot(122, projection='polar')
 
-theta_mesh = np.linspace(0, 2*np.pi, 2000)
+theta_mesh = np.linspace(-np.pi, np.pi, 2000)
 if targets.geom_name is None:
     p_func = np.zeros(2000)
     for theta in angles:
-        if theta < 0:
-            theta += 2*np.pi
         idx = np.searchsorted(theta_mesh,theta)
         if (theta-theta_mesh[idx-1]) < (theta_mesh[idx]-theta):
             p_func[idx-1] = 1
@@ -89,18 +87,12 @@ if targets.geom_name is None:
 elif targets.geom_name == 'circle':
     p_func = np.zeros(2000)
     for thetas in angles:
-        for ii in range(2):
-            if thetas[ii] < 0:
-                thetas[ii] += 2*np.pi
         # step function perception
         theta_bool = np.logical_and(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
         p_func[theta_bool] = 1
 elif targets.geom_name == 'segment':
     p_func = np.zeros(2000)
     for thetas in angles:
-        for ii in range(2):
-            if thetas[ii] < 0:
-                thetas[ii] += 2*np.pi
         # step function perception
         theta_bool = np.logical_and(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
         p_func[theta_bool] = 1

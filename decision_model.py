@@ -7,7 +7,7 @@ import numpy as np
 
 class Targets:
 
-    def __init__(self, pos=None, geom_name=None, r=None, l=None, theta=None):
+    def __init__(self, pos=None, geom_name=None, r=None, l=None, theta=0):
         '''Set up targets for attraction model.
         The only thing taken care of here is storage of target locations and 
         calculation of unbiased, unwarped perception of the targets (angluar 
@@ -36,7 +36,7 @@ class Targets:
             radius of circles in the geometry; see geom for requirements
         l : float or ndarray
             line segment lengths in the geometry; see geom for requirements
-        theta : float or length N ndarray
+        theta : float or length N ndarray, default=0
             orientation of targets; see geom for requirements
         '''
 
@@ -44,11 +44,10 @@ class Targets:
             self.locs = np.array([[15,5],[15,15]])
         else:
             self.locs = pos
-        self.angles = theta
         self.geom_name = geom_name
         self.r = r
         self.l = l
-        self.theta = theta
+        self.theta = self.convert_angles(theta)
 
     
     def get_percep_angles(self,loc,angle=0):
@@ -72,7 +71,7 @@ class Targets:
             # Get a vector toward each target
             vecs = self.locs - loc
             target_angles = np.arctan2(vecs[:,1],vecs[:,0])
-            return target_angles - angle
+            return self.convert_angles(target_angles - angle)
         elif self.geom_name == 'circle':
             vecs = self.locs - loc
             target_angles = np.arctan2(vecs[:,1],vecs[:,0])
@@ -81,8 +80,8 @@ class Targets:
             else:
                 vecs_length = np.linalg.norm(vecs)
             pm_theta = np.arcsin(self.r/vecs_length)
-            return np.column_stack([target_angles-pm_theta-angle,
-                                    target_angles+pm_theta-angle])
+            return self.convert_angles(np.column_stack([target_angles-pm_theta-angle,
+                                                        target_angles+pm_theta-angle]))
         elif self.geom_name == 'segment':
             # find location of segment endpoints
             diff = np.column_stack([self.l/2*np.cos(self.theta),
@@ -97,9 +96,18 @@ class Targets:
             # store sorted and return
             target_angles = np.zeros((len(angles1),2))
             one_two = angles1 <= angles2
-            target_angles[one_two,:] = np.column_stack([angles1[one_two]-angle,
-                                                        angles2[one_two]-angle])
-            target_angles[~one_two,:] = np.column_stack([angles2[~one_two]-angle,
-                                                         angles1[~one_two]-angle])
+            target_angles[one_two,:] = self.convert_angles(
+                                        np.column_stack([angles1[one_two]-angle,
+                                                         angles2[one_two]-angle]))
+            target_angles[~one_two,:] = self.convert_angles(
+                                        np.column_stack([angles2[~one_two]-angle,
+                                                         angles1[~one_two]-angle]))
             return target_angles
-            
+        
+
+    @staticmethod
+    def convert_angles(theta):
+        '''Given a scalar or array of angles, convert to angles in 
+        [-np.pi,np.pi]
+        '''
+        return theta - (theta+np.pi)//(2*np.pi)*2*np.pi
