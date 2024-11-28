@@ -9,9 +9,12 @@ import decision_model as model
 
 focal_loc = np.array([5,10])
 
-targets = model.Targets(pos=np.array([[9,12],[15,14],[13,7]]), geom_name='circle', 
-                        r=np.array([0.5, 1.25, 0.75]))
-focal_angle = -1
+# targets = model.Targets(pos=np.array([[9,12],[15,14],[13,7]]), geom_name='circle', 
+#                         r=np.array([0.5, 1.25, 0.75]))
+
+targets = model.Targets(geom_name='segment', l=1, theta=np.array([0.2, 2.5]))
+
+focal_angle = -1.1 - np.pi/2
 angles = targets.get_percep_angles(focal_loc, focal_angle)
 
 fig = plt.figure(figsize=(12,6))
@@ -88,13 +91,19 @@ elif targets.geom_name == 'circle':
     p_func = np.zeros(2000)
     for thetas in angles:
         # step function perception
-        theta_bool = np.logical_and(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
+        if thetas[1] > thetas[0]:
+            theta_bool = np.logical_and(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
+        else:
+            theta_bool = np.logical_or(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
         p_func[theta_bool] = 1
 elif targets.geom_name == 'segment':
     p_func = np.zeros(2000)
     for thetas in angles:
         # step function perception
-        theta_bool = np.logical_and(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
+        if thetas[1] > thetas[0]:
+            theta_bool = np.logical_and(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
+        else:
+            theta_bool = np.logical_or(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
         p_func[theta_bool] = 1
 
 ax2.plot(theta_mesh,p_func)

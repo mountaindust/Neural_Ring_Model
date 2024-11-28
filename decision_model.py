@@ -91,17 +91,17 @@ class Targets:
             # get a vector to each
             vecs1 = endpt1 - loc; vecs2 = endpt2 - loc
             # get angles to each
-            angles1 = np.arctan2(vecs1[:,1],vecs1[:,0])
-            angles2 = np.arctan2(vecs2[:,1],vecs2[:,0])
+            angles1 = self.convert_angles(np.arctan2(vecs1[:,1],vecs1[:,0])-angle)
+            angles2 = self.convert_angles(np.arctan2(vecs2[:,1],vecs2[:,0])-angle)
             # store sorted and return
             target_angles = np.zeros((len(angles1),2))
-            one_two = angles1 <= angles2
-            target_angles[one_two,:] = self.convert_angles(
-                                        np.column_stack([angles1[one_two]-angle,
-                                                         angles2[one_two]-angle]))
-            target_angles[~one_two,:] = self.convert_angles(
-                                        np.column_stack([angles2[~one_two]-angle,
-                                                         angles1[~one_two]-angle]))
+            one_two = np.logical_and(angles1 <= angles2, angles2-angles1 < np.pi)
+            one_two = np.logical_or(one_two, np.logical_and(angles1 > angles2,
+                                                            angles2+2*np.pi-angles1 < np.pi))
+            target_angles[one_two,:] = np.column_stack([angles1[one_two],
+                                                         angles2[one_two]])
+            target_angles[~one_two,:] = np.column_stack([angles2[~one_two],
+                                                         angles1[~one_two]])
             return target_angles
         
 
