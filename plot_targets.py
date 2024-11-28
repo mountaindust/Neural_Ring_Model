@@ -51,8 +51,10 @@ elif targets.geom_name == 'segment':
     for n,pos in enumerate(targets.locs):
         try:
             l = targets.l[n]
+            onel = False
         except TypeError:
             l = targets.l
+            onel = True
         try:
             theta = targets.theta[n]
         except TypeError:
@@ -63,6 +65,10 @@ elif targets.geom_name == 'segment':
     # plot perception angles. Requires adding back angle of focal locust
     for n, thetas in enumerate(angles+focal_angle):
         r = np.linalg.norm(targets.locs[n,:] - focal_loc)
+        if onel:
+            r += l
+        else:
+            r += l[n]
         for ii in range(2):
             x = (focal_loc[0],focal_loc[0] + r*np.cos(thetas[ii]))
             y = (focal_loc[1],focal_loc[1] + r*np.sin(thetas[ii]))
