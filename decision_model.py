@@ -4,6 +4,7 @@ it wants to go based on static targets with certain geometry
 '''
 
 import numpy as np
+from scipy import stats
 
 class Targets:
 
@@ -111,3 +112,25 @@ class Targets:
         [-np.pi,np.pi]
         '''
         return theta - (theta+np.pi)//(2*np.pi)*2*np.pi
+
+
+
+class DirectionModel:
+
+    def __init__(self, model='truncnorm', *args, **kwargs):
+        '''The constructor essentially just acts as a kernel picker for convolution 
+        with the signal.
+        '''
+
+        if model == 'truncnorm':
+            self.model = self.truncnorm(*args, **kwargs)
+
+
+    def truncnorm(self, mu, sigma, left, right):
+        '''Function generator that returns a truncated normal pdf with mean mu, 
+        std sigma, and truncated at left and right.
+        '''
+
+        a, b = (left - mu) / sigma, (right - mu) / sigma
+        rv = stats.truncnorm(a,b,mu,sigma)
+        return lambda x: rv.pdf(x)
