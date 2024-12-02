@@ -5,6 +5,7 @@ it wants to go based on static targets with certain geometry
 
 import numpy as np
 from scipy import stats
+import matplotlib.pyplot as plt
 
 class Targets:
 
@@ -115,15 +116,185 @@ class Targets:
 
 
 
+class PerceptionModel:
+
+    def __init__(self, focal_loc=(5,10), focal_angle=0, targets=None, type=None):
+        '''Establishes an observer at location focal_loc, looking in a direction 
+        given by focal_angle, at targets given by targets. All three of these 
+        can be changed at any time as attributes.
+
+        Parameters
+        ----------
+        focal_loc : array-like of length 2
+            (x,y) location of observer in Euclidean space. Will be stored as an 
+            ndarray.
+        focal_angle : float
+            direction observer is facing in Euclidean space from [-pi,pi).
+        targets : Targets object, optional.
+            the targets around the observer as a Targets object. If no targets 
+            object is given, a default target object will be set.
+        type : TODO
+            how the angular extent of targets should be translated into 
+            observation signal. None corresponds to an indicator function, but 
+            this could be other things (blurred vision, higher weighting toward 
+            the front of the observed object, etc.)
+        '''
+
+        self.focal_loc = np.array(focal_loc)
+        self.focal_angle = focal_angle
+        if targets is None:
+            self.targets = Targets()
+        else:
+            assert isinstance(targets,Targets), "targets must be a Targets object."
+            self.targets = targets
+        self.type = type
+
+
+    def get_signal(self,res_num=2000):
+        '''Translates the focal position/angle and information about targets 
+        into a perception signal (1D mesh) with length res_num.
+
+        Returns
+        -------
+        ndarray of length res_num representing the perception signal. Values in 
+        the signal are normalized between 0 and 1.
+        '''
+
+        angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
+        theta_mesh = np.linspace(-np.pi, np.pi, res_num+1)[:-1]
+        signal = np.zeros(res_num)
+
+        if self.targets.geom_name is None:
+            for theta in angles:
+                idx = np.searchsorted(theta_mesh,theta)
+                if self.type is None:
+                    # step function perception
+                    if (theta-theta_mesh[idx-1]) < (theta_mesh[idx]-theta):
+                        signal[idx-1] = 1
+                    else:
+                        signal[idx] = 1
+                else:
+                    raise NotImplementedError("Unknown perception type.")
+        elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
+            for thetas in angles:
+                if self.type is None:
+                    # step function perception
+                    if thetas[1] > thetas[0]:
+                        theta_bool = np.logical_and(thetas[0]<=theta_mesh,
+                                                    theta_mesh<=thetas[1])
+                    else:
+                        theta_bool = np.logical_or(thetas[0]<=theta_mesh,
+                                                   theta_mesh<=thetas[1])
+                    signal[theta_bool] = 1
+                else:
+                    raise NotImplementedError("Unknown perception type.")
+        else:
+            raise NotImplementedError("Unknown target geometry name.")
+        
+        return signal
+
+
+    def plot(self):
+        '''Plots the targets and their angular extents from the observer, and 
+        also the signal distribution from the point of view of the observer.
+        '''
+
+        angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
+
+        plt.figure(figsize=(12,6))
+
+        ###### Target Geometry Plot ######
+        ax1 = plt.subplot(121)
+
+        if self.targets.geom_name is None:
+            # delta functions
+            ax1.plot(self.targets.locs[:,0],self.targets.locs[:,1],'.')
+            # plot geometric angles. Requires adding back angle of focal locust
+            for n, theta in enumerate(angles+self.focal_angle):
+                r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
+                x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(theta))
+                y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(theta))
+                ax1.plot(x,y,'k')
+        elif self.targets.geom_name == 'circle':
+            # plot circle targets
+            for n,pos in enumerate(self.targets.locs):
+                try:
+                    circle = plt.Circle(pos, self.targets.r[n], color='b')
+                except TypeError:
+                    circle = plt.Circle(pos, self.targets.r, color='b')
+                ax1.add_patch(circle)
+            # plot perception angles. Requires adding back angle of focal locust
+            for n, thetas in enumerate(angles+self.focal_angle):
+                r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
+                for ii in range(2):
+                    x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(thetas[ii]))
+                    y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(thetas[ii]))
+                    ax1.plot(x,y,'k')
+        elif self.targets.geom_name == 'segment':
+            # plot segment targets
+            for n,pos in enumerate(self.targets.locs):
+                try:
+                    l = self.targets.l[n]
+                    onel = False
+                except TypeError:
+                    l = self.targets.l
+                    onel = True
+                try:
+                    theta = self.targets.theta[n]
+                except TypeError:
+                    theta = self.targets.theta
+                x = (pos[0] - l/2*np.cos(theta), pos[0] + l/2*np.cos(theta))
+                y = (pos[1] - l/2*np.sin(theta), pos[1] + l/2*np.sin(theta))
+                ax1.plot(x,y,'b')
+            # plot perception angles. Requires adding back angle of focal locust
+            for n, thetas in enumerate(angles+self.focal_angle):
+                r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
+                if onel:
+                    r += l
+                else:
+                    r += l[n]
+                for ii in range(2):
+                    x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(thetas[ii]))
+                    y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(thetas[ii]))
+                    ax1.plot(x,y,'k')
+        else:
+            raise NotImplementedError("This geometry still TBD")
+
+        ax1.arrow(self.focal_loc[0],self.focal_loc[1],
+                  0.5*np.cos(self.focal_angle),0.5*np.sin(self.focal_angle), 
+                width=0.1, head_length=0.25)
+        ax1.set_aspect('equal')
+        ax1.set_title('Target Geometry')
+
+        ###### Perception Signal Plot ######
+        ax2 = plt.subplot(122, projection='polar')
+
+        p_func = self.get_signal(2000)
+        theta_mesh = np.linspace(-np.pi, np.pi, 2000+1)[:-1]
+
+        ax2.plot(theta_mesh,p_func)
+        ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
+        ax2.set_rmin(-0.5)
+        ax2.set_rmax(1.25)
+        ax2.set_rticks([0, 0.5, 1])
+        ax2.set_rlabel_position(0)
+        ax2.set_title('Perception Signal')
+        plt.show()
+
+
+
 class DirectionModel:
 
-    def __init__(self, model='truncnorm', *args, **kwargs):
+    def __init__(self, weighting='truncnorm', *args, **kwargs):
         '''The constructor essentially just acts as a kernel picker for convolution 
         with the signal.
         '''
 
-        if model == 'truncnorm':
-            self.model = self.truncnorm(*args, **kwargs)
+        if weighting == 'truncnorm':
+            self.weighting = self.truncnorm(*args, **kwargs)
+            self.weighting_name = weighting
+        else:
+            raise NotImplementedError("Unknown weighting kernel.")
 
 
     def truncnorm(self, mu, sigma, left, right):
@@ -133,4 +304,27 @@ class DirectionModel:
 
         a, b = (left - mu) / sigma, (right - mu) / sigma
         rv = stats.truncnorm(a,b,mu,sigma)
+        # x will be theta - phi
         return lambda x: rv.pdf(x)
+    
+
+    def hamiltonian(self, theta_mesh, targets):
+        '''Convolution of the weighting kernel with the signal over [-pi,pi],
+        evaluated at theta.
+
+        Parameters
+        ----------
+        theta_mesh : 1D ndarray
+            mesh of angles for convolution on [-pi,pi).
+        targets : Targets object
+
+        Returns
+        -------
+        ndarray of convoluted signal and weighting on [-pi,pi]. The length of 
+        the returned array will match the input array.
+        '''
+        if self.weighting_name == 'truncnorm':
+            kernel = self.weighting(theta_mesh)
+            raise NotImplementedError("This is a work in progress.")
+        else:
+            raise NotImplementedError("Unknown weighting kernel.")

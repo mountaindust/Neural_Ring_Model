@@ -8,115 +8,13 @@ import matplotlib.pyplot as plt
 import decision_model as model
 
 focal_loc = np.array([5,10])
+focal_angle = -1.1 - np.pi/2
 
 # targets = model.Targets(pos=np.array([[9,12],[15,14],[13,7]]), geom_name='circle', 
 #                         r=np.array([0.5, 1.25, 0.75]))
-
 targets = model.Targets(geom_name='segment', l=1, theta=np.array([0.2, 2.5]))
 
-focal_angle = -1.1 - np.pi/2
-angles = targets.get_percep_angles(focal_loc, focal_angle)
+percep_model = model.PerceptionModel(focal_loc, focal_angle, targets)
 
-fig = plt.figure(figsize=(12,6))
+percep_model.plot()
 
-###### Target Geometry Plot ######
-ax1 = plt.subplot(121)
-
-if targets.geom_name is None:
-    # delta functions
-    ax1.plot(targets.locs[:,0],targets.locs[:,1],'.')
-    # plot geometric angles. Requires adding back angle of focal locust
-    for n, theta in enumerate(angles+focal_angle):
-        r = np.linalg.norm(targets.locs[n,:] - focal_loc)
-        x = (focal_loc[0],focal_loc[0] + r*np.cos(theta))
-        y = (focal_loc[1],focal_loc[1] + r*np.sin(theta))
-        ax1.plot(x,y,'k')
-elif targets.geom_name == 'circle':
-    # plot circle targets
-    for n,pos in enumerate(targets.locs):
-        try:
-            circle = plt.Circle(pos, targets.r[n], color='b')
-        except TypeError:
-            circle = plt.Circle(pos, targets.r, color='b')
-        ax1.add_patch(circle)
-    # plot perception angles. Requires adding back angle of focal locust
-    for n, thetas in enumerate(angles+focal_angle):
-        r = np.linalg.norm(targets.locs[n,:] - focal_loc)
-        for ii in range(2):
-            x = (focal_loc[0],focal_loc[0] + r*np.cos(thetas[ii]))
-            y = (focal_loc[1],focal_loc[1] + r*np.sin(thetas[ii]))
-            ax1.plot(x,y,'k')
-elif targets.geom_name == 'segment':
-    # plot segment targets
-    for n,pos in enumerate(targets.locs):
-        try:
-            l = targets.l[n]
-            onel = False
-        except TypeError:
-            l = targets.l
-            onel = True
-        try:
-            theta = targets.theta[n]
-        except TypeError:
-            theta = targets.theta
-        x = (pos[0] - l/2*np.cos(theta), pos[0] + l/2*np.cos(theta))
-        y = (pos[1] - l/2*np.sin(theta), pos[1] + l/2*np.sin(theta))
-        ax1.plot(x,y,'b')
-    # plot perception angles. Requires adding back angle of focal locust
-    for n, thetas in enumerate(angles+focal_angle):
-        r = np.linalg.norm(targets.locs[n,:] - focal_loc)
-        if onel:
-            r += l
-        else:
-            r += l[n]
-        for ii in range(2):
-            x = (focal_loc[0],focal_loc[0] + r*np.cos(thetas[ii]))
-            y = (focal_loc[1],focal_loc[1] + r*np.sin(thetas[ii]))
-            ax1.plot(x,y,'k')
-else:
-    raise NotImplementedError("This geometry still TBD")
-
-ax1.arrow(focal_loc[0],focal_loc[1],0.5*np.cos(focal_angle),0.5*np.sin(focal_angle), 
-          width=0.1, head_length=0.25)
-ax1.set_aspect('equal')
-ax1.set_title('Target Geometry')
-
-###### Perception Signal Plot ######
-ax2 = plt.subplot(122, projection='polar')
-
-theta_mesh = np.linspace(-np.pi, np.pi, 2000)
-if targets.geom_name is None:
-    p_func = np.zeros(2000)
-    for theta in angles:
-        idx = np.searchsorted(theta_mesh,theta)
-        if (theta-theta_mesh[idx-1]) < (theta_mesh[idx]-theta):
-            p_func[idx-1] = 1
-        else:
-            p_func[idx] = 1    
-elif targets.geom_name == 'circle':
-    p_func = np.zeros(2000)
-    for thetas in angles:
-        # step function perception
-        if thetas[1] > thetas[0]:
-            theta_bool = np.logical_and(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
-        else:
-            theta_bool = np.logical_or(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
-        p_func[theta_bool] = 1
-elif targets.geom_name == 'segment':
-    p_func = np.zeros(2000)
-    for thetas in angles:
-        # step function perception
-        if thetas[1] > thetas[0]:
-            theta_bool = np.logical_and(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
-        else:
-            theta_bool = np.logical_or(thetas[0]<=theta_mesh,theta_mesh<=thetas[1])
-        p_func[theta_bool] = 1
-
-ax2.plot(theta_mesh,p_func)
-ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
-ax2.set_rmin(-0.5)
-ax2.set_rmax(1.25)
-ax2.set_rticks([0, 0.5, 1])
-ax2.set_rlabel_position(0)
-ax2.set_title('Perception Signal')
-plt.show()
