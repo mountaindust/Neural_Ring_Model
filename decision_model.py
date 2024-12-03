@@ -150,9 +150,15 @@ class PerceptionModel:
         self.type = type
 
 
-    def get_signal(self,res_num=2000):
+    def get_signal(self,theta_mesh=2000):
         '''Translates the focal position/angle and information about targets 
         into a perception signal (1D mesh) with length res_num.
+
+        Parameters
+        ----------
+        theta_mesh : float or 1D ndarray
+            the number of equally spaced mesh points on [-pi,pi) to evaluate at 
+            or a mesh of theta values to evaluate at
 
         Returns
         -------
@@ -161,8 +167,11 @@ class PerceptionModel:
         '''
 
         angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
-        theta_mesh = np.linspace(-np.pi, np.pi, res_num+1)[:-1]
-        signal = np.zeros(res_num)
+        if isinstance(theta_mesh, int):
+            signal = np.zeros(theta_mesh)
+            theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
+        else:
+            signal = np.zeros_like(theta_mesh)
 
         if self.targets.geom_name is None:
             for theta in angles:
@@ -336,24 +345,55 @@ class DirectionModel:
         return lambda x: rv.pdf(x)
     
 
-    def hamiltonian(self, theta_mesh, targets):
-        '''Convolution of the weighting kernel with the signal over [-pi,pi],
-        evaluated at theta.
+    def hamiltonian(self, theta_mesh):
+        '''Convolution of the weighting kernel with the signal over [-pi,pi]. 
 
         Parameters
         ----------
         theta_mesh : 1D ndarray
-            mesh of angles for convolution on [-pi,pi).
-        targets : Targets object
+            a mesh of points on [-pi,pi) to evaluate the hamiltonian at
 
         Returns
         -------
-        ndarray of convoluted signal and weighting on [-pi,pi]. The length of 
+        ndarray of convoluted signal and weighting on [-pi,pi). The length of 
         the returned array will match the input array.
         '''
         if self.weighting_name == 'truncnorm':
+            
             kernel = self.weighting(theta_mesh)
-            raise NotImplementedError("This is a work in progress.")
-        # return np.real(np.fft.ifft( np.fft.fft(signal)*np.fft.fft(ker) ))
+            signal = self.percep_model.get_signal(theta_mesh)
+            # Periodic convolution via convolution theorem
+            return np.real(np.fft.ifft( np.fft.fft(signal)*np.fft.fft(kernel) ))
         else:
             raise NotImplementedError("Unknown weighting kernel.")
+        
+
+    def get_direction(self, res_num=2000):
+        '''Get consensus direction for current parameterization of the 
+        DirectionModel.
+
+        Parameters
+        ----------
+        res_num : float
+            the number of equally spaced mesh points on [-pi,pi) to evaluate the
+            hamiltonian at. More increases accuracy at the expense of speed.
+
+        Returns
+        -------
+        theta : the Euclidean (allocentric) consensus direction as a float 
+        within [-pi,pi)
+        '''
+        theta_mesh = np.linspace(-np.pi, np.pi, res_num+1)[:-1]
+        H = self.hamiltonian(theta_mesh)
+
+        if self.consensus_type == 'additive':
+            x = np.sum(np.cos(theta_mesh)*H)
+            y = np.sum(np.sin(theta_mesh)*H)
+            return np.arctan2(y,x)
+        elif self.consensus_type == 'argmax':
+            idx_array = H.argmax()
+            if len(idx_array) > 1:
+                idx = np.random.choice(idx_array)
+            else:
+                idx = idx_array[0]
+            return theta_mesh[idx]
