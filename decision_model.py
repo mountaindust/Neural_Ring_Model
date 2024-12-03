@@ -285,19 +285,47 @@ class PerceptionModel:
 
 class DirectionModel:
 
-    def __init__(self, weighting='truncnorm', *args, **kwargs):
-        '''The constructor essentially just acts as a kernel picker for convolution 
-        with the signal.
+    def __init__(self, percep_model=None, consensus_type='additive', 
+                 weighting_name='truncnorm', *args, **kwargs):
+        '''From a PerceptionModel with its Targets object, establishes a model 
+        for chosing direction based on a weighting of the signal via convolution 
+        and a method for finding a consensus direction from the result.
+        
+        Parameters
+        ----------
+        percep_model : PerceptionModel
+            A PerceptionModel object (with its Targets object) that establishes 
+            the geometry of the scenario. If none is provided, a default one 
+            will be created. The PerceptionModel can be updated to obtain 
+            consensus directions for different layouts or focal locations/angles.
+        consensus_type : {'additive', 'argmax'}
+            Method that will be used to find a consensus direction after 
+            convoluting the perception signal with the weighting.
+        weighting_name : {'truncnorm'}
+            Weighting for the signal convolution. The necessary parameters for 
+            this weighting should be provided after this key word argument. The 
+            following is a list of parameterizations.
+            - 'truncnorm'
+                - mu=0 : mean
+                - sigma=np.pi/8 : standard deviation
+                - left=-np.pi : left cutoff
+                - right=np.pi : right cutoff
         '''
-
-        if weighting == 'truncnorm':
+        if percep_model is None:
+            self.percep_model = PerceptionModel()
+        else:
+            assert isinstance(percep_model,PerceptionModel),\
+            "percep_model must be a PerceptionModel object."
+            self.percep_model = percep_model
+        self.consensus_type = consensus_type
+        if weighting_name == 'truncnorm':
             self.weighting = self.truncnorm(*args, **kwargs)
-            self.weighting_name = weighting
+            self.weighting_name = weighting_name
         else:
             raise NotImplementedError("Unknown weighting kernel.")
 
 
-    def truncnorm(self, mu, sigma, left, right):
+    def truncnorm(self, mu=0, sigma=np.pi/8, left=-np.pi, right=np.pi):
         '''Function generator that returns a truncated normal pdf with mean mu, 
         std sigma, and truncated at left and right.
         '''
@@ -326,5 +354,6 @@ class DirectionModel:
         if self.weighting_name == 'truncnorm':
             kernel = self.weighting(theta_mesh)
             raise NotImplementedError("This is a work in progress.")
+        # return np.real(np.fft.ifft( np.fft.fft(signal)*np.fft.fft(ker) ))
         else:
             raise NotImplementedError("Unknown weighting kernel.")
