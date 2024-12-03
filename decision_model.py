@@ -386,11 +386,14 @@ class DirectionModel:
         the returned array will match the input array.
         '''
         if self.weighting_name == 'truncnorm':
-            
             kernel = self.weighting(theta_mesh)
             signal = self.percep_model.get_signal(theta_mesh)
-            # Periodic convolution via convolution theorem
-            return np.real(np.fft.ifft( np.fft.fft(signal)*np.fft.fft(kernel) ))
+            # Periodic convolution via convolution theorem.
+            # Results must be shifted because numpy fft puts the zero frequency
+            #   at the left-most position of the array.
+            return np.fft.fftshift(np.fft.irfft( 
+                                   np.fft.rfft(kernel)*np.fft.rfft(signal),
+                                   len(signal)))
         else:
             raise NotImplementedError("Unknown weighting kernel.")
         
@@ -449,29 +452,33 @@ class DirectionModel:
         with_signal : bool, default=False
             Include a plot of the signal alongside the Hamiltonian for comparison.
         '''
-        res_num = 2000
+        res_num = 3000
         theta_mesh = np.linspace(-np.pi, np.pi, res_num+1)[:-1]
 
         if focal_loc_mesh is None:
             if with_signal:
-                fig, axs = plt.subplots(2, figsize=(8,6))
+                fig, axs = plt.subplots(2, figsize=(8,5))
             else:
-                fig, axs = plt.subplots(figsize=(8,4))
-            axs[0].plot(theta_mesh,self.hamiltonian(theta_mesh),xunits=radians)
+                fig, axs = plt.subplots(figsize=(8,2.5))
+                axs = np.array([axs])
+            H_array = self.hamiltonian(theta_mesh)
+            axs[0].plot(theta_mesh*radians, H_array, xunits=radians)
             axs[0].set_title('Hamiltonian')
             if with_signal:
-                axs[1].plot(theta_mesh,self.percep_model.get_signal(theta_mesh),
+                axs[1].plot(theta_mesh*radians,
+                            self.percep_model.get_signal(theta_mesh),
                             xunits=radians)
-                axs[1].set_title['Perceived Signal']
+                axs[1].set_title('Perceived Signal')
         else:
             if with_signal:
-                fig, axs = plt.subplots(1, 2, figsize=(12,6), 
+                fig, axs = plt.subplots(1, 2, figsize=(10,5), 
                                         subplot_kw=dict(projection='3d'))
                 # create array to store signal
                 signal_array = np.zeros((focal_loc_mesh.shape[0],res_num))
             else:
-                fig, axs = plt.subplots(figsize=(8,6), 
+                fig, axs = plt.subplots(figsize=(5.5,5), 
                                         subplot_kw=dict(projection='3d'))
+                axs = np.array([axs])
             # save current loc
             current_loc = self.percep_model.focal_loc.copy()
             # create array to store hamiltonian
@@ -481,24 +488,22 @@ class DirectionModel:
             for n,loc in enumerate(focal_loc_mesh):
                 self.percep_model.focal_loc = loc
                 angle_array[n] = self.percep_model.targets.get_angles_to_targets(loc,
-                                                    self.percep_model.focal_angle)[0]
+                                                    self.percep_model.focal_angle)[-1]
                 if with_signal:
                     signal_array[n,:] = self.percep_model.get_signal(theta_mesh)
                 H_array[n,:] = self.hamiltonian(theta_mesh)
             
             # Create 3D plot(s)
-            theta_mgrid, angle_mgrid = np.meshgrid(theta_mesh,angle_array)
-            axs[0].plot_surface(theta_mgrid, angle_mgrid, H_array, 
-                                xunits=radians, yunits=radians)
+            theta_mgrid, angle_mgrid = np.meshgrid(theta_mesh, angle_array)
+            axs[0].plot_surface(theta_mgrid, angle_mgrid, H_array)
             axs[0].set_title('Hamiltonian')
             axs[0].set_xlabel(r'$\theta$')
-            axs[0].set_ylabel('angle to first target')
+            axs[0].set_ylabel('angle to last target')
             if with_signal:
-                axs[1].plot_surface(theta_mgrid, angle_mgrid, signal_array,
-                                    xunits=radians, yunits=radians)
+                axs[1].plot_surface(theta_mgrid, angle_mgrid, signal_array)
                 axs[1].set_title('Perception Signal')
                 axs[1].set_xlabel(r'$\theta$')
-                axs[1].set_ylabel('angle to first target')
+                axs[1].set_ylabel('angle to last target')
 
         if focal_loc_mesh is not None:
             # replace current loc

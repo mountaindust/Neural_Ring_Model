@@ -23,4 +23,9 @@ dir_model = model.DirectionModel(percep_model)
 
 print(dir_model.get_direction())
 
-dir_model.plot_weighting()
+# dir_model.plot_weighting()
+
+# dir_model.plot_hamiltonian(with_signal=False)
+
+focal_loc_mesh = np.column_stack((np.linspace(1,14,100), 10*np.ones(100)))
+dir_model.plot_hamiltonian(focal_loc_mesh, with_signal=True)
