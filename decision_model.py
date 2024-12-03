@@ -7,6 +7,7 @@ import numpy as np
 from scipy import stats
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+from matplotlib import cm
 from basic_units import radians
 
 class Targets:
@@ -398,7 +399,7 @@ class DirectionModel:
             raise NotImplementedError("Unknown weighting kernel.")
         
 
-    def get_direction(self, res_num=2000):
+    def get_direction(self, res_num=2000, return_H=False):
         '''Get consensus direction for current parameterization of the 
         DirectionModel.
 
@@ -407,6 +408,8 @@ class DirectionModel:
         res_num : float
             the number of equally spaced mesh points on [-pi,pi) to evaluate the
             hamiltonian at. More increases accuracy at the expense of speed.
+        return_H : bool
+            whether or not to return the full Hamiltonian too
 
         Returns
         -------
@@ -419,14 +422,20 @@ class DirectionModel:
         if self.consensus_type == 'additive':
             x = np.sum(np.cos(theta_mesh)*H)
             y = np.sum(np.sin(theta_mesh)*H)
-            return np.arctan2(y,x)
+            if return_H:
+                return np.arctan2(y,x), H
+            else:
+                return np.arctan2(y,x)
         elif self.consensus_type == 'argmax':
             idx_array = H.argmax()
             if len(idx_array) > 1:
                 idx = np.random.choice(idx_array)
             else:
                 idx = idx_array[0]
-            return theta_mesh[idx]
+            if return_H:
+                return theta_mesh[idx], H
+            else:
+                return theta_mesh[idx]
         
 
     def plot_weighting(self):
@@ -461,13 +470,17 @@ class DirectionModel:
             else:
                 fig, axs = plt.subplots(figsize=(8,2.5))
                 axs = np.array([axs])
-            H_array = self.hamiltonian(theta_mesh)
+            # Get direction angle and hamiltonian
+            dir_angle, H_array = self.get_direction(res_num, return_H=True)
             axs[0].plot(theta_mesh*radians, H_array, xunits=radians)
             axs[0].set_title('Hamiltonian')
+            # Indicate chosen angle
+            idx = np.searchsorted(theta_mesh, dir_angle)
+            axs[0].plot(dir_angle*radians, H_array[idx], 'ok')
             if with_signal:
-                axs[1].plot(theta_mesh*radians,
-                            self.percep_model.get_signal(theta_mesh),
-                            xunits=radians)
+                signal = self.percep_model.get_signal(theta_mesh)
+                axs[1].plot(theta_mesh*radians, signal, xunits=radians)
+                axs[1].plot(dir_angle*radians, signal[idx], 'ok')
                 axs[1].set_title('Perceived Signal')
         else:
             if with_signal:
@@ -485,25 +498,37 @@ class DirectionModel:
             H_array = np.zeros((focal_loc_mesh.shape[0],res_num))
             # also get an array of angles to create axis ticks
             angle_array = np.zeros(focal_loc_mesh.shape[0])
+            # get array to store consensus angle
+            dir_angle = np.zeros_like(angle_array)
+            idx_array = np.zeros_like(angle_array, dtype=int)
             for n,loc in enumerate(focal_loc_mesh):
                 self.percep_model.focal_loc = loc
                 angle_array[n] = self.percep_model.targets.get_angles_to_targets(loc,
                                                     self.percep_model.focal_angle)[-1]
                 if with_signal:
                     signal_array[n,:] = self.percep_model.get_signal(theta_mesh)
-                H_array[n,:] = self.hamiltonian(theta_mesh)
+                # Get direction angle and hamiltonian
+                dir_angle[n], H_array[n,:] = self.get_direction(res_num, return_H=True)
+                idx_array[n] = np.searchsorted(theta_mesh, dir_angle[n])
             
             # Create 3D plot(s)
             theta_mgrid, angle_mgrid = np.meshgrid(theta_mesh, angle_array)
-            axs[0].plot_surface(theta_mgrid, angle_mgrid, H_array)
+            axs[0].plot_surface(theta_mgrid, angle_mgrid, H_array, 
+                                cmap=cm.viridis)
             axs[0].set_title('Hamiltonian')
             axs[0].set_xlabel(r'$\theta$')
             axs[0].set_ylabel('angle to last target')
+            # Indicate chosen angles
+            H_vals = [H_array[n,idx_array[n]] for n in range(len(angle_array))]
+            axs[0].scatter(dir_angle, angle_array, H_vals, c='k')
             if with_signal:
-                axs[1].plot_surface(theta_mgrid, angle_mgrid, signal_array)
+                axs[1].plot_surface(theta_mgrid, angle_mgrid, signal_array,
+                                    cmap=cm.viridis)
                 axs[1].set_title('Perception Signal')
                 axs[1].set_xlabel(r'$\theta$')
                 axs[1].set_ylabel('angle to last target')
+                sig_vals = [signal_array[n,idx_array[n]] for n in range(len(angle_array))]
+                axs[1].scatter(dir_angle, angle_array, sig_vals, c='k')
 
         if focal_loc_mesh is not None:
             # replace current loc

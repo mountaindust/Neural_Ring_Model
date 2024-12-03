@@ -21,11 +21,10 @@ percep_model = model.PerceptionModel(focal_loc, focal_angle, targets)
 
 dir_model = model.DirectionModel(percep_model)
 
-print(dir_model.get_direction())
-
 # dir_model.plot_weighting()
 
-# dir_model.plot_hamiltonian(with_signal=False)
+# dir_model.plot_hamiltonian(with_signal=True)
 
-focal_loc_mesh = np.column_stack((np.linspace(1,14,100), 10*np.ones(100)))
+num_stps = 1000
+focal_loc_mesh = np.column_stack((np.linspace(1,14,num_stps), 10*np.ones(num_stps)))
 dir_model.plot_hamiltonian(focal_loc_mesh, with_signal=True)
