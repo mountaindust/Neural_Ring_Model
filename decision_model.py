@@ -6,10 +6,12 @@ it wants to go based on static targets with certain geometry
 import numpy as np
 from scipy import stats
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+from basic_units import radians
 
 class Targets:
 
-    def __init__(self, pos=None, geom_name=None, r=None, l=None, theta=0):
+    def __init__(self, locs=None, geom_name=None, r=None, l=None, theta=0):
         '''Set up targets for attraction model.
         The only thing taken care of here is storage of target locations and 
         calculation of unbiased, unwarped perception of the targets (angluar 
@@ -21,7 +23,7 @@ class Targets:
 
         Parameters
         ----------
-        pos : Nx2 ndarray (default=np.array([[15,5],[15,15]]))
+        locs : Nx2 ndarray (default=np.array([[15,5],[15,15]]))
             x,y coordinates of targets
         geom : {'circle'}, (optional)
             geometry of targets. Depending on the choice, additional parameters 
@@ -42,10 +44,10 @@ class Targets:
             orientation of targets; see geom for requirements
         '''
 
-        if pos is None:
+        if locs is None:
             self.locs = np.array([[15,5],[15,15]])
         else:
-            self.locs = pos
+            self.locs = locs
         self.geom_name = geom_name
         self.r = r
         self.l = l
@@ -67,14 +69,13 @@ class Targets:
         Nx2 ndarray of angles theta_1 < theta_2, unless geom is None, then a 
         length N ndarray of single theta values instead.
         '''
+        loc = np.array(loc)
 
         if self.geom_name is None:
             ##### Point targets #####
-            # Get a vector toward each target
-            vecs = self.locs - loc
-            target_angles = np.arctan2(vecs[:,1],vecs[:,0])
-            return self.convert_angles(target_angles - angle)
+            return self.get_angles_to_targets(loc,angle)
         elif self.geom_name == 'circle':
+            ##### Circle targets #####
             vecs = self.locs - loc
             target_angles = np.arctan2(vecs[:,1],vecs[:,0])
             if vecs.ndim > 1:
@@ -85,6 +86,7 @@ class Targets:
             return self.convert_angles(np.column_stack([target_angles-pm_theta-angle,
                                                         target_angles+pm_theta-angle]))
         elif self.geom_name == 'segment':
+            ##### Segment targets #####
             # find location of segment endpoints
             diff = np.column_stack([self.l/2*np.cos(self.theta),
                                     self.l/2*np.sin(self.theta)])
@@ -105,6 +107,31 @@ class Targets:
             target_angles[~one_two,:] = np.column_stack([angles2[~one_two],
                                                          angles1[~one_two]])
             return target_angles
+        
+
+    def get_angles_to_targets(self,loc,angle=0):
+        '''Given the (x,y) coordinate of an observer, loc, return an array of
+        angles corresponding to where the center of the targets are as percieved 
+        from the position of the observer when the observer is facing a 
+        direction given by angle.
+
+        This is the same as get_percep_angles when geom_name is None 
+        (point targets).
+
+        Parameters
+        ----------
+        loc : (x,y) of floats
+        angle : float
+
+        Returns
+        -------
+        length N ndarray of theta values corresponding to target centers
+        '''
+        loc = np.array(loc)
+        # Get a vector toward each target
+        vecs = self.locs - loc
+        target_angles = np.arctan2(vecs[:,1],vecs[:,0])
+        return self.convert_angles(target_angles - angle)
         
 
     @staticmethod
@@ -397,3 +424,84 @@ class DirectionModel:
             else:
                 idx = idx_array[0]
             return theta_mesh[idx]
+        
+
+    def plot_weighting(self):
+        '''Plot the currently selected weighting function.'''
+
+        plt.figure(figsize=(8,5))
+        theta_mesh = np.linspace(-np.pi, np.pi, 2001)
+        plt.plot(theta_mesh,self.weighting(theta_mesh))
+        plt.title(self.weighting_name)
+        plt.show()
+
+
+    def plot_hamiltonian(self, focal_loc_mesh=None, with_signal=False):
+        '''Plot the hamiltonian with or without the signal alongside it.
+        
+        Parameters
+        ----------
+        focal_loc_mesh : Nx2 ndarray, optional
+            If provided, will plot the hamiltonian as a 3D surface plot 
+            parameterized by the focal (x,y) locations in Euclidean space given 
+            in this mesh. Otherwise, will plot the current focal location given 
+            by the PerceptionModel object.
+        with_signal : bool, default=False
+            Include a plot of the signal alongside the Hamiltonian for comparison.
+        '''
+        res_num = 2000
+        theta_mesh = np.linspace(-np.pi, np.pi, res_num+1)[:-1]
+
+        if focal_loc_mesh is None:
+            if with_signal:
+                fig, axs = plt.subplots(2, figsize=(8,6))
+            else:
+                fig, axs = plt.subplots(figsize=(8,4))
+            axs[0].plot(theta_mesh,self.hamiltonian(theta_mesh),xunits=radians)
+            axs[0].set_title('Hamiltonian')
+            if with_signal:
+                axs[1].plot(theta_mesh,self.percep_model.get_signal(theta_mesh),
+                            xunits=radians)
+                axs[1].set_title['Perceived Signal']
+        else:
+            if with_signal:
+                fig, axs = plt.subplots(1, 2, figsize=(12,6), 
+                                        subplot_kw=dict(projection='3d'))
+                # create array to store signal
+                signal_array = np.zeros((focal_loc_mesh.shape[0],res_num))
+            else:
+                fig, axs = plt.subplots(figsize=(8,6), 
+                                        subplot_kw=dict(projection='3d'))
+            # save current loc
+            current_loc = self.percep_model.focal_loc.copy()
+            # create array to store hamiltonian
+            H_array = np.zeros((focal_loc_mesh.shape[0],res_num))
+            # also get an array of angles to create axis ticks
+            angle_array = np.zeros(focal_loc_mesh.shape[0])
+            for n,loc in enumerate(focal_loc_mesh):
+                self.percep_model.focal_loc = loc
+                angle_array[n] = self.percep_model.targets.get_angles_to_targets(loc,
+                                                    self.percep_model.focal_angle)[0]
+                if with_signal:
+                    signal_array[n,:] = self.percep_model.get_signal(theta_mesh)
+                H_array[n,:] = self.hamiltonian(theta_mesh)
+            
+            # Create 3D plot(s)
+            theta_mgrid, angle_mgrid = np.meshgrid(theta_mesh,angle_array)
+            axs[0].plot_surface(theta_mgrid, angle_mgrid, H_array, 
+                                xunits=radians, yunits=radians)
+            axs[0].set_title('Hamiltonian')
+            axs[0].set_xlabel(r'$\theta$')
+            axs[0].set_ylabel('angle to first target')
+            if with_signal:
+                axs[1].plot_surface(theta_mgrid, angle_mgrid, signal_array,
+                                    xunits=radians, yunits=radians)
+                axs[1].set_title('Perception Signal')
+                axs[1].set_xlabel(r'$\theta$')
+                axs[1].set_ylabel('angle to first target')
+
+        if focal_loc_mesh is not None:
+            # replace current loc
+            self.percep_model.focal_loc = current_loc
+        fig.tight_layout()
+        plt.show()
