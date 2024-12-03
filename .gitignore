@@ -11,3 +11,5 @@ __pycache__/
 *.mltbx
 # Matlab code generation folders
 codegen/
+# Jupyter
+*.ipynb_checkpoints

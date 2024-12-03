@@ -146,21 +146,21 @@ class Targets:
 
 class PerceptionModel:
 
-    def __init__(self, focal_loc=(5,10), focal_angle=0, targets=None, type=None):
+    def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, type=None):
         '''Establishes an observer at location focal_loc, looking in a direction 
         given by focal_angle, at targets given by targets. All three of these 
         can be changed at any time as attributes.
 
         Parameters
         ----------
+        targets : Targets object, optional.
+            the targets around the observer as a Targets object. If no targets 
+            object is given, a default target object will be set.
         focal_loc : array-like of length 2
             (x,y) location of observer in Euclidean space. Will be stored as an 
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        targets : Targets object, optional.
-            the targets around the observer as a Targets object. If no targets 
-            object is given, a default target object will be set.
         type : TODO
             how the angular extent of targets should be translated into 
             observation signal. None corresponds to an indicator function, but 
@@ -231,14 +231,19 @@ class PerceptionModel:
         return signal
 
 
-    def plot(self):
+    def plot(self, wb_plot=False):
         '''Plots the targets and their angular extents from the observer, and 
         also the signal distribution from the point of view of the observer.
+        
+        Set wb_plot to True if plotting in a Jupyber notebook
         '''
 
         angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
 
-        plt.figure(figsize=(12,6))
+        if wb_plot:
+            plt.figure(figsize=(6.5,3.25))
+        else:
+            plt.figure(figsize=(12,6))
 
         ###### Target Geometry Plot ######
         ax1 = plt.subplot(121)
@@ -438,17 +443,24 @@ class DirectionModel:
                 return theta_mesh[idx]
         
 
-    def plot_weighting(self):
-        '''Plot the currently selected weighting function.'''
+    def plot_weighting(self, wb_plot=False):
+        '''Plot the currently selected weighting function.
+        
+        Set wb_plot to True if plotting in a Jupyber notebook
+        '''
 
-        plt.figure(figsize=(8,5))
+        if wb_plot:
+            plt.figure(figsize=(6.5,2))
+        else:
+            plt.figure(figsize=(8,5))
         theta_mesh = np.linspace(-np.pi, np.pi, 2001)
         plt.plot(theta_mesh,self.weighting(theta_mesh))
         plt.title(self.weighting_name)
         plt.show()
 
 
-    def plot_hamiltonian(self, focal_loc_mesh=None, with_signal=False):
+    def plot_hamiltonian(self, focal_loc_mesh=None, with_signal=False,
+                         wb_plot=True):
         '''Plot the hamiltonian with or without the signal alongside it.
         
         Parameters
@@ -466,9 +478,15 @@ class DirectionModel:
 
         if focal_loc_mesh is None:
             if with_signal:
-                fig, axs = plt.subplots(2, figsize=(8,5))
+                if wb_plot:
+                    fig, axs = plt.subplots(2, figsize=(6.5,4))
+                else:
+                    fig, axs = plt.subplots(2, figsize=(8,5))
             else:
-                fig, axs = plt.subplots(figsize=(8,2.5))
+                if wb_plot:
+                    fig, axs = plt.subplots(figsize=(6.5,2))
+                else:
+                    fig, axs = plt.subplots(figsize=(8,2.5))
                 axs = np.array([axs])
             # Get direction angle and hamiltonian
             dir_angle, H_array = self.get_direction(res_num, return_H=True)
@@ -484,13 +502,21 @@ class DirectionModel:
                 axs[1].set_title('Perceived Signal')
         else:
             if with_signal:
-                fig, axs = plt.subplots(1, 2, figsize=(10,5), 
-                                        subplot_kw=dict(projection='3d'))
+                if wb_plot:
+                    fig, axs = plt.subplots(1, 2, figsize=(6.5,4), 
+                                            subplot_kw=dict(projection='3d'))
+                else:
+                    fig, axs = plt.subplots(1, 2, figsize=(10,5), 
+                                            subplot_kw=dict(projection='3d'))
                 # create array to store signal
                 signal_array = np.zeros((focal_loc_mesh.shape[0],res_num))
             else:
-                fig, axs = plt.subplots(figsize=(5.5,5), 
-                                        subplot_kw=dict(projection='3d'))
+                if wb_plot:
+                    fig, axs = plt.subplots(figsize=(6.5,4), 
+                                            subplot_kw=dict(projection='3d'))
+                else:
+                    fig, axs = plt.subplots(figsize=(5.5,5), 
+                                            subplot_kw=dict(projection='3d'))
                 axs = np.array([axs])
             # save current loc
             current_loc = self.percep_model.focal_loc.copy()
