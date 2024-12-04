@@ -141,7 +141,38 @@ class Targets:
         [-np.pi,np.pi]
         '''
         return theta - (theta+np.pi)//(2*np.pi)*2*np.pi
+    
 
+    def plot_targets_to_axis(self, ax):
+        '''Plots the targets on a given axis object.
+        '''
+
+        if self.geom_name is None:
+            # delta functions
+            ax.plot(self.locs[:,0],self.locs[:,1],'.')
+        elif self.geom_name == 'circle':
+            for n,pos in enumerate(self.locs):
+                try:
+                    circle = plt.Circle(pos, self.r[n], color='b')
+                except TypeError:
+                    circle = plt.Circle(pos, self.r, color='b')
+                ax.add_patch(circle)
+        elif self.geom_name == 'segment':
+            # plot segment targets
+            for n,pos in enumerate(self.locs):
+                try:
+                    l = self.l[n]
+                except TypeError:
+                    l = self.l
+                try:
+                    theta = self.theta[n]
+                except TypeError:
+                    theta = self.theta
+                x = (pos[0] - l/2*np.cos(theta), pos[0] + l/2*np.cos(theta))
+                y = (pos[1] - l/2*np.sin(theta), pos[1] + l/2*np.sin(theta))
+                ax.plot(x,y,'b')
+        else:
+            raise NotImplementedError("This geometry still TBD in Targets.")
 
 
 class PerceptionModel:
@@ -248,9 +279,11 @@ class PerceptionModel:
         ###### Target Geometry Plot ######
         ax1 = plt.subplot(121)
 
+        # First, plot the targets themselves
+        self.targets.plot_targets_to_axis(ax1)
+
+        # Now plot perception lines
         if self.targets.geom_name is None:
-            # delta functions
-            ax1.plot(self.targets.locs[:,0],self.targets.locs[:,1],'.')
             # plot geometric angles. Requires adding back angle of focal locust
             for n, theta in enumerate(angles+self.focal_angle):
                 r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
@@ -258,13 +291,6 @@ class PerceptionModel:
                 y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(theta))
                 ax1.plot(x,y,'k')
         elif self.targets.geom_name == 'circle':
-            # plot circle targets
-            for n,pos in enumerate(self.targets.locs):
-                try:
-                    circle = plt.Circle(pos, self.targets.r[n], color='b')
-                except TypeError:
-                    circle = plt.Circle(pos, self.targets.r, color='b')
-                ax1.add_patch(circle)
             # plot perception angles. Requires adding back angle of focal locust
             for n, thetas in enumerate(angles+self.focal_angle):
                 r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
@@ -273,34 +299,21 @@ class PerceptionModel:
                     y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(thetas[ii]))
                     ax1.plot(x,y,'k')
         elif self.targets.geom_name == 'segment':
-            # plot segment targets
-            for n,pos in enumerate(self.targets.locs):
-                try:
-                    l = self.targets.l[n]
-                    onel = False
-                except TypeError:
-                    l = self.targets.l
-                    onel = True
-                try:
-                    theta = self.targets.theta[n]
-                except TypeError:
-                    theta = self.targets.theta
-                x = (pos[0] - l/2*np.cos(theta), pos[0] + l/2*np.cos(theta))
-                y = (pos[1] - l/2*np.sin(theta), pos[1] + l/2*np.sin(theta))
-                ax1.plot(x,y,'b')
             # plot perception angles. Requires adding back angle of focal locust
             for n, thetas in enumerate(angles+self.focal_angle):
                 r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
-                if onel:
-                    r += l
-                else:
+                try:
+                    l = self.targets.l[n]
                     r += l[n]
+                except TypeError:
+                    l = self.targets.l
+                    r += l
                 for ii in range(2):
                     x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(thetas[ii]))
                     y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(thetas[ii]))
                     ax1.plot(x,y,'k')
         else:
-            raise NotImplementedError("This geometry still TBD")
+            raise NotImplementedError("This geometry still TBD in PerceptionModel.")
 
         ax1.arrow(self.focal_loc[0],self.focal_loc[1],
                   0.5*np.cos(self.focal_angle),0.5*np.sin(self.focal_angle), 
@@ -462,6 +475,8 @@ class DirectionModel:
     def plot_hamiltonian(self, focal_loc_mesh=None, with_signal=False,
                          wb_plot=True):
         '''Plot the hamiltonian with or without the signal alongside it.
+
+        Set wb_plot to True if plotting in a Jupyber notebook
         
         Parameters
         ----------
@@ -561,3 +576,63 @@ class DirectionModel:
             self.percep_model.focal_loc = current_loc
         fig.tight_layout()
         plt.show()
+
+
+    def plot_direction_mesh(self, xlim=(0,19), num_x=20, ylim=(0,19), num_y=20, 
+                            return_theta=False, wb_plot=False):
+        '''Create a mesh of starting locations and, for each point in the mesh, 
+        get the direction of travel as a scalar theta. Plots the result as a 
+        vector field of unit vectors and optionally returns a scalar field of 
+        the values theta within [-pi,pi].
+
+        Set wb_plot to True if plotting in a Jupyber notebook
+
+        TODO: automatically avoid targets in a mesh that surrounds them
+
+        Parameters
+        ----------
+        xlim : (xmin,xmax) tuple of floats
+            x limits for mesh, inclusive
+        num_x : number of steps in x direction
+        ylim : (ymin,ymax) tuple of floats
+            y limits for mesh, inclusive
+        num_y : number of steps in y direction
+        return_theta : bool
+            whether or not to return a theta scalar field
+        '''
+
+        current_focal_loc = self.percep_model.focal_loc.copy()
+
+        xmesh = np.linspace(xlim[0], xlim[1], num_x)
+        ymesh = np.linspace(ylim[0], ylim[1], num_y)
+
+        X, Y = np.meshgrid(xmesh, ymesh)
+        theta_mesh = np.zeros_like(X)
+        U = np.zeros_like(X)
+        V = np.zeros_like(X)
+
+        for ii in range(num_x):
+            for jj in range(num_y):
+                this_x = X[jj,ii]
+                this_y = Y[jj,ii]
+                self.percep_model.focal_loc = np.array([this_x,this_y])
+                theta_mesh[jj,ii] = self.get_direction()
+                U[jj,ii] = np.cos(theta_mesh[jj,ii])
+                V[jj,ii] = np.sin(theta_mesh[jj,ii])
+
+        self.percep_model.focal_loc = current_focal_loc
+        if wb_plot:
+            plt.figure(figsize=(6.5,4))
+        else:
+            plt.figure(figsize=(5.5,5))
+        ax = plt.subplot()
+
+        # Plot targets
+        self.percep_model.targets.plot_targets_to_axis(ax)
+        # Plot arrows
+        ax.quiver(X, Y, U, V, angles='xy')
+        ax.set_title("Direction Model")
+        plt.show()
+        if return_theta:
+            return theta_mesh
+        
