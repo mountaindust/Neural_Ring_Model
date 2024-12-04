@@ -216,7 +216,6 @@ class Targets:
             return np.abs(cross)<eps & dot>=0 & dot<=sqdist
 
 
-
     @staticmethod
     def convert_angles(theta):
         '''Given a scalar or array of angles, convert to angles in 
@@ -255,6 +254,7 @@ class Targets:
                 ax.plot(x,y,'b')
         else:
             raise NotImplementedError("This geometry still TBD in Targets.")
+
 
 
 class PerceptionModel:
@@ -735,3 +735,34 @@ class DirectionModel:
         if return_theta:
             return theta_mesh
         
+
+    def plot_walker(self, step=0.1, std=np.pi/10, trials=10, max_steps=3000,
+                    start_loc=None, start_angle=None):
+        '''Plot a walker that starts at a specified location looking in a 
+        specified angle (defaults to the focal_loc and focal_angle in attached 
+        PerceptionModel) and moves in the direction given by the current 
+        direction model with a specified step and angular Gaussian noise with 
+        standard deviation as specified. Repeat for a number of trials and plot 
+        a heat map of these walks in 2D space.
+
+        The walker stops whenever it is detected to be overlapping a target or 
+        after max_steps.
+
+        Parameters
+        ----------
+        step : float
+            How far to move in the determined direction
+        std : float
+            Standard deviation of angular Gaussian noise with mean zero
+        trials : int
+            Number of walks to perform and aggregate
+        max_steps : int
+            Maximum number of steps for each walker
+        start_loc : (x,y) coordinates, optional
+            Starting location of the walk, defaults to focal_loc in the attached 
+            PerceptionModel
+        start_angle : float
+            Starting direction that the walker is facing. Defaults to 
+            focal_angle in the attached PerceptionModel
+        '''
+        pass
