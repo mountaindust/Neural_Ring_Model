@@ -37,9 +37,9 @@ class Targets:
             a theta (for all targets or each), specifying the angle each target 
             segment is at in the plane. The position of the target is the 
             midpoint of the segment.
-        r : float or ndarray
+        r : float or sequence of length N
             radius of circles in the geometry; see geom for requirements
-        l : float or ndarray
+        l : float or sequence of length N
             line segment lengths in the geometry; see geom for requirements
         theta : float or length N ndarray, default=0
             orientation of targets; see geom for requirements
@@ -48,11 +48,30 @@ class Targets:
         if locs is None:
             self.locs = np.array([[15,5],[15,15]])
         else:
-            self.locs = locs
+            try:
+                if locs.ndim == 1:
+                    self.locs = np.array([locs])
+                else:
+                    self.locs = locs
+            except AttributeError:
+                print('locs must be an ndarray')
+                raise
         self.geom_name = geom_name
-        self.r = r
-        self.l = l
-        self.theta = self.convert_angles(theta)
+        if hasattr(r,'__iter__'):
+            assert len(r) == self.locs.shape[0], "length of r must match first dim of locs"
+            self.r = np.array(r)
+        else:
+            self.r = r
+        if hasattr(l,'__iter__'):
+            assert len(l) == self.locs.shape[0], "length of l must match first dim of locs"
+            self.l = np.array(l)
+        else:
+            self.l = l
+        if hasattr(theta,'__iter__'):
+            assert len(theta) == self.locs.shape[0], "length of theta must match first dim of locs"
+            self.theta = self.convert_angles(np.array(theta))
+        else:
+            self.theta = self.convert_angles(theta)
 
     
     def get_percep_angles(self,loc,angle=0):
@@ -60,7 +79,8 @@ class Targets:
         angles corresponding to how the targets are percieved from the position 
         of the observer when the observer is facing a direction given by angle.
 
-        Returns zeros wherever loc is within a target.
+        Returns -pi,pi for any target that loc overlaps, except in the case of 
+        delta function targets, which returns angle instead.
 
         Parameters
         ----------
@@ -76,22 +96,42 @@ class Targets:
 
         if self.geom_name is None:
             ##### Point targets #####
-            return self.get_angles_to_targets(loc,angle)
+            on_target_bool = self.check_target_overlap(loc)
+            if np.any(on_target_bool):
+                angle_to_targets = self.get_angles_to_targets(loc,angle)
+                angle_to_targets[on_target_bool] = angle
+                return angle_to_targets
+            else:
+                return self.get_angles_to_targets(loc,angle)
         
         elif self.geom_name == 'circle':
+            on_target_bool = self.check_target_overlap(loc)
+            # Make sure locs is 2D
+            if self.locs.ndim == 1:
+                self.locs = np.array([self.locs])
             ##### Circle targets #####
-            vecs = self.locs - loc
+            vecs = self.locs[~on_target_bool,:] - loc
             target_angles = np.arctan2(vecs[:,1],vecs[:,0])
             if vecs.ndim > 1:
                 vecs_length = np.linalg.norm(vecs, axis=1)
             else:
                 vecs_length = np.linalg.norm(vecs)
-            on_target_bool = vecs_length <= self.r
-            pm_theta = np.zeros_like(vecs_length)
-            pm_theta[~on_target_bool] = np.arcsin(self.r/vecs_length[~on_target_bool])
-            target_angles[on_target_bool,...] = 0
-            return self.convert_angles(np.column_stack([target_angles-pm_theta-angle,
-                                                        target_angles+pm_theta-angle]))
+            if not np.any(on_target_bool):
+                pm_theta = np.arcsin(self.r/vecs_length)
+                return self.convert_angles(np.column_stack([target_angles-pm_theta-angle,
+                                                            target_angles+pm_theta-angle]))
+            else:
+                if isinstance(self.r,np.ndarray):
+                    pm_theta = np.arcsin(self.r[~on_target_bool]/vecs_length)
+                else:
+                    pm_theta = np.arcsin(self.r/vecs_length)
+                angle_to_targets = np.zeros(self.locs.shape)
+                angle_to_targets[on_target_bool,:] = np.array([-np.pi,np.pi])
+                angle_to_targets[~on_target_bool,:] = \
+                    self.convert_angles(np.column_stack([target_angles-pm_theta-angle,
+                                                         target_angles+pm_theta-angle]))
+                return angle_to_targets
+
         elif self.geom_name == 'segment':
             ##### Segment targets #####
             # find location of segment endpoints
@@ -99,27 +139,15 @@ class Targets:
                                     self.l/2*np.sin(self.theta)])
             endpt1 = self.locs + diff
             endpt2 = self.locs - diff # difference in heading angle is pi between seg endpoints
+             # check for loc on segment
+            on_target_bool = self.check_target_overlap(loc)
             # get a vector to each
-            vecs1 = endpt1 - loc; vecs2 = endpt2 - loc
-            # check for loc on segment
-            eps = np.finfo(np.float32).eps
-            if vecs1.ndim > 1:
-                on_target_bool = np.logical_or(np.linalg.norm(vecs1,axis=1)<eps,
-                                               np.linalg.norm(vecs2,axis=1)<eps)
-            else:
-                on_target_bool = np.logical_or(np.linalg.norm(vecs1)<eps,
-                                               np.linalg.norm(vecs2)<eps)
-            on_target_bool = np.logical_or(on_target_bool, )
+            vecs1 = endpt1[~on_target_bool] - loc
+            vecs2 = endpt2[~on_target_bool] - loc
             # get angles to each
-            angles1 = np.arctan2(vecs1[:,1],vecs1[:,0])
-            angles2 = np.arctan2(vecs2[:,1],vecs2[:,0])
-            # test for on the segment somewhere
-            on_target_bool = np.logical_or(on_target_bool, np.sin(angles1-angles2)<eps)
-            angles1 = self.convert_angles(angles1-angle)
-            angles2 = self.convert_angles(angles2-angle)
-            angles1[on_target_bool] = 0
-            angles2[on_target_bool] = 0
-            # store sorted and return
+            angles1 = self.convert_angles(np.arctan2(vecs1[:,1],vecs1[:,0])-angle)
+            angles2 = self.convert_angles(np.arctan2(vecs2[:,1],vecs2[:,0])-angle)
+            # store sorted
             target_angles = np.zeros((len(angles1),2))
             one_two = np.logical_and(angles1 <= angles2, angles2-angles1 < np.pi)
             one_two = np.logical_or(one_two, np.logical_and(angles1 > angles2,
@@ -128,7 +156,13 @@ class Targets:
                                                          angles2[one_two]])
             target_angles[~one_two,:] = np.column_stack([angles2[~one_two],
                                                          angles1[~one_two]])
-            return target_angles
+            if not np.any(on_target_bool):
+                return target_angles
+            else:
+                angle_to_targets = np.zeros(self.locs.shape)
+                angle_to_targets[on_target_bool] = np.array([-np.pi,np.pi])
+                angle_to_targets[~on_target_bool] = target_angles
+                return angle_to_targets
         
 
     def get_angles_to_targets(self,loc,angle=0):
@@ -154,7 +188,34 @@ class Targets:
         vecs = self.locs - loc
         target_angles = np.arctan2(vecs[:,1],vecs[:,0])
         return self.convert_angles(target_angles - angle)
-        
+
+
+    def check_target_overlap(self,loc):
+        '''Check to see if loc overlaps with any of the targets. Return a bool
+        array of length N (where N is the number of targets) indicating overlap.
+        '''
+        eps = np.finfo(np.float32).eps
+
+        if self.geom_name is None:
+            return self.locs == loc
+        elif self.geom_name == 'circle':
+            return np.linalg.norm(self.locs - loc,axis=1) <= self.r
+        elif self.geom_name == 'segment':
+            # Make sure locs is 2D
+            if self.locs.ndim == 1:
+                self.locs = np.array([self.locs])
+            diff = np.column_stack([self.l/2*np.cos(self.theta),
+                                    self.l/2*np.sin(self.theta)])
+            pt1 = self.locs + diff
+            pt2 = self.locs - diff
+            cross = (loc[1]-pt1[:,1])*(pt2[:,0]-pt1[:,0])-\
+                    (loc[0]-pt1[:,0])*(pt2[:,1]-pt1[:,1])
+            dot = (loc[0]-pt1[:,0])*(pt2[:,0]-pt1[:,0])+\
+                  (loc[1]-pt1[:,1])*(pt2[:,1]-pt1[:,1])
+            sqdist = (pt2[:,0]-pt1[:,0])**2 + (pt2[:,1]-pt1[:,1])**2
+            return np.abs(cross)<eps & dot>=0 & dot<=sqdist
+
+
 
     @staticmethod
     def convert_angles(theta):
@@ -251,7 +312,7 @@ class PerceptionModel:
             signal = np.zeros(theta_mesh)
             theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
         else:
-            signal = np.zeros_like(theta_mesh)
+            signal = np.zeros(theta_mesh.shape)
 
         if self.targets.geom_name is None:
             for theta in angles:
@@ -351,7 +412,7 @@ class PerceptionModel:
         ax2.plot(theta_mesh,p_func)
         ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
         ax2.set_rmin(-0.5)
-        ax2.set_rmax(1.25)
+        ax2.set_rmax(1)
         ax2.set_rticks([0, 0.5, 1])
         ax2.set_rlabel_position(0)
         ax2.set_title('Perception Signal')
@@ -442,6 +503,11 @@ class DirectionModel:
         '''Get consensus direction for current parameterization of the 
         DirectionModel.
 
+        If the difference between the min and the max of the Hamiltonian is 
+        essentially zero (within machine precision), returns the focal angle of 
+        the PerceptionModel. This also happens in the additive model if the 
+        resulting directional angle is essentially the zero vector.
+
         Parameters
         ----------
         res_num : float
@@ -455,16 +521,30 @@ class DirectionModel:
         theta : the Euclidean (allocentric) consensus direction as a float 
         within [-pi,pi)
         '''
+        eps = np.finfo(np.float32).eps
+
         theta_mesh = np.linspace(-np.pi, np.pi, res_num+1)[:-1]
         H = self.hamiltonian(theta_mesh)
+        
+        if H.max()-H.min() < eps:
+            if return_H:
+                return self.percep_model.focal_angle, H
+            else:
+                return self.percep_model.focal_angle
 
         if self.consensus_type == 'additive':
             x = np.sum(np.cos(theta_mesh)*H)
             y = np.sum(np.sin(theta_mesh)*H)
-            if return_H:
-                return np.arctan2(y,x), H
+            if np.abs(x)<eps and np.abs(y)<eps:
+                if return_H:
+                    return self.percep_model.focal_angle, H
+                else:
+                    return self.percep_model.focal_angle
             else:
-                return np.arctan2(y,x)
+                if return_H:
+                    return np.arctan2(y,x), H
+                else:
+                    return np.arctan2(y,x)
         elif self.consensus_type == 'argmax':
             idx_array = H.argmax()
             if len(idx_array) > 1:
@@ -561,8 +641,8 @@ class DirectionModel:
             # also get an array of angles to create axis ticks
             angle_array = np.zeros(focal_loc_mesh.shape[0])
             # get array to store consensus angle
-            dir_angle = np.zeros_like(angle_array)
-            idx_array = np.zeros_like(angle_array, dtype=int)
+            dir_angle = np.zeros(angle_array.shape)
+            idx_array = np.zeros(angle_array.shape, dtype=int)
             for n,loc in enumerate(focal_loc_mesh):
                 self.percep_model.focal_loc = loc
                 angle_array[n] = self.percep_model.targets.get_angles_to_targets(loc,
@@ -608,9 +688,6 @@ class DirectionModel:
 
         Set wb_plot to True if plotting in a Jupyber notebook
 
-        TODO: better treatment of mesh points within targets. Currently, 
-            zero angles are returned for those targets.
-
         Parameters
         ----------
         xlim : (xmin,xmax) tuple of floats
@@ -629,9 +706,9 @@ class DirectionModel:
         ymesh = np.linspace(ylim[0], ylim[1], num_y)
 
         X, Y = np.meshgrid(xmesh, ymesh)
-        theta_mesh = np.zeros_like(X)
-        U = np.zeros_like(X)
-        V = np.zeros_like(X)
+        theta_mesh = np.zeros(X.shape)
+        U = np.zeros_like(theta_mesh)
+        V = np.zeros_like(theta_mesh)
 
         for ii in range(num_x):
             for jj in range(num_y):
