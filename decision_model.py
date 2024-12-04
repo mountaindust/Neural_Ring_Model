@@ -60,6 +60,8 @@ class Targets:
         angles corresponding to how the targets are percieved from the position 
         of the observer when the observer is facing a direction given by angle.
 
+        Returns zeros wherever loc is within a target.
+
         Parameters
         ----------
         loc : (x,y) of floats
@@ -75,6 +77,7 @@ class Targets:
         if self.geom_name is None:
             ##### Point targets #####
             return self.get_angles_to_targets(loc,angle)
+        
         elif self.geom_name == 'circle':
             ##### Circle targets #####
             vecs = self.locs - loc
@@ -83,7 +86,10 @@ class Targets:
                 vecs_length = np.linalg.norm(vecs, axis=1)
             else:
                 vecs_length = np.linalg.norm(vecs)
-            pm_theta = np.arcsin(self.r/vecs_length)
+            on_target_bool = vecs_length <= self.r
+            pm_theta = np.zeros_like(vecs_length)
+            pm_theta[~on_target_bool] = np.arcsin(self.r/vecs_length[~on_target_bool])
+            target_angles[on_target_bool,...] = 0
             return self.convert_angles(np.column_stack([target_angles-pm_theta-angle,
                                                         target_angles+pm_theta-angle]))
         elif self.geom_name == 'segment':
@@ -95,9 +101,24 @@ class Targets:
             endpt2 = self.locs - diff # difference in heading angle is pi between seg endpoints
             # get a vector to each
             vecs1 = endpt1 - loc; vecs2 = endpt2 - loc
+            # check for loc on segment
+            eps = np.finfo(np.float32).eps
+            if vecs1.ndim > 1:
+                on_target_bool = np.logical_or(np.linalg.norm(vecs1,axis=1)<eps,
+                                               np.linalg.norm(vecs2,axis=1)<eps)
+            else:
+                on_target_bool = np.logical_or(np.linalg.norm(vecs1)<eps,
+                                               np.linalg.norm(vecs2)<eps)
+            on_target_bool = np.logical_or(on_target_bool, )
             # get angles to each
-            angles1 = self.convert_angles(np.arctan2(vecs1[:,1],vecs1[:,0])-angle)
-            angles2 = self.convert_angles(np.arctan2(vecs2[:,1],vecs2[:,0])-angle)
+            angles1 = np.arctan2(vecs1[:,1],vecs1[:,0])
+            angles2 = np.arctan2(vecs2[:,1],vecs2[:,0])
+            # test for on the segment somewhere
+            on_target_bool = np.logical_or(on_target_bool, np.sin(angles1-angles2)<eps)
+            angles1 = self.convert_angles(angles1-angle)
+            angles2 = self.convert_angles(angles2-angle)
+            angles1[on_target_bool] = 0
+            angles2[on_target_bool] = 0
             # store sorted and return
             target_angles = np.zeros((len(angles1),2))
             one_two = np.logical_and(angles1 <= angles2, angles2-angles1 < np.pi)
@@ -578,7 +599,7 @@ class DirectionModel:
         plt.show()
 
 
-    def plot_direction_mesh(self, xlim=(0,19), num_x=20, ylim=(0,19), num_y=20, 
+    def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,24), num_y=25, 
                             return_theta=False, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         get the direction of travel as a scalar theta. Plots the result as a 
@@ -587,7 +608,8 @@ class DirectionModel:
 
         Set wb_plot to True if plotting in a Jupyber notebook
 
-        TODO: automatically avoid targets in a mesh that surrounds them
+        TODO: better treatment of mesh points within targets. Currently, 
+            zero angles are returned for those targets.
 
         Parameters
         ----------
