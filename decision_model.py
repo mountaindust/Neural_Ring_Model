@@ -645,15 +645,19 @@ class DirectionModel:
             current_loc = self.percep_model.focal_loc.copy()
             # create array to store hamiltonian
             H_array = np.zeros((focal_loc_mesh.shape[0],res_num))
-            # also get an array of angles to create axis ticks
-            angle_array = np.zeros(focal_loc_mesh.shape[0])
+            # also get an array of positions for axis ticks
+            if focal_loc_mesh[:,0].max() - focal_loc_mesh[:,0].min() >= \
+               focal_loc_mesh[:,1].max() - focal_loc_mesh[:,1].min():
+                axis_mesh = focal_loc_mesh[:,0]
+                axis_x = True
+            else:
+                axis_mesh = focal_loc_mesh[:,1]
+                axis_x = False
             # get array to store consensus angle
-            dir_angle = np.zeros(angle_array.shape)
-            idx_array = np.zeros(angle_array.shape, dtype=int)
+            dir_angle = np.zeros(focal_loc_mesh.shape[0])
+            idx_array = np.zeros(focal_loc_mesh.shape[0], dtype=int)
             for n,loc in enumerate(focal_loc_mesh):
                 self.percep_model.focal_loc = loc
-                angle_array[n] = self.percep_model.targets.get_angles_to_targets(loc,
-                                                    self.percep_model.focal_angle)[-1]
                 if with_signal:
                     signal_array[n,:] = self.percep_model.get_signal(theta_mesh)
                 # Get direction angle and hamiltonian
@@ -661,23 +665,29 @@ class DirectionModel:
                 idx_array[n] = np.searchsorted(theta_mesh, dir_angle[n])
             
             # Create 3D plot(s)
-            theta_mgrid, angle_mgrid = np.meshgrid(theta_mesh, angle_array)
-            axs[0].plot_surface(theta_mgrid, angle_mgrid, H_array, 
+            theta_mgrid, pos_mgrid = np.meshgrid(theta_mesh, axis_mesh)
+            axs[0].plot_surface(theta_mgrid, pos_mgrid, H_array, 
                                 cmap=cm.viridis)
             axs[0].set_title('Hamiltonian')
             axs[0].set_xlabel(r'$\theta$')
-            axs[0].set_ylabel('angle to last target')
+            if axis_x:
+                axs[0].set_ylabel('x position')
+            else:
+                axs[0].set_ylabel('y position')
             # Indicate chosen angles
-            H_vals = [H_array[n,idx_array[n]] for n in range(len(angle_array))]
-            axs[0].scatter(dir_angle, angle_array, H_vals, c='k')
+            H_vals = [H_array[n,idx_array[n]] for n in range(len(axis_mesh))]
+            axs[0].scatter(dir_angle, axis_mesh, H_vals, c='k')
             if with_signal:
-                axs[1].plot_surface(theta_mgrid, angle_mgrid, signal_array,
+                axs[1].plot_surface(theta_mgrid, pos_mgrid, signal_array,
                                     cmap=cm.viridis)
                 axs[1].set_title('Perception Signal')
                 axs[1].set_xlabel(r'$\theta$')
-                axs[1].set_ylabel('angle to last target')
-                sig_vals = [signal_array[n,idx_array[n]] for n in range(len(angle_array))]
-                axs[1].scatter(dir_angle, angle_array, sig_vals, c='k')
+                if axis_x:
+                    axs[1].set_ylabel('x position')
+                else:
+                    axs[1].set_ylabel('y position')
+                sig_vals = [signal_array[n,idx_array[n]] for n in range(len(axis_mesh))]
+                axs[1].scatter(dir_angle, axis_mesh, sig_vals, c='k')
 
         if focal_loc_mesh is not None:
             # replace current loc
@@ -686,7 +696,7 @@ class DirectionModel:
         plt.show()
 
 
-    def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,24), num_y=25, 
+    def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,20), num_y=21, 
                             return_theta=False, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         get the allocentric direction of travel as a scalar theta. Plots the 
@@ -740,6 +750,7 @@ class DirectionModel:
         # Plot arrows
         ax.quiver(X, Y, U, V, angles='xy')
         ax.set_title("Direction Model")
+        ax.set_aspect('equal')
         plt.show()
         if return_theta:
             return theta_mesh
