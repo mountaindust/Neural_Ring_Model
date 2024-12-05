@@ -8,6 +8,7 @@ from scipy import stats
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
+from matplotlib.image import NonUniformImage
 from basic_units import radians
 
 class Targets:
@@ -281,7 +282,7 @@ class PerceptionModel:
             the front of the observed object, etc.)
         '''
 
-        self.focal_loc = np.array(focal_loc)
+        self.focal_loc = np.array(focal_loc, dtype=float)
         self.focal_angle = focal_angle
         if targets is None:
             self.targets = Targets()
@@ -463,6 +464,9 @@ class DirectionModel:
             self.weighting_name = weighting_name
         else:
             raise NotImplementedError("Unknown weighting kernel.")
+        # Random number generator for certain processes within the class;
+        #   Can seed here for reproducability.
+        self.rng = np.random.default_rng()
 
 
     def truncnorm(self, mu=0, sigma=np.pi/8, left=-np.pi, right=np.pi):
@@ -551,7 +555,7 @@ class DirectionModel:
         elif self.consensus_type == 'argmax':
             idx_array = H.argmax()
             if len(idx_array) > 1:
-                idx = np.random.choice(idx_array)
+                idx = self.rng.choice(idx_array)
             else:
                 idx = idx_array[0]
             if return_H:
@@ -563,7 +567,7 @@ class DirectionModel:
     def plot_weighting(self, wb_plot=False):
         '''Plot the currently selected weighting function.
         
-        Set wb_plot to True if plotting in a Jupyber notebook
+        Set wb_plot to True if plotting in a Jupyter notebook
         '''
 
         if wb_plot:
@@ -741,17 +745,19 @@ class DirectionModel:
             return theta_mesh
         
 
-    def plot_walker(self, s=0.1, std=np.pi/10, trials=10, max_steps=3000,
+    def plot_walker(self, s=0.1, std=np.pi/50, repetitions=20, max_steps=3000,
                     start_loc=None, start_angle=None):
         '''Plot a walker that starts at a specified location looking in a 
         specified angle (defaults to the focal_loc and focal_angle in attached 
         PerceptionModel) and moves in the direction given by the current 
         direction model with a specified step size and angular Gaussian noise 
-        with standard deviation as specified. Repeat for a number of trials and 
-        plot a heat map of these walks in 2D space.
+        with standard deviation as specified. Repeat for a number of 
+        repetitions and plot a heat map of these walks in 2D space.
 
         The walker stops whenever it is detected to be overlapping a target or 
         after max_steps.
+
+        Set wb_plot to True if plotting in a Jupyter notebook
 
         Parameters
         ----------
@@ -759,7 +765,7 @@ class DirectionModel:
             How far to move in the determined direction on each step of the walk
         std : float
             Standard deviation of angular Gaussian noise with mean zero
-        trials : int
+        repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
             Maximum number of steps for each walker
@@ -773,23 +779,82 @@ class DirectionModel:
         
         if start_loc is None:
             start_loc = self.percep_model.focal_loc
+        else:
+            start_loc = np.array(start_loc, dtype=float)
         if start_angle is None:
             start_angle = self.percep_model.focal_angle
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
 
-        walks = []
+        all_walks = []
 
-        for n in range(trials):
+        for n in range(repetitions):
             self.percep_model.focal_loc = start_loc.copy()
             self.percep_model.focal_angle = start_angle
-            this_walk = [start_loc.copy()]
+            walk = [start_loc.copy()]
             for step in range(max_steps):
                 # check for target overlap
                 if np.any(self.percep_model.targets.check_target_overlap(
                           self.percep_model.focal_loc)):
                     break
-                # determine direction and take a step
-                theta = self.get_direction()
+                # determine allocentric direction and take a step
+                #   assume turning speed is infinite
+                noise = self.rng.normal(scale=std)
+                theta = self.get_direction() + self.percep_model.focal_angle \
+                    + noise
                 mv_vec = s*np.array([np.cos(theta),np.sin(theta)])
+                self.percep_model.focal_loc += mv_vec
+                self.percep_model.focal_angle = \
+                    self.percep_model.targets.convert_angles(theta)
+                # append location to walk list
+                walk.append(self.percep_model.focal_loc.copy())
+            # done. save to all_walks
+            all_walks.append(list(walk))
 
+        # Restore focal location and angle
+        self.percep_model.focal_loc = orig_loc
+        self.percep_model.focal_angle = orig_angle
+
+        # concatenate walks
+        walks = sum(all_walks, [])
+
+        # Convert list to 2xN array: row of x-vals then row of y-vals
+        walks = np.column_stack(walks)
+        # Detect good bin edges
+        dim_min = np.floor(walks.min(axis=1))
+        dim_max = np.ceil(walks.max(axis=1))
+        n_xedges = round((dim_max[0]-dim_min[0])/0.25)
+        n_yedges = round((dim_max[1]-dim_min[1])/0.25)
+        xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
+        yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
+
+        H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:], 
+                                           bins=(xedges,yedges))
+        H = H.T # for plotting
+
+        fig = plt.figure(figsize=(5,5))
+
+        # Display actual historgram
+        # ax = fig.add_subplot(title='Random walker path histogram',
+        #                      aspect='equal')
+        # X, Y = np.meshgrid(xedges, yedges)
+        # ax.pcolormesh(X, Y, H)
+        # self.percep_model.targets.plot_targets_to_axis(ax)
+
+        # Display with interpolation
+        ax = fig.add_subplot(title='Random walker path histogram, interpolated',
+                             aspect='equal')
+        im = NonUniformImage(ax, interpolation='bilinear')
+        xcenters = (xedges[:-1] + xedges[1:]) / 2
+        ycenters = (yedges[:-1] + yedges[1:]) / 2
+        im.set_data(xcenters, ycenters, H)
+        ax.add_image(im)
+        self.percep_model.targets.plot_targets_to_axis(ax)
+        ax.set_xlim(dim_min[0],dim_max[0])
+        ax.set_ylim(dim_min[1],dim_max[1])
+
+        # Plot individual walks
+        # for walk in all_walks:
+        #     walk = np.column_stack(walk)
+        #     ax.plot(walk[0,:], walk[1,:], 'k')
+        plt.show()

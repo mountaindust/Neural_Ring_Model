@@ -36,13 +36,13 @@ target_locs = np.array([[20,5],[20,15]]) # (x,y) coordinates
 
 targets = model.Targets(locs=target_locs, geom_name='circle', r=0.5)
 
-focal_loc = (20,10)
+focal_loc = (0,10)
 focal_angle = 0
 
 percep_model = model.PerceptionModel(targets, focal_loc, focal_angle)
 
 # You can plot the perception model to see the current geometry and perception signal
-percep_model.plot(wb_plot=True)
+# percep_model.plot(wb_plot=True)
 
 weighting_name='truncnorm'
 mu = 0
@@ -54,4 +54,4 @@ consensus_type='additive'
 
 dir_model = model.DirectionModel(percep_model, consensus_type, weighting_name, mu, sigma, left, right)
 
-print(dir_model.get_direction())
+dir_model.plot_walker()
