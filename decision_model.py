@@ -293,7 +293,7 @@ class PerceptionModel:
 
     def get_signal(self,theta_mesh=2000):
         '''Translates the focal position/angle and information about targets 
-        into a perception signal (1D mesh) with length res_num.
+        into an EGOCENTRIC perception signal (1D mesh) with length res_num.
 
         Parameters
         ----------
@@ -367,6 +367,7 @@ class PerceptionModel:
         # Now plot perception lines
         if self.targets.geom_name is None:
             # plot geometric angles. Requires adding back angle of focal locust
+            #   to get allocentric angles
             for n, theta in enumerate(angles+self.focal_angle):
                 r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
                 x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(theta))
@@ -374,6 +375,7 @@ class PerceptionModel:
                 ax1.plot(x,y,'k')
         elif self.targets.geom_name == 'circle':
             # plot perception angles. Requires adding back angle of focal locust
+            #   to get allocentric angles
             for n, thetas in enumerate(angles+self.focal_angle):
                 r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
                 for ii in range(2):
@@ -382,6 +384,7 @@ class PerceptionModel:
                     ax1.plot(x,y,'k')
         elif self.targets.geom_name == 'segment':
             # plot perception angles. Requires adding back angle of focal locust
+            #   to get allocentric angles
             for n, thetas in enumerate(angles+self.focal_angle):
                 r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
                 try:
@@ -475,6 +478,7 @@ class DirectionModel:
 
     def hamiltonian(self, theta_mesh):
         '''Convolution of the weighting kernel with the signal over [-pi,pi]. 
+        Since the signal is egocentric, the hamiltonian will be as well.
 
         Parameters
         ----------
@@ -500,13 +504,13 @@ class DirectionModel:
         
 
     def get_direction(self, res_num=2000, return_H=False):
-        '''Get consensus direction for current parameterization of the 
-        DirectionModel.
+        '''Get consensus EGOCENTRIC direction for current parameterization of 
+        the DirectionModel.
 
         If the difference between the min and the max of the Hamiltonian is 
-        essentially zero (within machine precision), returns the focal angle of 
-        the PerceptionModel. This also happens in the additive model if the 
-        resulting directional angle is essentially the zero vector.
+        essentially zero (within machine precision), returns zero (corresponding 
+        to the current allocentric heading). This also happens in the additive 
+        model if the resulting directional angle is essentially the zero vector.
 
         Parameters
         ----------
@@ -518,8 +522,7 @@ class DirectionModel:
 
         Returns
         -------
-        theta : the Euclidean (allocentric) consensus direction as a float 
-        within [-pi,pi)
+        theta : the egocentric consensus direction as a float within [-pi,pi)
         '''
         eps = np.finfo(np.float32).eps
 
@@ -528,18 +531,18 @@ class DirectionModel:
         
         if H.max()-H.min() < eps:
             if return_H:
-                return self.percep_model.focal_angle, H
+                return 0, H
             else:
-                return self.percep_model.focal_angle
+                return 0
 
         if self.consensus_type == 'additive':
             x = np.sum(np.cos(theta_mesh)*H)
             y = np.sum(np.sin(theta_mesh)*H)
             if np.abs(x)<eps and np.abs(y)<eps:
                 if return_H:
-                    return self.percep_model.focal_angle, H
+                    return 0, H
                 else:
-                    return self.percep_model.focal_angle
+                    return 0
             else:
                 if return_H:
                     return np.arctan2(y,x), H
@@ -682,9 +685,9 @@ class DirectionModel:
     def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,24), num_y=25, 
                             return_theta=False, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
-        get the direction of travel as a scalar theta. Plots the result as a 
-        vector field of unit vectors and optionally returns a scalar field of 
-        the values theta within [-pi,pi].
+        get the allocentric direction of travel as a scalar theta. Plots the 
+        result as a vector field of unit vectors and optionally returns a scalar 
+        field of the values theta within [-pi,pi].
 
         Set wb_plot to True if plotting in a Jupyber notebook
 
@@ -715,7 +718,9 @@ class DirectionModel:
                 this_x = X[jj,ii]
                 this_y = Y[jj,ii]
                 self.percep_model.focal_loc = np.array([this_x,this_y])
-                theta_mesh[jj,ii] = self.get_direction()
+                # Must add the focal_angle to each result to convert from 
+                #   egocentric to allocentric
+                theta_mesh[jj,ii] = self.get_direction() + self.percep_model.focal_angle
                 U[jj,ii] = np.cos(theta_mesh[jj,ii])
                 V[jj,ii] = np.sin(theta_mesh[jj,ii])
 
@@ -736,22 +741,22 @@ class DirectionModel:
             return theta_mesh
         
 
-    def plot_walker(self, step=0.1, std=np.pi/10, trials=10, max_steps=3000,
+    def plot_walker(self, s=0.1, std=np.pi/10, trials=10, max_steps=3000,
                     start_loc=None, start_angle=None):
         '''Plot a walker that starts at a specified location looking in a 
         specified angle (defaults to the focal_loc and focal_angle in attached 
         PerceptionModel) and moves in the direction given by the current 
-        direction model with a specified step and angular Gaussian noise with 
-        standard deviation as specified. Repeat for a number of trials and plot 
-        a heat map of these walks in 2D space.
+        direction model with a specified step size and angular Gaussian noise 
+        with standard deviation as specified. Repeat for a number of trials and 
+        plot a heat map of these walks in 2D space.
 
         The walker stops whenever it is detected to be overlapping a target or 
         after max_steps.
 
         Parameters
         ----------
-        step : float
-            How far to move in the determined direction
+        s : float
+            How far to move in the determined direction on each step of the walk
         std : float
             Standard deviation of angular Gaussian noise with mean zero
         trials : int
@@ -765,4 +770,26 @@ class DirectionModel:
             Starting direction that the walker is facing. Defaults to 
             focal_angle in the attached PerceptionModel
         '''
-        pass
+        
+        if start_loc is None:
+            start_loc = self.percep_model.focal_loc
+        if start_angle is None:
+            start_angle = self.percep_model.focal_angle
+        orig_loc = self.percep_model.focal_loc.copy()
+        orig_angle = self.percep_model.focal_angle
+
+        walks = []
+
+        for n in range(trials):
+            self.percep_model.focal_loc = start_loc.copy()
+            self.percep_model.focal_angle = start_angle
+            this_walk = [start_loc.copy()]
+            for step in range(max_steps):
+                # check for target overlap
+                if np.any(self.percep_model.targets.check_target_overlap(
+                          self.percep_model.focal_loc)):
+                    break
+                # determine direction and take a step
+                theta = self.get_direction()
+                mv_vec = s*np.array([np.cos(theta),np.sin(theta)])
+
