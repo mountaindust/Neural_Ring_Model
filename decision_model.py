@@ -451,6 +451,9 @@ class DirectionModel:
                 - sigma=np.pi/8 : standard deviation
                 - left=-np.pi : left cutoff
                 - right=np.pi : right cutoff
+            - 'cosine'
+                - beta=1 : stretch
+                - phi=0 : phase
         '''
         if percep_model is None:
             self.percep_model = PerceptionModel()
@@ -461,6 +464,9 @@ class DirectionModel:
         self.consensus_type = consensus_type
         if weighting_name == 'truncnorm':
             self.weighting = self.truncnorm(*args, **kwargs)
+            self.weighting_name = weighting_name
+        elif weighting_name == 'cosine':
+            self.weighting = self.cosine(*args, **kwargs)
             self.weighting_name = weighting_name
         else:
             raise NotImplementedError("Unknown weighting kernel.")
@@ -480,6 +486,12 @@ class DirectionModel:
         return lambda x: rv.pdf(x)
     
 
+    def cosine(self, beta=1, phi=0):
+        '''Function generator that returns a cos(beta*x+phi)'''
+
+        return lambda x: np.cos(beta*x+phi)
+    
+
     def hamiltonian(self, theta_mesh):
         '''Convolution of the weighting kernel with the signal over [-pi,pi]. 
         Since the signal is egocentric, the hamiltonian will be as well.
@@ -494,17 +506,15 @@ class DirectionModel:
         ndarray of convoluted signal and weighting on [-pi,pi). The length of 
         the returned array will match the input array.
         '''
-        if self.weighting_name == 'truncnorm':
-            kernel = self.weighting(theta_mesh)
-            signal = self.percep_model.get_signal(theta_mesh)
-            # Periodic convolution via convolution theorem.
-            # Results must be shifted because numpy fft puts the zero frequency
-            #   at the left-most position of the array.
-            return np.fft.fftshift(np.fft.irfft( 
-                                   np.fft.rfft(kernel)*np.fft.rfft(signal),
-                                   len(signal)))
-        else:
-            raise NotImplementedError("Unknown weighting kernel.")
+
+        kernel = self.weighting(theta_mesh)
+        signal = self.percep_model.get_signal(theta_mesh)
+        # Periodic convolution via convolution theorem.
+        # Results must be shifted because numpy fft puts the zero frequency
+        #   at the left-most position of the array.
+        return np.fft.fftshift(np.fft.irfft( 
+                                np.fft.rfft(kernel)*np.fft.rfft(signal),
+                                len(signal)))
         
 
     def get_direction(self, res_num=2000, return_H=False):
@@ -553,7 +563,7 @@ class DirectionModel:
                 else:
                     return np.arctan2(y,x)
         elif self.consensus_type == 'argmax':
-            idx_array = H.argmax()
+            idx_array = H.argmax(keepdims=True)
             if len(idx_array) > 1:
                 idx = self.rng.choice(idx_array)
             else:
