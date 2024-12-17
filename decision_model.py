@@ -458,9 +458,11 @@ class DirectionModel:
                 - sigma=np.pi/8 : standard deviation
                 - left=-np.pi : left cutoff
                 - right=np.pi : right cutoff
-            - 'cosine'
-                - beta=1 : stretch
+            - 'trunccosine'
+                - beta=2 : stretch
                 - phi=0 : phase
+                - left=-np.pi/2 : left cutoff
+                - right=np.pi/2 : right cutoff
         '''
         if percep_model is None:
             self.percep_model = PerceptionModel()
@@ -472,8 +474,8 @@ class DirectionModel:
         if weighting_name == 'truncnorm':
             self.weighting = self.truncnorm(*args, **kwargs)
             self.weighting_name = weighting_name
-        elif weighting_name == 'cosine':
-            self.weighting = self.cosine(*args, **kwargs)
+        elif weighting_name == 'trunccosine':
+            self.weighting = self.trunccosine(*args, **kwargs)
             self.weighting_name = weighting_name
         else:
             raise NotImplementedError("Unknown weighting kernel.")
@@ -481,6 +483,8 @@ class DirectionModel:
         #   Can seed here for reproducability.
         self.rng = np.random.default_rng()
 
+
+    #### Weighting function generators. All return a function on an ndarray ####
 
     def truncnorm(self, mu=0, sigma=np.pi/8, left=-np.pi, right=np.pi):
         '''Function generator that returns a truncated normal pdf with mean mu, 
@@ -493,10 +497,18 @@ class DirectionModel:
         return lambda x: rv.pdf(x)
     
 
-    def cosine(self, beta=1, phi=0):
-        '''Function generator that returns a cos(beta*x+phi)'''
+    def trunccosine(self, beta=2, phi=0, left=-np.pi, right=np.pi):
+        '''Function generator that returns a cos(beta*x+phi) with support on the
+        interval [left,right]'''
 
-        return lambda x: np.cos(beta*x+phi)
+        def trunccos(x):
+            result = np.zeros_like(x)
+            result[(x>=left) & (x<=right)] = np.cos(beta*x[(x>=left) & (x<=right)] + phi)
+            return result
+
+        return trunccos
+    
+    ############################################################################
     
 
     def hamiltonian(self, theta_mesh):
