@@ -90,8 +90,9 @@ class Targets:
 
         Returns
         -------
-        Nx2 ndarray of angles theta_1 < theta_2, unless geom is None, then a 
-        length N ndarray of single theta values instead.
+        Nx2 ndarray of angles in counter-clockwise order between -pi and pi, 
+        unless geom is None, then a length N ndarray of single theta values 
+        instead.
         '''
         loc = np.array(loc)
 
@@ -101,9 +102,9 @@ class Targets:
             if np.any(on_target_bool):
                 angle_to_targets = self.get_angles_to_targets(loc,angle)
                 angle_to_targets[on_target_bool] = angle
-                return angle_to_targets
+                return self.convert_angles(angle_to_targets)
             else:
-                return self.get_angles_to_targets(loc,angle)
+                return self.convert_angles(self.get_angles_to_targets(loc,angle))
         
         elif self.geom_name == 'circle':
             on_target_bool = self.check_target_overlap(loc)
@@ -318,10 +319,16 @@ class PerceptionModel:
         if self.targets.geom_name is None:
             for theta in angles:
                 idx = np.searchsorted(theta_mesh,theta)
+                if idx == len(theta_mesh):
+                    idx = 0
                 if self.type is None:
                     # step function perception
-                    if (theta-theta_mesh[idx-1]) < (theta_mesh[idx]-theta):
+                    if idx != 0 and \
+                    theta-theta_mesh[idx-1] < theta_mesh[idx]-theta:
                         signal[idx-1] = 1
+                    elif idx == 0 and \
+                    theta-theta_mesh[-1] < -theta_mesh[0]-theta:
+                        signal[-1] = 1
                     else:
                         signal[idx] = 1
                 else:
@@ -563,7 +570,19 @@ class DirectionModel:
                 else:
                     return np.arctan2(y,x)
         elif self.consensus_type == 'argmax':
-            idx_array = H.argmax(keepdims=True)
+            # a straight argmax is VERY numerically unstable, especially in 
+            #   cases (which are of interest) where H is multimodal with the 
+            #   different peaks at essentially the exact same height. In this 
+            #   scenario, it will return the one which happens to be highest due 
+            #   to numerical error, which is in turn tends to depend upon things 
+            #   like the size of the theta mesh. This ends up yielding consistent
+            #   choices rather than random ones. To fix this, get all locations 
+            #   within numerical error and explicitly pick randomly from among 
+            #   them.
+            
+            max_val = H.max()
+            # get all indices which are within numerical error of this value
+            idx_array = np.argwhere(max_val-H<eps).flatten()
             if len(idx_array) > 1:
                 idx = self.rng.choice(idx_array)
             else:
@@ -766,8 +785,8 @@ class DirectionModel:
             return theta_mesh
         
 
-    def plot_walker(self, s=0.1, std=np.pi/50, repetitions=20, max_steps=3000,
-                    start_loc=None, start_angle=None):
+    def plot_walker(self, s=0.1, std=0, repetitions=20, max_steps=3000,
+                    start_loc=None, start_angle=None, plot_tracks=False):
         '''Plot a walker that starts at a specified location looking in a 
         specified angle (defaults to the focal_loc and focal_angle in attached 
         PerceptionModel) and moves in the direction given by the current 
@@ -785,7 +804,8 @@ class DirectionModel:
         s : float
             How far to move in the determined direction on each step of the walk
         std : float
-            Standard deviation of angular Gaussian noise with mean zero
+            Standard deviation of angular Gaussian noise with mean zero.
+            If zero (default), run without any angular noise.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -796,10 +816,12 @@ class DirectionModel:
         start_angle : float
             Starting direction that the walker is facing. Defaults to 
             focal_angle in the attached PerceptionModel
+        plot_tracks : bool
+            Whether or not to overlay the walker trajectories
         '''
         
         if start_loc is None:
-            start_loc = self.percep_model.focal_loc
+            start_loc = self.percep_model.focal_loc.copy()
         else:
             start_loc = np.array(start_loc, dtype=float)
         if start_angle is None:
@@ -818,9 +840,19 @@ class DirectionModel:
                 if np.any(self.percep_model.targets.check_target_overlap(
                           self.percep_model.focal_loc)):
                     break
+                elif self.percep_model.targets.geom_name is None and \
+                np.any(np.linalg.norm(
+                       self.percep_model.focal_loc-self.percep_model.targets.locs,
+                       axis=1)<s):
+                    break
+                # if step > 75:
+                #     import pdb; pdb.set_trace()
                 # determine allocentric direction and take a step
                 #   assume turning speed is infinite
-                noise = self.rng.normal(scale=std)
+                if std > 0:
+                    noise = self.rng.normal(scale=std)
+                else:
+                    noise = 0
                 theta = self.get_direction() + self.percep_model.focal_angle \
                     + noise
                 mv_vec = s*np.array([np.cos(theta),np.sin(theta)])
@@ -875,7 +907,8 @@ class DirectionModel:
         ax.set_ylim(dim_min[1],dim_max[1])
 
         # Plot individual walks
-        # for walk in all_walks:
-        #     walk = np.column_stack(walk)
-        #     ax.plot(walk[0,:], walk[1,:], 'k')
+        if plot_tracks:
+            for walk in all_walks:
+                walk = np.column_stack(walk)
+                ax.plot(walk[0,:], walk[1,:], 'k')
         plt.show()
