@@ -190,6 +190,28 @@ class Targets:
         vecs = self.locs - loc
         target_angles = np.arctan2(vecs[:,1],vecs[:,0])
         return self.convert_angles(target_angles - angle)
+    
+
+    def get_dist_to_targets(self,loc):
+        '''Given the (x,y) coordinate of an observer, loc, return an array of 
+        distances to the targets.
+        
+        Parameters
+        ----------
+        loc : (x,y) of floats
+
+        Returns
+        -------
+        length N ndarray of distance values
+        '''
+        if self.geom_name is None:
+            return np.linalg.norm(loc-self.locs, axis=1)
+        elif self.geom_name == 'circle':
+            return np.linalg.norm(loc-self.locs, axis=1) + self.r
+        elif self.geom_name == 'segment':
+            seg_vec = 0.5*self.l*np.array([np.cos(self.theta),np.sin(self.theta)]).T
+            return self.closest_dist_btwn_lines_and_pt(self.locs-seg_vec,
+                                                       self.locs+seg_vec, loc)
 
 
     def check_target_overlap(self,loc):
@@ -225,6 +247,45 @@ class Targets:
         '''
         return theta - (theta+np.pi)//(2*np.pi)*2*np.pi
     
+
+    @staticmethod
+    def closest_dist_btwn_lines_and_pt(Q0_list, Q1_list, pt):
+        '''
+        Given line segments that begin at Q0 and end at Q1, and a point in space, 
+        return the minimum distance between each of the line segments and the point.
+
+        Parameters
+        ----------
+        Q0_list : Nx2 or Nx3 ndarray 
+            start points of line segments
+        Q1_list : Nx2 or Nx3 ndarray
+            end points of line segments
+        pt : 1D ndarray
+            point in 2D or 3D space
+        '''
+
+        seg_lengths_2 = np.linalg.norm(Q1_list - Q0_list, axis=1)**2
+
+        dist_list = np.empty(Q0_list.shape[0])
+
+        # Wherever the segment lengths are close to zero, calculate pt distance
+        z_check = seg_lengths_2 < np.finfo(float).eps * 100
+        dist_list[z_check] = np.linalg.norm(Q0_list[z_check] - pt, axis=1)
+
+        Q0 = Q0_list[~z_check]
+        Q1 = Q1_list[~z_check]
+        seg_lengths_2[~z_check] = seg_lengths_2
+
+        # For the rest, follow the same math as in closest_dist_btwn_line_and_pts
+        # First, find the projection of the point onto the line and clamp to segments
+        dot = ((pt-Q0)*(Q1-Q0)).sum(1)/seg_lengths_2 # dot prod of each row vec
+        t_list = np.maximum(0,np.minimum(1,dot))
+        # Find the point on the segments
+        proj_pt_list = Q0 + np.tile(t_list,(pt.shape[0],1)).T*(Q1-Q0)
+        dist_list[~z_check] = np.linalg.norm(pt-proj_pt_list,axis=1)
+
+        return dist_list
+
 
     def plot_targets_to_axis(self, ax):
         '''Plots the targets on a given axis object.
@@ -293,9 +354,10 @@ class PerceptionModel:
         self.type = type
 
 
-    def get_signal(self,theta_mesh=2000):
+    def get_binary_signal(self,theta_mesh=2000):
         '''Translates the focal position/angle and information about targets 
-        into an EGOCENTRIC perception signal (1D mesh) with length res_num.
+        into an EGOCENTRIC perception signal (1D mesh) with length res_num that 
+        is binary.
 
         Parameters
         ----------
@@ -350,6 +412,22 @@ class PerceptionModel:
             raise NotImplementedError("Unknown target geometry name.")
         
         return signal
+
+
+    def get_target_signals(self):
+        '''Returns angular position and distance to all *visible* targets.'''
+
+        if self.targets.geom_name is None:
+            angles = self.targets.get_angles_to_targets(self.focal_loc, self.focal_angle)
+        elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
+            angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
+            # determine blocking
+            pass
+
+        else:
+            raise NotImplementedError("Unknown target geometry name.")
+
+
 
 
     def plot(self, wb_plot=False):
@@ -417,7 +495,7 @@ class PerceptionModel:
         ###### Perception Signal Plot ######
         ax2 = plt.subplot(122, projection='polar')
 
-        p_func = self.get_signal(2000)
+        p_func = self.get_binary_signal(2000)
         theta_mesh = np.linspace(-np.pi, np.pi, 2000+1)[:-1]
 
         ax2.plot(theta_mesh,p_func)
@@ -473,13 +551,14 @@ class DirectionModel:
         return lambda x: rv.pdf(x)
     
 
-    def trunccosine(self, beta=2, phi=0, left=-np.pi, right=np.pi):
-        '''Function generator that returns a cos(beta*x+phi) with support on the
+    def trunccosine(self, beta=2, phi=0, left=-np.pi, right=np.pi, nu=1):
+        '''Function generator that returns a cos(beta*pi*(x/pi)^nu+phi) with support on the
         interval [left,right]'''
 
         def trunccos(x):
             result = np.zeros_like(x)
-            result[(x>=left) & (x<=right)] = np.cos(beta*x[(x>=left) & (x<=right)] + phi)
+            result[(x>=left) & (x<=right)] = np.cos(
+                np.pi*beta*(x[(x>=left) & (x<=right)]/np.pi)**nu + phi)
             return result
 
         return trunccos
@@ -490,6 +569,22 @@ class DirectionModel:
     def get_direction(self):
         '''Must be implemented in subclass!'''
         raise NotImplementedError("get_direction must be implemented in subclass")
+
+
+    def plot_weighting(self, wb_plot=False):
+        '''Plot the currently selected weighting function.
+        
+        Set wb_plot to True if plotting in a Jupyter notebook
+        '''
+
+        if wb_plot:
+            plt.figure(figsize=(6.5,2))
+        else:
+            plt.figure(figsize=(8,5))
+        theta_mesh = np.linspace(-np.pi, np.pi, 2001)
+        plt.plot(theta_mesh,self.weighting(theta_mesh))
+        plt.title(self.weighting_name)
+        plt.show()
 
 
     def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,20), num_y=21, 
@@ -682,6 +777,37 @@ class DirectionModel:
 
 
 
+class IsingExtModel(DirectionModel):
+
+    def __init__(self, percep_model=None, T=0.5, *args, **kwargs):
+        '''From a PerceptionModel with its Targets object, establishes a model 
+        for chosing direction based on discrete Ising.
+        TODO: continuous Ising
+        
+        Parameters
+        ----------
+        percep_model : PerceptionModel
+            A PerceptionModel object (with its Targets object) that establishes 
+            the geometry of the scenario. If none is provided, a default one 
+            will be created. The PerceptionModel can be updated to obtain 
+            consensus directions for different layouts or focal locations/angles.
+        T : float
+            Temperature for Ising model
+        Optional Arguments for trunccosine kernel
+            - beta=2 : stretch
+            - phi=0 : phase
+            - left=-np.pi/2 : left cutoff
+            - right=np.pi/2 : right cutoff
+            - nu=1 : warping
+        '''
+
+        super().__init__(percep_model)
+        self.T = T
+        self.weighting = self.truncnorm(*args, **kwargs)
+        self.weighting_name = "Truncnorm"
+
+
+
 class AndyDirectionModel(DirectionModel):
 
     def __init__(self, percep_model=None, consensus_type='additive', 
@@ -728,7 +854,6 @@ class AndyDirectionModel(DirectionModel):
         
         super().__init__(percep_model)
 
-    
 
     def hamiltonian(self, theta_mesh):
         '''Convolution of the weighting kernel with the signal over [-pi,pi]. 
@@ -746,7 +871,7 @@ class AndyDirectionModel(DirectionModel):
         '''
 
         kernel = self.weighting(theta_mesh)
-        signal = self.percep_model.get_signal(theta_mesh)
+        signal = self.percep_model.get_binary_signal(theta_mesh)
         # Periodic convolution via convolution theorem.
         # Results must be shifted because numpy fft puts the zero frequency
         #   at the left-most position of the array.
@@ -824,22 +949,6 @@ class AndyDirectionModel(DirectionModel):
                 return theta_mesh[idx]
         
 
-    def plot_weighting(self, wb_plot=False):
-        '''Plot the currently selected weighting function.
-        
-        Set wb_plot to True if plotting in a Jupyter notebook
-        '''
-
-        if wb_plot:
-            plt.figure(figsize=(6.5,2))
-        else:
-            plt.figure(figsize=(8,5))
-        theta_mesh = np.linspace(-np.pi, np.pi, 2001)
-        plt.plot(theta_mesh,self.weighting(theta_mesh))
-        plt.title(self.weighting_name)
-        plt.show()
-
-
     def plot_hamiltonian(self, focal_loc_mesh=None, with_signal=False,
                          wb_plot=True):
         '''Plot the hamiltonian with or without the signal alongside it.
@@ -879,7 +988,7 @@ class AndyDirectionModel(DirectionModel):
             idx = np.searchsorted(theta_mesh, dir_angle)
             axs[0].plot(dir_angle*radians, H_array[idx], 'ok')
             if with_signal:
-                signal = self.percep_model.get_signal(theta_mesh)
+                signal = self.percep_model.get_binary_signal(theta_mesh)
                 axs[1].plot(theta_mesh*radians, signal, xunits=radians)
                 axs[1].plot(dir_angle*radians, signal[idx], 'ok')
                 axs[1].set_title('Perceived Signal')
@@ -919,7 +1028,7 @@ class AndyDirectionModel(DirectionModel):
             for n,loc in enumerate(focal_loc_mesh):
                 self.percep_model.focal_loc = loc
                 if with_signal:
-                    signal_array[n,:] = self.percep_model.get_signal(theta_mesh)
+                    signal_array[n,:] = self.percep_model.get_binary_signal(theta_mesh)
                 # Get direction angle and hamiltonian
                 dir_angle[n], H_array[n,:] = self.get_direction(res_num, return_H=True)
                 idx_array[n] = np.searchsorted(theta_mesh, dir_angle[n])
