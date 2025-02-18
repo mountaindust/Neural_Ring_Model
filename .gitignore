@@ -13,3 +13,8 @@ __pycache__/
 codegen/
 # Jupyter
 *.ipynb_checkpoints
+# latex
+*.aux
+*.log
+*.gz
+*.pdf

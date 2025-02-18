@@ -1,0 +1,44 @@
+\documentclass[12pt]{article}
+\usepackage[bookmarks=false]{hyperref}
+\usepackage{enumerate}
+\usepackage{amssymb,amsmath,amsthm}
+\usepackage{graphicx}
+\usepackage{geometry}
+
+\pagestyle{empty}
+
+\begin{document}
+	
+\section*{Discrete version}
+Assume that $k$ targets have been identified at radial positions $\theta_i$ with signal strength $s_i$. Let $\vec{p}_i = (\theta_i,s_i)$. A consensus direction will be chosen from among these targets.
+
+Let $0\leq n_i\leq 1$ be the fraction of spins active toward each $\vec{p}_i$. The consensus direction will be chosen based on these spins:
+\begin{equation}
+\Theta_{foc} = \sum_{i=1}^{k}\theta_in_i\label{eqn:Theta}
+\end{equation}
+
+Under the hood, we will assume a Hamiltonian of the form
+\[
+H = -\frac{k}{N}\sum_{i\neq j}J_{ij}\sigma_i\sigma_j
+\]
+where $\sigma_i$ is one of $N$ total spins in the system among $k$ groups (directions). This is exactly the same as the Gorbonos PNAS paper. However, we will choose a slightly different interaction kernel $J_{ij}$.
+\[
+J_{ij} = s_i\cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right)
+\]
+If all signal strengths in all directions are equal, we recover the PNAS model. $\nu=0.5$ was used in the PNAS paper and is similar to Mexican hat (see Fig. S1, Table S1, and Fig. 1 for comparison with experiments).
+
+This change easily trickles through the entire framework. To re-purpose Gorbonos's notation, let $\hat{p}_i$ be a unit vector in the direction of $\theta_i$, and let $\hat{V}_{foc}$ be a unit vector in the direction of $\Theta_{foc}$.
+Then
+\[
+\frac{dn_i}{dt} = \frac{1}{k\left(1+\exp\left(-\frac{2ks_i\hat{V}\cdot\hat{p}_i}{T}\right)\right)} - n_i
+\]
+where the dot product is shorthand notation for the cosine part of $J_{ij}$ and $T$ is the temperature. Taking the derivative of Eqn. \eqref{eqn:Theta} and plugging in, we get
+\begin{equation}
+	\frac{d\Theta_{foc}}{dt} = \sum_{i=1}^{k}\theta_i\frac{dn_i}{dt} = \frac{1}{k}\sum_{i=1}^{k}\frac{\theta_i}{\left(1+\exp\left(-\frac{2ks_i\hat{V}\cdot\hat{p}_i}{T}\right)\right)} - \Theta_{foc}
+\end{equation}
+This can be interpreted directly as a torque model.
+
+\section*{Continuous version}
+An issue here is that since there are angles that don't have targets, you need this $\eta$ term in Gorbonos [41] to inhibit angles which don't have signal. Given that we are supposed to take $\eta N >> J$ and $N\rightarrow\infty$, maybe it isn't important, but it's hard to say.
+
+\end{document}
