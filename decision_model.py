@@ -414,20 +414,59 @@ class PerceptionModel:
         return signal
 
 
-    def get_target_signals(self):
-        '''Returns angular position and distance to all *visible* targets.'''
+    def get_target_signals(self,theta_mesh=2000):
+        '''In the delta function case, returns the angular location of each 
+        target and the distance to each target as two length N arrays.
+        
+        In all other cases, returns the angular location of the center of each 
+        VISIBLE target as a length N array and the visible angular extents for 
+        each of those targets as a theta_mesh length signal with amplitude equal 
+        to the distance to the target (an array of shape N by theta_mesh).
+        
+        Uses a mesh of theta values to determine blocking, resulting in an 
+        approximation of extents. This adds noise, but maybe the right kind of 
+        noise (i.e., if less than 2pi/theta_mesh is visible to the right or left 
+        of a blocking locust, then the blocked locust is treated as not visible). 
+        theta_mesh is the size of the mesh, so larger values result in a finer 
+        mesh and a better approximation of exact blocking.
+        '''
 
+        dists = self.targets.get_dist_to_targets(self.focal_loc)
+        c_angles = self.targets.get_angles_to_targets(self.focal_loc, self.focal_angle)
         if self.targets.geom_name is None:
-            angles = self.targets.get_angles_to_targets(self.focal_loc, self.focal_angle)
+            return c_angles, dists
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
+            # sort by distance
+            arg_srt = dists.argsort()
+            angles = angles[arg_srt]
+            dists = dists[arg_srt]
+            c_angles = c_angles[arg_srt]
             # determine blocking
-            pass
-
+            # create binary signals for each angle extent
+            theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
+            signal = np.zeros((angles.shape[0],theta_mesh.size))
+            for n, thetas in enumerate(angles):
+                if thetas[1] > thetas[0]:
+                    theta_bool = np.logical_and(thetas[0]<=theta_mesh,
+                                                theta_mesh<=thetas[1])
+                else:
+                    theta_bool = np.logical_or(thetas[0]<=theta_mesh,
+                                            theta_mesh<=thetas[1])
+                signal[n,theta_bool] = 1
+            # determine blocking based on sorted order
+            # closest targets are earlier in the signal array
+            closer_signals = signal[0,:]
+            for n, sig in enumerate(signal[1:]):
+                blck_sig = sig - closer_signals
+                blck_sig[blck_sig<0] = 0
+                signal[n+1,:] = blck_sig
+                closer_signals += blck_sig
+            # remove all completely blocked targets and return
+            vis = signal.max(axis=1) > 0
+            return c_angles[vis], (signal[vis,:].T*dists[vis]).T
         else:
             raise NotImplementedError("Unknown target geometry name.")
-
-
 
 
     def plot(self, wb_plot=False):
