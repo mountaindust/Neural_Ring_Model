@@ -6,7 +6,6 @@ it wants to go based on static targets with certain geometry
 import numpy as np
 from scipy import stats
 import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import Axes3D
 from matplotlib import cm
 from matplotlib.image import NonUniformImage
 from basic_units import radians
