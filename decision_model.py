@@ -415,13 +415,11 @@ class PerceptionModel:
 
 
     def get_target_signals(self,theta_mesh=2000):
-        '''In the delta function case, returns the angular location of each 
-        target and the distance to each target as two length N arrays.
-        
-        In all other cases, returns the angular location of the center of each 
-        VISIBLE target as a length N array and the visible angular extents for 
-        each of those targets as a theta_mesh length signal with amplitude equal 
-        to the distance to the target (an array of shape N by theta_mesh).
+        '''Returns the angular location of the center of each VISIBLE target 
+        (closer targets that are not delta functions block ones behind) as 
+        a length N array and the visible angular extents for each of those 
+        targets as a theta_mesh length signal with amplitude equal to the 
+        distance to the target (an array of shape N by theta_mesh).
         
         Uses a mesh of theta values to determine blocking, resulting in an 
         approximation of extents. This adds noise, but maybe the right kind of 
@@ -434,7 +432,8 @@ class PerceptionModel:
         dists = self.targets.get_dist_to_targets(self.focal_loc)
         c_angles = self.targets.get_angles_to_targets(self.focal_loc, self.focal_angle)
         if self.targets.geom_name is None:
-            return c_angles, dists
+            signal = self.get_binary_signal(theta_mesh)
+            return c_angles, (signal.T*dists).T
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
             # sort by distance
@@ -535,6 +534,57 @@ class PerceptionModel:
         ax2 = plt.subplot(122, projection='polar')
 
         p_func = self.get_binary_signal(2000)
+        theta_mesh = np.linspace(-np.pi, np.pi, 2000+1)[:-1]
+
+        ax2.plot(theta_mesh,p_func)
+        ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
+        ax2.set_rmin(-0.5)
+        ax2.set_rmax(1)
+        ax2.set_rticks([0, 0.5, 1])
+        ax2.set_rlabel_position(0)
+        ax2.set_title('Perception Signal')
+        plt.show()
+
+
+    def plot_blocking(self, wb_plot=False):
+        '''Plots visible targets and their angular direction from the observer, 
+        and also the signal distribution from the point of view of the observer.
+
+        Use as a test for get_target_signals.
+        
+        Set wb_plot to True if plotting in a Jupyber notebook
+        '''
+
+        angles, signals = self.get_target_signals()
+
+        if wb_plot:
+            plt.figure(figsize=(6.5,3.25))
+        else:
+            plt.figure(figsize=(12,6))
+
+        ###### Target Geometry Plot ######
+        ax1 = plt.subplot(121)
+
+        # First, plot the targets themselves
+        self.targets.plot_targets_to_axis(ax1)
+
+        # Now plot perception lines. Requires adding back angle of focal locust
+        #   to get allocentric angles.
+        for n, theta in enumerate(angles+self.focal_angle):
+            r = signals.max(axis=1)
+            x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(theta))
+            y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(theta))
+            ax1.plot(x,y,'k')
+        ax1.arrow(self.focal_loc[0],self.focal_loc[1],
+                  0.5*np.cos(self.focal_angle),0.5*np.sin(self.focal_angle), 
+                width=0.1, head_length=0.25)
+        ax1.set_aspect('equal')
+        ax1.set_title('Target Geometry')
+
+        ###### Perception Signal Plot ######
+        ax2 = plt.subplot(122, projection='polar')
+
+        p_func = signals.sum(axis=0)
         theta_mesh = np.linspace(-np.pi, np.pi, 2000+1)[:-1]
 
         ax2.plot(theta_mesh,p_func)
