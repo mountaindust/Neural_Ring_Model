@@ -426,24 +426,43 @@ class PerceptionModel:
         of a blocking locust, then the blocked locust is treated as not visible). 
         theta_mesh is the size of the mesh, so larger values result in a finer 
         mesh and a better approximation of exact blocking.
+
+        Parameters
+        ----------
+        theta_mesh : float or 1D ndarray
+            the number of equally spaced mesh points on [-pi,pi) to evaluate at 
+            or a mesh of theta values to evaluate at
         '''
 
         dists = self.targets.get_dist_to_targets(self.focal_loc)
         c_angles = self.targets.get_angles_to_targets(self.focal_loc, self.focal_angle)
+        angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
+        if isinstance(theta_mesh, int):
+            theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
+        signal = np.zeros((angles.shape[0],theta_mesh.size))
+
         if self.targets.geom_name is None:
-            signal = self.get_binary_signal(theta_mesh)
+            for n, theta in enumerate(angles):
+                idx = np.searchsorted(theta_mesh,theta)
+                if idx == len(theta_mesh):
+                    idx = 0
+                # step function perception
+                if idx != 0 and \
+                theta-theta_mesh[idx-1] < theta_mesh[idx]-theta:
+                    signal[n,idx-1] = 1
+                elif idx == 0 and \
+                theta-theta_mesh[-1] < -theta_mesh[0]-theta:
+                    signal[n,-1] = 1
+                else:
+                    signal[n,idx] = 1
             return c_angles, (signal.T*dists).T
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
-            angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
             # sort by distance
             arg_srt = dists.argsort()
             angles = angles[arg_srt]
             dists = dists[arg_srt]
             c_angles = c_angles[arg_srt]
-            # determine blocking
-            # create binary signals for each angle extent
-            theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
-            signal = np.zeros((angles.shape[0],theta_mesh.size))
+            # determine blocking by creating binary signals for each angle extent
             for n, thetas in enumerate(angles):
                 if thetas[1] > thetas[0]:
                     theta_bool = np.logical_and(thetas[0]<=theta_mesh,
@@ -570,7 +589,7 @@ class PerceptionModel:
         # Now plot perception lines. Requires adding back angle of focal locust
         #   to get allocentric angles.
         for n, theta in enumerate(angles+self.focal_angle):
-            r = signals.max(axis=1)
+            r = signals[n].max()
             x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(theta))
             y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(theta))
             ax1.plot(x,y,'k')
@@ -589,8 +608,6 @@ class PerceptionModel:
         ax2.plot(theta_mesh,p_func)
         ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
         ax2.set_rmin(-0.5)
-        ax2.set_rmax(1)
-        ax2.set_rticks([0, 0.5, 1])
         ax2.set_rlabel_position(0)
         ax2.set_title('Perception Signal')
         plt.show()
