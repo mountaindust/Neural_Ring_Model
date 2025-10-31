@@ -432,6 +432,14 @@ class PerceptionModel:
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
+
+        Returns
+        -------
+        angles : length N ndarray
+            angles to the centers of visible targets
+        signals : Nxtheta_mesh ndarray
+            perception signals for each visible target, with amplitude equal 
+            to distance to target
         '''
 
         dists = self.targets.get_dist_to_targets(self.focal_loc)
@@ -439,7 +447,7 @@ class PerceptionModel:
         angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
         if isinstance(theta_mesh, int):
             theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
-        signal = np.zeros((angles.shape[0],theta_mesh.size))
+        signals = np.zeros((angles.shape[0], theta_mesh.size))
 
         if self.targets.geom_name is None:
             for n, theta in enumerate(angles):
@@ -449,13 +457,13 @@ class PerceptionModel:
                 # step function perception
                 if idx != 0 and \
                 theta-theta_mesh[idx-1] < theta_mesh[idx]-theta:
-                    signal[n,idx-1] = 1
+                    signals[n,idx-1] = 1
                 elif idx == 0 and \
                 theta-theta_mesh[-1] < -theta_mesh[0]-theta:
-                    signal[n,-1] = 1
+                    signals[n,-1] = 1
                 else:
-                    signal[n,idx] = 1
-            return c_angles, (signal.T*dists).T
+                    signals[n,idx] = 1
+            return c_angles, (signals.T*dists).T
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             # sort by distance
             arg_srt = dists.argsort()
@@ -470,25 +478,24 @@ class PerceptionModel:
                 else:
                     theta_bool = np.logical_or(thetas[0]<=theta_mesh,
                                             theta_mesh<=thetas[1])
-                signal[n,theta_bool] = 1
+                signals[n,theta_bool] = 1
             # determine blocking based on sorted order
-            # closest targets are earlier in the signal array
-            closer_signals = signal[0,:]
-            for n, sig in enumerate(signal[1:]):
-                blck_sig = sig - closer_signals
-                blck_sig[blck_sig<0] = 0
-                signal[n+1,:] = blck_sig
-                closer_signals += blck_sig
+            # closest targets are earlier in the signals array
+            blocked = signals[0,:] != 0
+            for n in range(1,signals.shape[0]):
+                signals[n,blocked] = 0
+                blocked = np.logical_or(blocked, signals[n,:] != 0)
             # remove all completely blocked targets and return
-            vis = signal.max(axis=1) > 0
-            return c_angles[vis], (signal[vis,:].T*dists[vis]).T
+            vis = signals.max(axis=1) > 0
+            return c_angles[vis], (signals[vis,:].T*dists[vis]).T
         else:
             raise NotImplementedError("Unknown target geometry name.")
 
 
-    def plot(self, wb_plot=False):
+    def plot_binary(self, wb_plot=False):
         '''Plots the targets and their angular extents from the observer, and 
-        also the signal distribution from the point of view of the observer.
+        also the signal distribution from the point of view of the observer 
+        based on a binary signal from each target. This is non-blocking.
         
         Set wb_plot to True if plotting in a Jupyber notebook
         '''
