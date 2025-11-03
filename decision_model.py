@@ -413,10 +413,11 @@ class PerceptionModel:
         return signal
 
 
-    def get_target_signals(self,theta_mesh=2000):
-        '''Returns the angular location of the center of each VISIBLE target 
-        (closer targets that are not delta functions block ones behind) as 
-        a length N array and the visible angular extents for each of those 
+    def get_target_signals(self,theta_mesh=2000,full_signal=False):
+        '''Returns the egocentric angular location of the center of each VISIBLE 
+        target (closer targets that are not delta functions block ones behind) as 
+        a length N array and a visual signal for each that is either a scalar or 
+        is supported on the visible angular extents for each of those 
         targets as a theta_mesh length signal with amplitude equal to the 
         distance to the target (an array of shape N by theta_mesh).
         
@@ -432,12 +433,15 @@ class PerceptionModel:
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
+        full_signal : bool
+            if True, return the full signal for each target as a theta mesh, 
+            otherwise return only the value of the signal for each target
 
         Returns
         -------
         angles : length N ndarray
             angles to the centers of visible targets
-        signals : Nxtheta_mesh ndarray
+        signals : length N or Nxtheta_mesh ndarray
             perception signals for each visible target, with amplitude equal 
             to distance to target
         '''
@@ -463,7 +467,10 @@ class PerceptionModel:
                     signals[n,-1] = 1
                 else:
                     signals[n,idx] = 1
-            return c_angles, (signals.T*dists).T
+            if full_signal:
+                return c_angles, (signals.T*dists).T
+            else:
+                return c_angles, dists
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             # sort by distance
             arg_srt = dists.argsort()
@@ -487,7 +494,10 @@ class PerceptionModel:
                 blocked = np.logical_or(blocked, signals[n,:] != 0)
             # remove all completely blocked targets and return
             vis = signals.max(axis=1) > 0
-            return c_angles[vis], (signals[vis,:].T*dists[vis]).T
+            if full_signal:
+                return c_angles[vis], (signals[vis,:].T*dists[vis]).T
+            else:
+                return c_angles[vis], dists[vis]
         else:
             raise NotImplementedError("Unknown target geometry name.")
 
@@ -571,7 +581,7 @@ class PerceptionModel:
         plt.show()
 
 
-    def plot_blocking(self, wb_plot=False):
+    def plot_blocked_signals(self, wb_plot=False):
         '''Plots visible targets and their angular direction from the observer, 
         and also the signal distribution from the point of view of the observer.
 
@@ -580,7 +590,7 @@ class PerceptionModel:
         Set wb_plot to True if plotting in a Jupyber notebook
         '''
 
-        angles, signals = self.get_target_signals()
+        angles, signals = self.get_target_signals(full_signal=True)
 
         if wb_plot:
             plt.figure(figsize=(6.5,3.25))
@@ -626,7 +636,7 @@ class DirectionModel:
     def __init__(self, percep_model=None):
         '''From a PerceptionModel with its Targets object, establishes a model 
         for chosing direction based on method for finding a consensus direction.
-        Superclass for 
+        Superclass for specific decision models.
         
         Parameters
         ----------
@@ -663,14 +673,18 @@ class DirectionModel:
         return lambda x: rv.pdf(x)
     
 
-    def trunccosine(self, beta=2, phi=0, left=-np.pi, right=np.pi, nu=1):
-        '''Function generator that returns a cos(beta*pi*(x/pi)^nu+phi) with support on the
-        interval [left,right]'''
+    def trunccosine(self, left=-np.pi, right=np.pi, nu=1):
+        '''Function generator that returns a cos(pi*(x/pi)^nu) with support on the
+        interval [left,right]. Outside this interval, the function returns zero.
+        
+        The idea here is to rescale theta to be between 0 and 1, then raise to the
+        power nu to control the steepness of the function, then scale back to
+        between -pi and pi and take the cosine. Truncation allows for a blindspot.'''
 
         def trunccos(x):
             result = np.zeros_like(x)
             result[(x>=left) & (x<=right)] = np.cos(
-                np.pi*beta*(x[(x>=left) & (x<=right)]/np.pi)**nu + phi)
+                np.pi*(x[(x>=left) & (x<=right)]/np.pi)**nu)
             return result
 
         return trunccos
@@ -891,7 +905,7 @@ class DirectionModel:
 
 class IsingExtModel(DirectionModel):
 
-    def __init__(self, percep_model=None, T=0.5, *args, **kwargs):
+    def __init__(self, percep_model=None, T=0.5, theta_mesh=2000, *args, **kwargs):
         '''From a PerceptionModel with its Targets object, establishes a model 
         for chosing direction based on discrete Ising.
         TODO: continuous Ising
@@ -905,18 +919,46 @@ class IsingExtModel(DirectionModel):
             consensus directions for different layouts or focal locations/angles.
         T : float
             Temperature for Ising model
+        theta_mesh : int
+            the number of equally spaced mesh points on [-pi,pi) that will be 
+            used to evaluate target location for the purposes of blocking.
         Optional Arguments for trunccosine kernel
-            - beta=2 : stretch
-            - phi=0 : phase
-            - left=-np.pi/2 : left cutoff
-            - right=np.pi/2 : right cutoff
+            - left=-np.pi : left cutoff
+            - right=np.pi : right cutoff
             - nu=1 : warping
         '''
 
         super().__init__(percep_model)
         self.T = T
-        self.weighting = self.truncnorm(*args, **kwargs)
-        self.weighting_name = "Truncnorm"
+        self.theta_mesh = theta_mesh
+        self.weighting = self.trunccosine(*args, **kwargs)
+        self.weighting_name = "Truncated Cosine"
+
+        super().__init__(percep_model)
+
+    def dtheta_dt(self):
+        '''Get the time derivative of theta according to the Ising model.
+
+        Returns
+        -------
+        dtheta_dt : float
+            time derivative of theta according to the Ising model
+        '''
+
+        angles, signals = self.percep_model.get_target_signals(self.theta_mesh)
+        if angles.size == 0:
+            return 0.0
+        # theta_i in formula is allocentric; angles plus focal angle gives 
+        #   allocentric angles, which cancels with subtractino with focal angle
+        #   in forumula.
+        return np.sum(angles/(1+np.exp(
+            -2*angles.size*signals*self.weighting(angles)/self.T)
+            ))/angles.size
+    
+    def get_direction(self):
+        '''
+        
+        '''
 
 
 
