@@ -5,6 +5,7 @@ it wants to go based on static targets with certain geometry
 
 import numpy as np
 from scipy import stats
+from scipy.integrate import solve_ivp
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.image import NonUniformImage
@@ -443,10 +444,12 @@ class PerceptionModel:
             angles to the centers of visible targets
         signals : length N or Nxtheta_mesh ndarray
             perception signals for each visible target, with amplitude equal 
-            to distance to target
+            to 1/distance to target
         '''
 
         dists = self.targets.get_dist_to_targets(self.focal_loc)
+        dist_sig = np.zeros_like(dists)
+        dist_sig[dists!=0] = 1/dists[dists!=0]
         c_angles = self.targets.get_angles_to_targets(self.focal_loc, self.focal_angle)
         angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
         if isinstance(theta_mesh, int):
@@ -468,14 +471,14 @@ class PerceptionModel:
                 else:
                     signals[n,idx] = 1
             if full_signal:
-                return c_angles, (signals.T*dists).T
+                return c_angles, (signals.T*dist_sig).T
             else:
-                return c_angles, dists
+                return c_angles, dist_sig
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             # sort by distance
             arg_srt = dists.argsort()
             angles = angles[arg_srt]
-            dists = dists[arg_srt]
+            dist_sig = dist_sig[arg_srt]
             c_angles = c_angles[arg_srt]
             # determine blocking by creating binary signals for each angle extent
             for n, thetas in enumerate(angles):
@@ -495,9 +498,9 @@ class PerceptionModel:
             # remove all completely blocked targets and return
             vis = signals.max(axis=1) > 0
             if full_signal:
-                return c_angles[vis], (signals[vis,:].T*dists[vis]).T
+                return c_angles[vis], (signals[vis,:].T*dist_sig[vis]).T
             else:
-                return c_angles[vis], dists[vis]
+                return c_angles[vis], dist_sig[vis]
         else:
             raise NotImplementedError("Unknown target geometry name.")
 
@@ -692,9 +695,14 @@ class DirectionModel:
     ############################################################################
 
 
-    def get_direction(self):
+    def get_direction(self, dt):
         '''Must be implemented in subclass!'''
         raise NotImplementedError("get_direction must be implemented in subclass")
+    
+
+    def dtheta_dt(self):
+        '''Must be implemented in subclass!'''
+        raise NotImplementedError("dtheta_dt must be implemented in subclass")
 
 
     def plot_weighting(self, wb_plot=False):
@@ -749,9 +757,9 @@ class DirectionModel:
                 this_x = X[jj,ii]
                 this_y = Y[jj,ii]
                 self.percep_model.focal_loc = np.array([this_x,this_y])
-                # Must add the focal_angle to each result to convert from 
-                #   egocentric to allocentric
-                theta_mesh[jj,ii] = self.get_direction() + self.percep_model.focal_angle
+                # TODO:
+                # Better would probably be to calculaute the steady-state direction.
+                theta_mesh[jj,ii] = self.dtheta_dt()
                 U[jj,ii] = np.cos(theta_mesh[jj,ii])
                 V[jj,ii] = np.sin(theta_mesh[jj,ii])
 
@@ -773,7 +781,7 @@ class DirectionModel:
             return theta_mesh
         
 
-    def plot_walker(self, s=0.1, std=0, repetitions=20, max_steps=3000,
+    def plot_walker(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
                     start_loc=None, start_angle=None, plot_tracks=False):
         '''Plot a walker that starts at a specified location looking in a 
         specified angle (defaults to the focal_loc and focal_angle in attached 
@@ -789,8 +797,10 @@ class DirectionModel:
 
         Parameters
         ----------
-        s : float
-            How far to move in the determined direction on each step of the walk
+        dt : float
+            Time step for the walk
+        v : float
+            Speed of the walker, assumed constant
         std : float
             Standard deviation of angular Gaussian noise with mean zero.
             If zero (default), run without any angular noise.
@@ -831,7 +841,7 @@ class DirectionModel:
                 elif self.percep_model.targets.geom_name is None and \
                 np.any(np.linalg.norm(
                        self.percep_model.focal_loc-self.percep_model.targets.locs,
-                       axis=1)<s):
+                       axis=1)<v*dt):
                     break
                 # if step > 75:
                 #     import pdb; pdb.set_trace()
@@ -841,9 +851,15 @@ class DirectionModel:
                     noise = self.rng.normal(scale=std)
                 else:
                     noise = 0
-                theta = self.get_direction() + self.percep_model.focal_angle \
-                    + noise
-                mv_vec = s*np.array([np.cos(theta),np.sin(theta)])
+                # NOTE:
+                # This walk is modeled on a two-step process:
+                # 1) decide on a direction to face based on an amount of time dt
+                # 2) move forward in that direction instantaneously
+                # This is not the same as moving forward while turning;
+                #   the only reason it is implemented this way is so that the 
+                #   function can be resused across models. It is TEMPORARY.
+                theta = self.get_direction(dt) + noise
+                mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = \
                     self.percep_model.targets.convert_angles(theta)
@@ -904,6 +920,23 @@ class DirectionModel:
 
 
 class IsingExtModel(DirectionModel):
+    '''
+    This only extends Ising slightly. The primary novelty is the underlying 
+    perception model that allows for non-delta function targets that can 
+    occlude each other, and the addition of a weighting function for the Ising
+    interactions based on distance to target.
+
+    The underlying assumpion is that there is a two-step process:
+    1) Perception of targets based on location (angle and dist), and geometry
+    2) Decision making based on discrete perceived targets via Ising model
+
+    One could try to combine these into a single-step, continuous Ising model, with 
+    the distance weighting doing the work of distinguishing between one close locust
+    and two adjacent locusts that are farther away (angular size alone is 
+    insufficient for this task). However, it would mean that a partially occluded 
+    locust would be seen as being located at its visible extent rather than its 
+    center. Hard to know if this is better or worse.
+    '''
 
     def __init__(self, percep_model=None, T=0.5, theta_mesh=2000, *args, **kwargs):
         '''From a PerceptionModel with its Targets object, establishes a model 
@@ -936,6 +969,7 @@ class IsingExtModel(DirectionModel):
 
         super().__init__(percep_model)
 
+
     def dtheta_dt(self):
         '''Get the time derivative of theta according to the Ising model.
 
@@ -954,17 +988,25 @@ class IsingExtModel(DirectionModel):
         return np.sum(angles/(1+np.exp(
             -2*angles.size*signals*self.weighting(angles)/self.T)
             ))/angles.size
-    
-    def get_direction(self):
+
+
+    def get_direction(self, dt):
+        '''Integrate the Ising model for one time step dt to get new direction.
+        
+        Parameters
+        ----------
+        dt : float
+            time step for integration of torque model.
         '''
         
-        '''
+        return solve_ivp(self.dtheta_dt, [0, dt], 
+                         [self.percep_model.focal_angle]).y[0,-1]
 
 
 
 class AndyDirectionModel(DirectionModel):
 
-    def __init__(self, percep_model=None, consensus_type='additive', 
+    def __init__(self, percep_model=None, consensus_type='additive', res_num=2000,
                  weighting_name='truncnorm', *args, **kwargs):
         '''From a PerceptionModel with its Targets object, establishes a model 
         for chosing direction based on a weighting of the signal via convolution 
@@ -980,6 +1022,9 @@ class AndyDirectionModel(DirectionModel):
         consensus_type : {'additive', 'argmax'}
             Method that will be used to find a consensus direction after 
             convoluting the perception signal with the weighting.
+        res_num : int
+            the number of equally spaced mesh points on [-pi,pi) to evaluate the
+            hamiltonian at. More increases accuracy at the expense of speed.
         weighting_name : {'truncnorm'}
             Weighting for the signal convolution. The necessary parameters for 
             this weighting should be provided after this key word argument. The 
@@ -1032,10 +1077,16 @@ class AndyDirectionModel(DirectionModel):
         return np.fft.fftshift(np.fft.irfft( 
                                 np.fft.rfft(kernel)*np.fft.rfft(signal),
                                 len(signal)))
-        
 
-    def get_direction(self, res_num=2000, return_H=False):
-        '''Get consensus EGOCENTRIC direction for current parameterization of 
+
+    def dtheta_dt(self):
+        '''This is an updating model, so dtheta_dt is not used. Just return the 
+        consensus direction.'''
+        return self.get_direction()
+
+
+    def get_direction(self, dt=None, return_H=False):
+        '''Get consensus ALLOCENTRIC direction for current parameterization of 
         the DirectionModel.
 
         If the difference between the min and the max of the Hamiltonian is 
@@ -1045,9 +1096,8 @@ class AndyDirectionModel(DirectionModel):
 
         Parameters
         ----------
-        res_num : float
-            the number of equally spaced mesh points on [-pi,pi) to evaluate the
-            hamiltonian at. More increases accuracy at the expense of speed.
+        dt : float, optional
+            time step for integration of torque model. Not used in this model.
         return_H : bool
             whether or not to return the full Hamiltonian too
 
@@ -1057,28 +1107,28 @@ class AndyDirectionModel(DirectionModel):
         '''
         eps = np.finfo(np.float32).eps
 
-        theta_mesh = np.linspace(-np.pi, np.pi, res_num+1)[:-1]
+        theta_mesh = np.linspace(-np.pi, np.pi, self.res_num+1)[:-1]
         H = self.hamiltonian(theta_mesh)
         
         if H.max()-H.min() < eps:
             if return_H:
-                return 0, H
+                return self.percep_model.focal_angle, H
             else:
-                return 0
+                return self.percep_model.focal_angle
 
         if self.consensus_type == 'additive':
             x = np.sum(np.cos(theta_mesh)*H)
             y = np.sum(np.sin(theta_mesh)*H)
             if np.abs(x)<eps and np.abs(y)<eps:
                 if return_H:
-                    return 0, H
+                    return self.percep_model.focal_angle, H
                 else:
-                    return 0
+                    return self.percep_model.focal_angle
             else:
                 if return_H:
-                    return np.arctan2(y,x), H
+                    return np.arctan2(y,x)+self.percep_model.focal_angle, H
                 else:
-                    return np.arctan2(y,x)
+                    return np.arctan2(y,x)+self.percep_model.focal_angle
         elif self.consensus_type == 'argmax':
             # a straight argmax is VERY numerically unstable, especially in 
             #   cases (which are of interest) where H is multimodal with the 
@@ -1098,9 +1148,9 @@ class AndyDirectionModel(DirectionModel):
             else:
                 idx = idx_array[0]
             if return_H:
-                return theta_mesh[idx], H
+                return theta_mesh[idx]+self.percep_model.focal_angle, H
             else:
-                return theta_mesh[idx]
+                return theta_mesh[idx]+self.percep_model.focal_angle
         
 
     def plot_hamiltonian(self, focal_loc_mesh=None, with_signal=False,
@@ -1135,7 +1185,7 @@ class AndyDirectionModel(DirectionModel):
                     fig, axs = plt.subplots(figsize=(8,2.5))
                 axs = np.array([axs])
             # Get direction angle and hamiltonian
-            dir_angle, H_array = self.get_direction(res_num, return_H=True)
+            dir_angle, H_array = self.get_direction(return_H=True)
             axs[0].plot(theta_mesh*radians, H_array, xunits=radians)
             axs[0].set_title('Hamiltonian')
             # Indicate chosen angle
@@ -1184,7 +1234,7 @@ class AndyDirectionModel(DirectionModel):
                 if with_signal:
                     signal_array[n,:] = self.percep_model.get_binary_signal(theta_mesh)
                 # Get direction angle and hamiltonian
-                dir_angle[n], H_array[n,:] = self.get_direction(res_num, return_H=True)
+                dir_angle[n], H_array[n,:] = self.get_direction(return_H=True)
                 idx_array[n] = np.searchsorted(theta_mesh, dir_angle[n])
             
             # Create 3D plot(s)
