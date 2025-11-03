@@ -32,11 +32,14 @@ Then
 \[
 \frac{dn_i}{dt} = \frac{1}{k\left(1+\exp\left(-\frac{2ks_i\hat{V}\cdot\hat{p}_i}{T}\right)\right)} - n_i
 \]
-where the dot product is shorthand notation for the cosine part of $J_{ij}$ and $T$ is the temperature. Taking the derivative of Eqn. \eqref{eqn:Theta} and plugging in, we get
+where the dot product is shorthand notation for the cosine part of $J_{ij}$ and $T$ is the temperature. Assume a separation of time-scales where neural updates of spins occurs far faster than the physical rotation of an insect. In that case, we can treat the radial positions $\theta_i$ of the targets as roughly constant on the time-scale of updating the mental torque (consensus direction). Then, taking the derivative of Eqn. \eqref{eqn:Theta} and plugging in, we get
 \begin{equation}
 	\frac{d\Theta_{foc}}{dt} = \sum_{i=1}^{k}\theta_i\frac{dn_i}{dt} = \frac{1}{k}\sum_{i=1}^{k}\frac{\theta_i}{\left(1+\exp\left(-\frac{2ks_i\hat{V}\cdot\hat{p}_i}{T}\right)\right)} - \Theta_{foc}
 \end{equation}
-This can be interpreted directly as a torque model.
+This can be interpreted directly as a torque model by interpreting $\Theta_{foc}$ as the current direction the locust is facing. Also, $\theta_i - \Theta_{foc}$ is then the angle of target $i$ relative to the current heading of the locust, $\theta_{i,foc}$ and using an expanded definition of dot product based on interaction kernel $J_{ij}$,
+\[
+s_i\hat{V}\cdot\hat{p}_i = J_{i,foc}.
+\]
 
 \section*{Continuous version}
 An issue here is that since there are angles that don't have targets, you need this $\eta$ term in Gorbonos [41] to inhibit angles which don't have signal. Given that we are supposed to take $\eta N >> J$ and $N\rightarrow\infty$, maybe it isn't important, but it's hard to say.
