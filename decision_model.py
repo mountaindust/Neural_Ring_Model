@@ -324,8 +324,8 @@ class PerceptionModel:
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, type=None):
         '''Establishes an observer at location focal_loc, looking in a direction 
-        given by focal_angle, at targets given by targets. All three of these 
-        can be changed at any time as attributes.
+        given by focal_angle, at targets given by the targets object. All three 
+        of these can be changed at any time as attributes.
 
         Parameters
         ----------
@@ -417,10 +417,11 @@ class PerceptionModel:
     def get_target_signals(self,theta_mesh=2000,full_signal=False):
         '''Returns the egocentric angular location of the center of each VISIBLE 
         target (closer targets that are not delta functions block ones behind) as 
-        a length N array and a visual signal for each that is either a scalar or 
-        is supported on the visible angular extents for each of those 
-        targets as a theta_mesh length signal with amplitude equal to the 
-        distance to the target (an array of shape N by theta_mesh).
+        a length N array, and a visual signal for each that is either a scalar or 
+        a binary array with support on the visible angular extents of the target.
+        
+        The scalar visual signal is computed as the integral of the visual signal 
+        normalized by 2pi.
         
         Uses a mesh of theta values to determine blocking, resulting in an 
         approximation of extents. This adds noise, but maybe the right kind of 
@@ -448,8 +449,6 @@ class PerceptionModel:
         '''
 
         dists = self.targets.get_dist_to_targets(self.focal_loc)
-        dist_sig = np.zeros_like(dists)
-        dist_sig[dists!=0] = 1/dists[dists!=0]
         c_angles = self.targets.get_angles_to_targets(self.focal_loc, self.focal_angle)
         angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
         if isinstance(theta_mesh, int):
@@ -471,14 +470,13 @@ class PerceptionModel:
                 else:
                     signals[n,idx] = 1
             if full_signal:
-                return c_angles, (signals.T*dist_sig).T
+                return c_angles, signals
             else:
-                return c_angles, dist_sig
+                return c_angles, signals.sum(axis=1)/theta_mesh.size
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             # sort by distance
             arg_srt = dists.argsort()
             angles = angles[arg_srt]
-            dist_sig = dist_sig[arg_srt]
             c_angles = c_angles[arg_srt]
             # determine blocking by creating binary signals for each angle extent
             for n, thetas in enumerate(angles):
@@ -498,9 +496,9 @@ class PerceptionModel:
             # remove all completely blocked targets and return
             vis = signals.max(axis=1) > 0
             if full_signal:
-                return c_angles[vis], (signals[vis,:].T*dist_sig[vis]).T
+                return c_angles[vis], signals[vis,:]
             else:
-                return c_angles[vis], dist_sig[vis]
+                return c_angles[vis], signals[vis,:].sum(axis=1)/theta_mesh.size
         else:
             raise NotImplementedError("Unknown target geometry name.")
 
@@ -609,7 +607,7 @@ class PerceptionModel:
         # Now plot perception lines. Requires adding back angle of focal locust
         #   to get allocentric angles.
         for n, theta in enumerate(angles+self.focal_angle):
-            r = signals[n].max()
+            r = self.targets.get_dist_to_targets(self.focal_loc)[n]
             x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(theta))
             y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(theta))
             ax1.plot(x,y,'k')
@@ -634,12 +632,228 @@ class PerceptionModel:
 
 
 
-class DirectionModel:
+# def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,20), num_y=21, 
+#                         return_theta=False, wb_plot=False):
+#     '''Create a mesh of starting locations and, for each point in the mesh, 
+#     get the allocentric direction of travel as a scalar theta. Plots the 
+#     result as a vector field of unit vectors and optionally returns a scalar 
+#     field of the values theta within [-pi,pi].
 
-    def __init__(self, percep_model=None):
+#     Set wb_plot to True if plotting in a Jupyber notebook
+
+#     Parameters
+#     ----------
+#     xlim : (xmin,xmax) tuple of floats
+#         x limits for mesh, inclusive
+#     num_x : number of steps in x direction
+#     ylim : (ymin,ymax) tuple of floats
+#         y limits for mesh, inclusive
+#     num_y : number of steps in y direction
+#     return_theta : bool
+#         whether or not to return a theta scalar field
+#     '''
+
+#     current_focal_loc = self.percep_model.focal_loc.copy()
+
+#     xmesh = np.linspace(xlim[0], xlim[1], num_x)
+#     ymesh = np.linspace(ylim[0], ylim[1], num_y)
+
+#     X, Y = np.meshgrid(xmesh, ymesh)
+#     theta_mesh = np.zeros(X.shape)
+#     U = np.zeros_like(theta_mesh)
+#     V = np.zeros_like(theta_mesh)
+
+#     for ii in range(num_x):
+#         for jj in range(num_y):
+#             this_x = X[jj,ii]
+#             this_y = Y[jj,ii]
+#             self.percep_model.focal_loc = np.array([this_x,this_y])
+#             # TODO:
+#             # Better would probably be to calculaute the steady-state direction.
+#             theta_mesh[jj,ii] = self.dtheta_dt()
+#             U[jj,ii] = np.cos(theta_mesh[jj,ii])
+#             V[jj,ii] = np.sin(theta_mesh[jj,ii])
+
+#     self.percep_model.focal_loc = current_focal_loc
+#     if wb_plot:
+#         plt.figure(figsize=(6.5,4))
+#     else:
+#         plt.figure(figsize=(5.5,5))
+#     ax = plt.subplot()
+
+#     # Plot targets
+#     self.percep_model.targets.plot_targets_to_axis(ax)
+#     # Plot arrows
+#     ax.quiver(X, Y, U, V, angles='xy')
+#     ax.set_title("Direction Model")
+#     ax.set_aspect('equal')
+#     plt.show()
+#     if return_theta:
+#         return theta_mesh
+    
+
+# def plot_walker(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
+#                 start_loc=None, start_angle=None, plot_tracks=False):
+#     '''Plot a walker that starts at a specified location looking in a 
+#     specified angle (defaults to the focal_loc and focal_angle in attached 
+#     PerceptionModel) and moves in the direction given by the current 
+#     direction model with a specified step size and angular Gaussian noise 
+#     with standard deviation as specified. Repeat for a number of 
+#     repetitions and plot a heat map of these walks in 2D space.
+
+#     The walker stops whenever it is detected to be overlapping a target or 
+#     after max_steps.
+
+#     Set wb_plot to True if plotting in a Jupyter notebook
+
+#     Parameters
+#     ----------
+#     dt : float
+#         Time step for the walk
+#     v : float
+#         Speed of the walker, assumed constant
+#     std : float
+#         Standard deviation of angular Gaussian noise with mean zero.
+#         If zero (default), run without any angular noise.
+#     repetitions : int
+#         Number of walks to perform and aggregate
+#     max_steps : int
+#         Maximum number of steps for each walker
+#     start_loc : (x,y) coordinates, optional
+#         Starting location of the walk, defaults to focal_loc in the attached 
+#         PerceptionModel
+#     start_angle : float
+#         Starting direction that the walker is facing. Defaults to 
+#         focal_angle in the attached PerceptionModel
+#     plot_tracks : bool
+#         Whether or not to overlay the walker trajectories
+#     '''
+    
+#     if start_loc is None:
+#         start_loc = self.percep_model.focal_loc.copy()
+#     else:
+#         start_loc = np.array(start_loc, dtype=float)
+#     if start_angle is None:
+#         start_angle = self.percep_model.focal_angle
+#     orig_loc = self.percep_model.focal_loc.copy()
+#     orig_angle = self.percep_model.focal_angle
+
+#     all_walks = []
+
+#     for n in range(repetitions):
+#         self.percep_model.focal_loc = start_loc.copy()
+#         self.percep_model.focal_angle = start_angle
+#         walk = [start_loc.copy()]
+#         for step in range(max_steps):
+#             # check for target overlap
+#             if np.any(self.percep_model.targets.check_target_overlap(
+#                         self.percep_model.focal_loc)):
+#                 break
+#             elif self.percep_model.targets.geom_name is None and \
+#             np.any(np.linalg.norm(
+#                     self.percep_model.focal_loc-self.percep_model.targets.locs,
+#                     axis=1)<v*dt):
+#                 break
+#             # if step > 75:
+#             #     import pdb; pdb.set_trace()
+#             # determine allocentric direction and take a step
+#             #   assume turning speed is infinite
+#             if std > 0:
+#                 noise = self.rng.normal(scale=std)
+#             else:
+#                 noise = 0
+#             # NOTE:
+#             # This walk is modeled on a two-step process:
+#             # 1) decide on a direction to face based on an amount of time dt
+#             # 2) move forward in that direction instantaneously
+#             # This is not the same as moving forward while turning;
+#             #   the only reason it is implemented this way is so that the 
+#             #   function can be resused across models. It is TEMPORARY.
+#             theta = self.get_direction(dt) + noise
+#             mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
+#             self.percep_model.focal_loc += mv_vec
+#             self.percep_model.focal_angle = \
+#                 self.percep_model.targets.convert_angles(theta)
+#             # append location to walk list
+#             walk.append(self.percep_model.focal_loc.copy())
+#         # done. save to all_walks
+#         all_walks.append(list(walk))
+
+#     # Restore focal location and angle
+#     self.percep_model.focal_loc = orig_loc
+#     self.percep_model.focal_angle = orig_angle
+
+#     # concatenate walks
+#     walks = sum(all_walks, [])
+
+#     # Convert list to 2xN array: row of x-vals then row of y-vals
+#     walks = np.column_stack(walks)
+#     # Detect good bin edges
+#     dim_min = np.floor(walks.min(axis=1))
+#     dim_max = np.ceil(walks.max(axis=1))
+#     n_xedges = round((dim_max[0]-dim_min[0])/0.25)
+#     n_yedges = round((dim_max[1]-dim_min[1])/0.25)
+#     xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
+#     yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
+
+#     H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:], 
+#                                         bins=(xedges,yedges))
+#     H = H.T # for plotting
+
+#     fig = plt.figure(figsize=(5,5))
+
+#     # Display actual historgram
+#     # ax = fig.add_subplot(title='Random walker path histogram',
+#     #                      aspect='equal')
+#     # X, Y = np.meshgrid(xedges, yedges)
+#     # ax.pcolormesh(X, Y, H)
+#     # self.percep_model.targets.plot_targets_to_axis(ax)
+
+#     # Display with interpolation
+#     ax = fig.add_subplot(title='Random walker path histogram, interpolated',
+#                             aspect='equal')
+#     im = NonUniformImage(ax, interpolation='bilinear')
+#     xcenters = (xedges[:-1] + xedges[1:]) / 2
+#     ycenters = (yedges[:-1] + yedges[1:]) / 2
+#     im.set_data(xcenters, ycenters, H)
+#     ax.add_image(im)
+#     self.percep_model.targets.plot_targets_to_axis(ax)
+#     ax.set_xlim(dim_min[0],dim_max[0])
+#     ax.set_ylim(dim_min[1],dim_max[1])
+
+#     # Plot individual walks
+#     if plot_tracks:
+#         for walk in all_walks:
+#             walk = np.column_stack(walk)
+#             ax.plot(walk[0,:], walk[1,:], 'k')
+#     plt.show()
+
+
+
+class IsingExtModel:
+    '''
+    This only extends Ising slightly. The primary novelty is the underlying 
+    perception model that allows for non-delta function targets that can 
+    occlude each other, and the addition of a weighting function for the Ising
+    interactions based on distance to target.
+
+    The underlying assumpion is that there is a two-step process:
+    1) Perception of targets based on location (angle and dist), and geometry
+    2) Decision making based on discrete perceived targets via Ising model
+
+    One could try to combine these into a single-step, continuous Ising model, with 
+    the distance weighting doing the work of distinguishing between one close locust
+    and two adjacent locusts that are farther away (angular size alone is 
+    insufficient for this task). However, it would mean that a partially occluded 
+    locust would be seen as being located at its visible extent rather than its 
+    center. Hard to know if this is better or worse.
+    '''
+
+    def __init__(self, percep_model=None, T=0.5, theta_mesh=2000, *args, **kwargs):
         '''From a PerceptionModel with its Targets object, establishes a model 
-        for chosing direction based on method for finding a consensus direction.
-        Superclass for specific decision models.
+        for chosing direction based on discrete Ising. Relies on get_target_signals 
+        from the PerceptionModel to obtain perceived target angles and signal strength.
+        TODO: continuous Ising
         
         Parameters
         ----------
@@ -648,7 +862,136 @@ class DirectionModel:
             the geometry of the scenario. If none is provided, a default one 
             will be created. The PerceptionModel can be updated to obtain 
             consensus directions for different layouts or focal locations/angles.
+        T : float
+            Temperature for Ising model
+        theta_mesh : int
+            the number of equally spaced mesh points on [-pi,pi) that will be 
+            used to evaluate target location for the purposes of blocking.
+        Optional Arguments for trunccosine kernel
+            - left=-np.pi : left cutoff
+            - right=np.pi : right cutoff
+            - nu=1 : warping
         '''
+
+        self.T = T
+        self.theta_mesh = theta_mesh
+        self.weighting = self.trunccosine(*args, **kwargs)
+        self.weighting_name = "Truncated Cosine"
+
+        if percep_model is None:
+            self.percep_model = PerceptionModel()
+        else:
+            assert isinstance(percep_model,PerceptionModel),\
+            "percep_model must be a PerceptionModel object."
+            self.percep_model = percep_model
+
+        # Random number generator for certain processes within the class;
+        #   Can seed here for reproducability.
+        self.rng = np.random.default_rng()
+
+
+    def trunccosine(self, left=-np.pi, right=np.pi, nu=1):
+        '''Function generator that returns a cos(pi*(x/pi)^nu) with support on the
+        interval [left,right]. Outside this interval, the function returns zero.
+        
+        The idea here is to rescale theta to be between 0 and 1, then raise to the
+        power nu to control the steepness of the function, then scale back to
+        between -pi and pi and take the cosine. Truncation allows for a blindspot.'''
+
+        def trunccos(x):
+            result = np.zeros_like(x)
+            result[(x>=left) & (x<=right)] = np.cos(
+                np.pi*(x[(x>=left) & (x<=right)]/np.pi)**nu)
+            return result
+
+        return trunccos
+
+
+    def dtheta_dt(self):
+        '''Get the time derivative of theta according to the Ising model.
+
+        Returns
+        -------
+        dtheta_dt : float
+            time derivative of theta according to the Ising model
+        '''
+
+        angles, signals = self.percep_model.get_target_signals(self.theta_mesh)
+        if angles.size == 0:
+            return 0.0
+        # theta_i in formula is allocentric; angles plus focal angle gives 
+        #   allocentric angles, which cancels with subtractino with focal angle
+        #   in forumula.
+        return np.sum(angles/(1+np.exp(
+            -2*angles.size*signals*self.weighting(angles)/self.T)
+            ))/angles.size
+
+
+    def get_direction(self, dt):
+        '''Integrate the Ising model for one time step dt to get new direction.
+        
+        Parameters
+        ----------
+        dt : float
+            time step for integration of torque model.
+        '''
+        
+        return solve_ivp(self.dtheta_dt, [0, dt], 
+                         [self.percep_model.focal_angle]).y[0,-1]
+
+
+
+class AndyDirectionModel:
+
+    def __init__(self, percep_model=None, consensus_type='additive', res_num=2000,
+                 weighting_name='truncnorm', *args, **kwargs):
+        '''From a PerceptionModel with its Targets object, establishes a model 
+        for chosing direction based on a weighting of a binary signal via convolution 
+        and a method for finding a consensus direction from the result.
+
+        This model relies on get_binary_signal from the PerceptionModel, which
+        creates an egocentric binary signal based on target locations and
+        focal angle.
+        
+        Parameters
+        ----------
+        percep_model : PerceptionModel
+            A PerceptionModel object (with its Targets object) that establishes 
+            the geometry of the scenario. If none is provided, a default one 
+            will be created. The PerceptionModel can be updated to obtain 
+            consensus directions for different layouts or focal locations/angles.
+        consensus_type : {'additive', 'argmax'}
+            Method that will be used to find a consensus direction after 
+            convoluting the perception signal with the weighting.
+        res_num : int
+            the number of equally spaced mesh points on [-pi,pi) to evaluate the
+            hamiltonian at. More increases accuracy at the expense of speed.
+        weighting_name : {'truncnorm'}
+            Weighting for the signal convolution. The necessary parameters for 
+            this weighting should be provided after this key word argument. The 
+            following is a list of parameterizations.
+            - 'truncnorm'
+                - mu=0 : mean
+                - sigma=np.pi/8 : standard deviation
+                - left=-np.pi : left cutoff
+                - right=np.pi : right cutoff
+            - 'trunccosine'
+                - beta=2 : stretch
+                - phi=0 : phase
+                - left=-np.pi/2 : left cutoff
+                - right=np.pi/2 : right cutoff
+        '''
+
+        self.consensus_type = consensus_type
+        if weighting_name == 'truncnorm':
+            self.weighting = self.truncnorm(*args, **kwargs)
+            self.weighting_name = weighting_name
+        elif weighting_name == 'trunccosine':
+            self.weighting = self.trunccosine(*args, **kwargs)
+            self.weighting_name = weighting_name
+        else:
+            raise NotImplementedError("Unknown weighting kernel.")
+        
         if percep_model is None:
             self.percep_model = PerceptionModel()
         else:
@@ -695,365 +1038,6 @@ class DirectionModel:
     ############################################################################
 
 
-    def get_direction(self, dt):
-        '''Must be implemented in subclass!'''
-        raise NotImplementedError("get_direction must be implemented in subclass")
-    
-
-    def dtheta_dt(self):
-        '''Must be implemented in subclass!'''
-        raise NotImplementedError("dtheta_dt must be implemented in subclass")
-
-
-    def plot_weighting(self, wb_plot=False):
-        '''Plot the currently selected weighting function.
-        
-        Set wb_plot to True if plotting in a Jupyter notebook
-        '''
-
-        if wb_plot:
-            plt.figure(figsize=(6.5,2))
-        else:
-            plt.figure(figsize=(8,5))
-        theta_mesh = np.linspace(-np.pi, np.pi, 2001)
-        plt.plot(theta_mesh,self.weighting(theta_mesh))
-        plt.title(self.weighting_name)
-        plt.show()
-
-
-    def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,20), num_y=21, 
-                            return_theta=False, wb_plot=False):
-        '''Create a mesh of starting locations and, for each point in the mesh, 
-        get the allocentric direction of travel as a scalar theta. Plots the 
-        result as a vector field of unit vectors and optionally returns a scalar 
-        field of the values theta within [-pi,pi].
-
-        Set wb_plot to True if plotting in a Jupyber notebook
-
-        Parameters
-        ----------
-        xlim : (xmin,xmax) tuple of floats
-            x limits for mesh, inclusive
-        num_x : number of steps in x direction
-        ylim : (ymin,ymax) tuple of floats
-            y limits for mesh, inclusive
-        num_y : number of steps in y direction
-        return_theta : bool
-            whether or not to return a theta scalar field
-        '''
-
-        current_focal_loc = self.percep_model.focal_loc.copy()
-
-        xmesh = np.linspace(xlim[0], xlim[1], num_x)
-        ymesh = np.linspace(ylim[0], ylim[1], num_y)
-
-        X, Y = np.meshgrid(xmesh, ymesh)
-        theta_mesh = np.zeros(X.shape)
-        U = np.zeros_like(theta_mesh)
-        V = np.zeros_like(theta_mesh)
-
-        for ii in range(num_x):
-            for jj in range(num_y):
-                this_x = X[jj,ii]
-                this_y = Y[jj,ii]
-                self.percep_model.focal_loc = np.array([this_x,this_y])
-                # TODO:
-                # Better would probably be to calculaute the steady-state direction.
-                theta_mesh[jj,ii] = self.dtheta_dt()
-                U[jj,ii] = np.cos(theta_mesh[jj,ii])
-                V[jj,ii] = np.sin(theta_mesh[jj,ii])
-
-        self.percep_model.focal_loc = current_focal_loc
-        if wb_plot:
-            plt.figure(figsize=(6.5,4))
-        else:
-            plt.figure(figsize=(5.5,5))
-        ax = plt.subplot()
-
-        # Plot targets
-        self.percep_model.targets.plot_targets_to_axis(ax)
-        # Plot arrows
-        ax.quiver(X, Y, U, V, angles='xy')
-        ax.set_title("Direction Model")
-        ax.set_aspect('equal')
-        plt.show()
-        if return_theta:
-            return theta_mesh
-        
-
-    def plot_walker(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
-                    start_loc=None, start_angle=None, plot_tracks=False):
-        '''Plot a walker that starts at a specified location looking in a 
-        specified angle (defaults to the focal_loc and focal_angle in attached 
-        PerceptionModel) and moves in the direction given by the current 
-        direction model with a specified step size and angular Gaussian noise 
-        with standard deviation as specified. Repeat for a number of 
-        repetitions and plot a heat map of these walks in 2D space.
-
-        The walker stops whenever it is detected to be overlapping a target or 
-        after max_steps.
-
-        Set wb_plot to True if plotting in a Jupyter notebook
-
-        Parameters
-        ----------
-        dt : float
-            Time step for the walk
-        v : float
-            Speed of the walker, assumed constant
-        std : float
-            Standard deviation of angular Gaussian noise with mean zero.
-            If zero (default), run without any angular noise.
-        repetitions : int
-            Number of walks to perform and aggregate
-        max_steps : int
-            Maximum number of steps for each walker
-        start_loc : (x,y) coordinates, optional
-            Starting location of the walk, defaults to focal_loc in the attached 
-            PerceptionModel
-        start_angle : float
-            Starting direction that the walker is facing. Defaults to 
-            focal_angle in the attached PerceptionModel
-        plot_tracks : bool
-            Whether or not to overlay the walker trajectories
-        '''
-        
-        if start_loc is None:
-            start_loc = self.percep_model.focal_loc.copy()
-        else:
-            start_loc = np.array(start_loc, dtype=float)
-        if start_angle is None:
-            start_angle = self.percep_model.focal_angle
-        orig_loc = self.percep_model.focal_loc.copy()
-        orig_angle = self.percep_model.focal_angle
-
-        all_walks = []
-
-        for n in range(repetitions):
-            self.percep_model.focal_loc = start_loc.copy()
-            self.percep_model.focal_angle = start_angle
-            walk = [start_loc.copy()]
-            for step in range(max_steps):
-                # check for target overlap
-                if np.any(self.percep_model.targets.check_target_overlap(
-                          self.percep_model.focal_loc)):
-                    break
-                elif self.percep_model.targets.geom_name is None and \
-                np.any(np.linalg.norm(
-                       self.percep_model.focal_loc-self.percep_model.targets.locs,
-                       axis=1)<v*dt):
-                    break
-                # if step > 75:
-                #     import pdb; pdb.set_trace()
-                # determine allocentric direction and take a step
-                #   assume turning speed is infinite
-                if std > 0:
-                    noise = self.rng.normal(scale=std)
-                else:
-                    noise = 0
-                # NOTE:
-                # This walk is modeled on a two-step process:
-                # 1) decide on a direction to face based on an amount of time dt
-                # 2) move forward in that direction instantaneously
-                # This is not the same as moving forward while turning;
-                #   the only reason it is implemented this way is so that the 
-                #   function can be resused across models. It is TEMPORARY.
-                theta = self.get_direction(dt) + noise
-                mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
-                self.percep_model.focal_loc += mv_vec
-                self.percep_model.focal_angle = \
-                    self.percep_model.targets.convert_angles(theta)
-                # append location to walk list
-                walk.append(self.percep_model.focal_loc.copy())
-            # done. save to all_walks
-            all_walks.append(list(walk))
-
-        # Restore focal location and angle
-        self.percep_model.focal_loc = orig_loc
-        self.percep_model.focal_angle = orig_angle
-
-        # concatenate walks
-        walks = sum(all_walks, [])
-
-        # Convert list to 2xN array: row of x-vals then row of y-vals
-        walks = np.column_stack(walks)
-        # Detect good bin edges
-        dim_min = np.floor(walks.min(axis=1))
-        dim_max = np.ceil(walks.max(axis=1))
-        n_xedges = round((dim_max[0]-dim_min[0])/0.25)
-        n_yedges = round((dim_max[1]-dim_min[1])/0.25)
-        xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
-        yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
-
-        H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:], 
-                                           bins=(xedges,yedges))
-        H = H.T # for plotting
-
-        fig = plt.figure(figsize=(5,5))
-
-        # Display actual historgram
-        # ax = fig.add_subplot(title='Random walker path histogram',
-        #                      aspect='equal')
-        # X, Y = np.meshgrid(xedges, yedges)
-        # ax.pcolormesh(X, Y, H)
-        # self.percep_model.targets.plot_targets_to_axis(ax)
-
-        # Display with interpolation
-        ax = fig.add_subplot(title='Random walker path histogram, interpolated',
-                             aspect='equal')
-        im = NonUniformImage(ax, interpolation='bilinear')
-        xcenters = (xedges[:-1] + xedges[1:]) / 2
-        ycenters = (yedges[:-1] + yedges[1:]) / 2
-        im.set_data(xcenters, ycenters, H)
-        ax.add_image(im)
-        self.percep_model.targets.plot_targets_to_axis(ax)
-        ax.set_xlim(dim_min[0],dim_max[0])
-        ax.set_ylim(dim_min[1],dim_max[1])
-
-        # Plot individual walks
-        if plot_tracks:
-            for walk in all_walks:
-                walk = np.column_stack(walk)
-                ax.plot(walk[0,:], walk[1,:], 'k')
-        plt.show()
-
-
-
-class IsingExtModel(DirectionModel):
-    '''
-    This only extends Ising slightly. The primary novelty is the underlying 
-    perception model that allows for non-delta function targets that can 
-    occlude each other, and the addition of a weighting function for the Ising
-    interactions based on distance to target.
-
-    The underlying assumpion is that there is a two-step process:
-    1) Perception of targets based on location (angle and dist), and geometry
-    2) Decision making based on discrete perceived targets via Ising model
-
-    One could try to combine these into a single-step, continuous Ising model, with 
-    the distance weighting doing the work of distinguishing between one close locust
-    and two adjacent locusts that are farther away (angular size alone is 
-    insufficient for this task). However, it would mean that a partially occluded 
-    locust would be seen as being located at its visible extent rather than its 
-    center. Hard to know if this is better or worse.
-    '''
-
-    def __init__(self, percep_model=None, T=0.5, theta_mesh=2000, *args, **kwargs):
-        '''From a PerceptionModel with its Targets object, establishes a model 
-        for chosing direction based on discrete Ising.
-        TODO: continuous Ising
-        
-        Parameters
-        ----------
-        percep_model : PerceptionModel
-            A PerceptionModel object (with its Targets object) that establishes 
-            the geometry of the scenario. If none is provided, a default one 
-            will be created. The PerceptionModel can be updated to obtain 
-            consensus directions for different layouts or focal locations/angles.
-        T : float
-            Temperature for Ising model
-        theta_mesh : int
-            the number of equally spaced mesh points on [-pi,pi) that will be 
-            used to evaluate target location for the purposes of blocking.
-        Optional Arguments for trunccosine kernel
-            - left=-np.pi : left cutoff
-            - right=np.pi : right cutoff
-            - nu=1 : warping
-        '''
-
-        super().__init__(percep_model)
-        self.T = T
-        self.theta_mesh = theta_mesh
-        self.weighting = self.trunccosine(*args, **kwargs)
-        self.weighting_name = "Truncated Cosine"
-
-        super().__init__(percep_model)
-
-
-    def dtheta_dt(self):
-        '''Get the time derivative of theta according to the Ising model.
-
-        Returns
-        -------
-        dtheta_dt : float
-            time derivative of theta according to the Ising model
-        '''
-
-        angles, signals = self.percep_model.get_target_signals(self.theta_mesh)
-        if angles.size == 0:
-            return 0.0
-        # theta_i in formula is allocentric; angles plus focal angle gives 
-        #   allocentric angles, which cancels with subtractino with focal angle
-        #   in forumula.
-        return np.sum(angles/(1+np.exp(
-            -2*angles.size*signals*self.weighting(angles)/self.T)
-            ))/angles.size
-
-
-    def get_direction(self, dt):
-        '''Integrate the Ising model for one time step dt to get new direction.
-        
-        Parameters
-        ----------
-        dt : float
-            time step for integration of torque model.
-        '''
-        
-        return solve_ivp(self.dtheta_dt, [0, dt], 
-                         [self.percep_model.focal_angle]).y[0,-1]
-
-
-
-class AndyDirectionModel(DirectionModel):
-
-    def __init__(self, percep_model=None, consensus_type='additive', res_num=2000,
-                 weighting_name='truncnorm', *args, **kwargs):
-        '''From a PerceptionModel with its Targets object, establishes a model 
-        for chosing direction based on a weighting of the signal via convolution 
-        and a method for finding a consensus direction from the result.
-        
-        Parameters
-        ----------
-        percep_model : PerceptionModel
-            A PerceptionModel object (with its Targets object) that establishes 
-            the geometry of the scenario. If none is provided, a default one 
-            will be created. The PerceptionModel can be updated to obtain 
-            consensus directions for different layouts or focal locations/angles.
-        consensus_type : {'additive', 'argmax'}
-            Method that will be used to find a consensus direction after 
-            convoluting the perception signal with the weighting.
-        res_num : int
-            the number of equally spaced mesh points on [-pi,pi) to evaluate the
-            hamiltonian at. More increases accuracy at the expense of speed.
-        weighting_name : {'truncnorm'}
-            Weighting for the signal convolution. The necessary parameters for 
-            this weighting should be provided after this key word argument. The 
-            following is a list of parameterizations.
-            - 'truncnorm'
-                - mu=0 : mean
-                - sigma=np.pi/8 : standard deviation
-                - left=-np.pi : left cutoff
-                - right=np.pi : right cutoff
-            - 'trunccosine'
-                - beta=2 : stretch
-                - phi=0 : phase
-                - left=-np.pi/2 : left cutoff
-                - right=np.pi/2 : right cutoff
-        '''
-
-        self.consensus_type = consensus_type
-        if weighting_name == 'truncnorm':
-            self.weighting = self.truncnorm(*args, **kwargs)
-            self.weighting_name = weighting_name
-        elif weighting_name == 'trunccosine':
-            self.weighting = self.trunccosine(*args, **kwargs)
-            self.weighting_name = weighting_name
-        else:
-            raise NotImplementedError("Unknown weighting kernel.")
-        
-        super().__init__(percep_model)
-
-
     def hamiltonian(self, theta_mesh):
         '''Convolution of the weighting kernel with the signal over [-pi,pi]. 
         Since the signal is egocentric, the hamiltonian will be as well.
@@ -1077,12 +1061,6 @@ class AndyDirectionModel(DirectionModel):
         return np.fft.fftshift(np.fft.irfft( 
                                 np.fft.rfft(kernel)*np.fft.rfft(signal),
                                 len(signal)))
-
-
-    def dtheta_dt(self):
-        '''This is an updating model, so dtheta_dt is not used. Just return the 
-        consensus direction.'''
-        return self.get_direction()
 
 
     def get_direction(self, dt=None, return_H=False):
@@ -1268,3 +1246,212 @@ class AndyDirectionModel(DirectionModel):
         fig.tight_layout()
         plt.show()
 
+
+    def plot_weighting(self, wb_plot=False):
+        '''Plot the currently selected weighting function.
+        
+        Set wb_plot to True if plotting in a Jupyter notebook
+        '''
+
+        if wb_plot:
+            plt.figure(figsize=(6.5,2))
+        else:
+            plt.figure(figsize=(8,5))
+        theta_mesh = np.linspace(-np.pi, np.pi, 2001)
+        plt.plot(theta_mesh,self.weighting(theta_mesh))
+        plt.title(self.weighting_name)
+        plt.show()
+
+
+    def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,20), num_y=21, 
+                            return_theta=False, wb_plot=False):
+        '''Create a mesh of starting locations and, for each point in the mesh, 
+        get the allocentric direction of travel as a scalar theta. Plots the 
+        result as a vector field of unit vectors and optionally returns a scalar 
+        field of the values theta within [-pi,pi].
+
+        Set wb_plot to True if plotting in a Jupyber notebook
+
+        Parameters
+        ----------
+        xlim : (xmin,xmax) tuple of floats
+            x limits for mesh, inclusive
+        num_x : number of steps in x direction
+        ylim : (ymin,ymax) tuple of floats
+            y limits for mesh, inclusive
+        num_y : number of steps in y direction
+        return_theta : bool
+            whether or not to return a theta scalar field
+        '''
+
+        current_focal_loc = self.percep_model.focal_loc.copy()
+
+        xmesh = np.linspace(xlim[0], xlim[1], num_x)
+        ymesh = np.linspace(ylim[0], ylim[1], num_y)
+
+        X, Y = np.meshgrid(xmesh, ymesh)
+        theta_mesh = np.zeros(X.shape)
+        U = np.zeros_like(theta_mesh)
+        V = np.zeros_like(theta_mesh)
+
+        for ii in range(num_x):
+            for jj in range(num_y):
+                this_x = X[jj,ii]
+                this_y = Y[jj,ii]
+                self.percep_model.focal_loc = np.array([this_x,this_y])
+                # TODO:
+                # Better would probably be to calculaute the steady-state direction.
+                theta_mesh[jj,ii] = self.get_direction()
+                U[jj,ii] = np.cos(theta_mesh[jj,ii])
+                V[jj,ii] = np.sin(theta_mesh[jj,ii])
+
+        self.percep_model.focal_loc = current_focal_loc
+        if wb_plot:
+            plt.figure(figsize=(6.5,4))
+        else:
+            plt.figure(figsize=(5.5,5))
+        ax = plt.subplot()
+
+        # Plot targets
+        self.percep_model.targets.plot_targets_to_axis(ax)
+        # Plot arrows
+        ax.quiver(X, Y, U, V, angles='xy')
+        ax.set_title("Direction Model")
+        ax.set_aspect('equal')
+        plt.show()
+        if return_theta:
+            return theta_mesh
+
+
+    def plot_walker(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
+                    start_loc=None, start_angle=None, plot_tracks=False):
+        '''Plot a walker that starts at a specified location looking in a 
+        specified angle (defaults to the focal_loc and focal_angle in attached 
+        PerceptionModel) and moves in the direction given by the current 
+        direction model with a specified step size and angular Gaussian noise 
+        with standard deviation as specified. Repeat for a number of 
+        repetitions and plot a heat map of these walks in 2D space.
+
+        The walker stops whenever it is detected to be overlapping a target or 
+        after max_steps.
+
+        Set wb_plot to True if plotting in a Jupyter notebook
+
+        Parameters
+        ----------
+        dt : float
+            Time step for the walk
+        v : float
+            Speed of the walker, assumed constant
+        std : float
+            Standard deviation of angular Gaussian noise with mean zero.
+            If zero (default), run without any angular noise.
+        repetitions : int
+            Number of walks to perform and aggregate
+        max_steps : int
+            Maximum number of steps for each walker
+        start_loc : (x,y) coordinates, optional
+            Starting location of the walk, defaults to focal_loc in the attached 
+            PerceptionModel
+        start_angle : float
+            Starting direction that the walker is facing. Defaults to 
+            focal_angle in the attached PerceptionModel
+        plot_tracks : bool
+            Whether or not to overlay the walker trajectories
+        '''
+        
+        if start_loc is None:
+            start_loc = self.percep_model.focal_loc.copy()
+        else:
+            start_loc = np.array(start_loc, dtype=float)
+        if start_angle is None:
+            start_angle = self.percep_model.focal_angle
+        orig_loc = self.percep_model.focal_loc.copy()
+        orig_angle = self.percep_model.focal_angle
+
+        all_walks = []
+
+        for n in range(repetitions):
+            self.percep_model.focal_loc = start_loc.copy()
+            self.percep_model.focal_angle = start_angle
+            walk = [start_loc.copy()]
+            for step in range(max_steps):
+                # check for target overlap
+                if np.any(self.percep_model.targets.check_target_overlap(
+                          self.percep_model.focal_loc)):
+                    break
+                elif self.percep_model.targets.geom_name is None and \
+                np.any(np.linalg.norm(
+                       self.percep_model.focal_loc-self.percep_model.targets.locs,
+                       axis=1)<v*dt):
+                    break
+                # if step > 75:
+                #     import pdb; pdb.set_trace()
+                # determine allocentric direction and take a step
+                #   assume turning speed is infinite
+                if std > 0:
+                    noise = self.rng.normal(scale=std)
+                else:
+                    noise = 0
+                # NOTE:
+                # This walk is modeled on a two-step process:
+                # 1) decide on a direction to face based on an amount of time dt
+                # 2) move forward in that direction instantaneously
+                theta = self.get_direction(dt) + noise
+                mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
+                self.percep_model.focal_loc += mv_vec
+                self.percep_model.focal_angle = \
+                    self.percep_model.targets.convert_angles(theta)
+                # append location to walk list
+                walk.append(self.percep_model.focal_loc.copy())
+            # done. save to all_walks
+            all_walks.append(list(walk))
+
+        # Restore focal location and angle
+        self.percep_model.focal_loc = orig_loc
+        self.percep_model.focal_angle = orig_angle
+
+        # concatenate walks
+        walks = sum(all_walks, [])
+
+        # Convert list to 2xN array: row of x-vals then row of y-vals
+        walks = np.column_stack(walks)
+        # Detect good bin edges
+        dim_min = np.floor(walks.min(axis=1))
+        dim_max = np.ceil(walks.max(axis=1))
+        n_xedges = round((dim_max[0]-dim_min[0])/0.25)
+        n_yedges = round((dim_max[1]-dim_min[1])/0.25)
+        xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
+        yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
+
+        H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:], 
+                                           bins=(xedges,yedges))
+        H = H.T # for plotting
+
+        fig = plt.figure(figsize=(5,5))
+
+        # Display actual historgram
+        # ax = fig.add_subplot(title='Random walker path histogram',
+        #                      aspect='equal')
+        # X, Y = np.meshgrid(xedges, yedges)
+        # ax.pcolormesh(X, Y, H)
+        # self.percep_model.targets.plot_targets_to_axis(ax)
+
+        # Display with interpolation
+        ax = fig.add_subplot(title='Random walker path histogram, interpolated',
+                             aspect='equal')
+        im = NonUniformImage(ax, interpolation='bilinear')
+        xcenters = (xedges[:-1] + xedges[1:]) / 2
+        ycenters = (yedges[:-1] + yedges[1:]) / 2
+        im.set_data(xcenters, ycenters, H)
+        ax.add_image(im)
+        self.percep_model.targets.plot_targets_to_axis(ax)
+        ax.set_xlim(dim_min[0],dim_max[0])
+        ax.set_ylim(dim_min[1],dim_max[1])
+
+        # Plot individual walks
+        if plot_tracks:
+            for walk in all_walks:
+                walk = np.column_stack(walk)
+                ax.plot(walk[0,:], walk[1,:], 'k')
+        plt.show()

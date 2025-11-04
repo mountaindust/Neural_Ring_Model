@@ -41,6 +41,9 @@ This can be interpreted directly as a torque model by interpreting $\Theta_{foc}
 s_i\hat{V}\cdot\hat{p}_i = J_{i,foc}.
 \]
 
+\subsection*{Signal strengths}
+This discrete version assumes that radial target locations are identified by a separate perception process. If signal strength does not vary with distance, then the underlying assumption is that all targets are delta functions. Avoiding this, the best choice for signal strength is probably some measure of the perceived angular width of the target. The problem of not being able to tell two overlapping locusts from one close locust is avoided by the prior target identification, and size scales with distance in the proper manner (closer yields larger numbers while staying bounded) and is also biological in the sense that visual size of the object IS the actual signal reaching the eye.
+
 \section*{Continuous version}
 An issue here is that since there are angles that don't have targets, you need this $\eta$ term in Gorbonos [41] to inhibit angles which don't have signal. Given that we are supposed to take $\eta N >> J$ and $N\rightarrow\infty$, maybe it isn't important, but it's hard to say.
 
