@@ -414,14 +414,14 @@ class PerceptionModel:
         return signal
 
 
-    def get_target_signals(self,theta_mesh=2000,full_signal=False):
+    def get_target_signals(self,theta_mesh=2000,norm=np.pi/8,full_signal=False):
         '''Returns the egocentric angular location of the center of each VISIBLE 
         target (closer targets that are not delta functions block ones behind) as 
         a length N array, and a visual signal for each that is either a scalar or 
         a binary array with support on the visible angular extents of the target.
         
         The scalar visual signal is computed as the integral of the visual signal 
-        normalized by 2pi.
+        normalized by norm.
         
         Uses a mesh of theta values to determine blocking, resulting in an 
         approximation of extents. This adds noise, but maybe the right kind of 
@@ -435,6 +435,10 @@ class PerceptionModel:
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
+        norm : float, default=np.pi/8
+            the normalization factor for the scalar visual signal. Default is 
+            chosen as some sort of approximation for how much visual space 
+            might be occupied by a target at reasonable decision-making distances.
         full_signal : bool
             if True, return the full signal for each target as a theta mesh, 
             otherwise return only the value of the signal for each target
@@ -472,7 +476,7 @@ class PerceptionModel:
             if full_signal:
                 return c_angles, signals
             else:
-                return c_angles, signals.sum(axis=1)/theta_mesh.size
+                return c_angles, 2*np.pi/theta_mesh.size*signals.sum(axis=1)/norm
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             # sort by distance
             arg_srt = dists.argsort()
@@ -498,7 +502,7 @@ class PerceptionModel:
             if full_signal:
                 return c_angles[vis], signals[vis,:]
             else:
-                return c_angles[vis], signals[vis,:].sum(axis=1)/theta_mesh.size
+                return c_angles[vis], 2*np.pi/theta_mesh.size*signals[vis,:].sum(axis=1)/norm
         else:
             raise NotImplementedError("Unknown target geometry name.")
 
@@ -849,7 +853,7 @@ class IsingExtModel:
     center. Hard to know if this is better or worse.
     '''
 
-    def __init__(self, percep_model=None, T=0.5, theta_mesh=2000, *args, **kwargs):
+    def __init__(self, percep_model=None, T=0.2, theta_mesh=2000, *args, **kwargs):
         '''From a PerceptionModel with its Targets object, establishes a model 
         for chosing direction based on discrete Ising. Relies on get_target_signals 
         from the PerceptionModel to obtain perceived target angles and signal strength.
@@ -907,8 +911,14 @@ class IsingExtModel:
         return trunccos
 
 
-    def dtheta_dt(self):
+    def dtheta_dt(self, t=None, theta=None):
         '''Get the time derivative of theta according to the Ising model.
+
+        Parameters
+        ----------
+        theta : float
+            current angle in allocentric coordinates. If None, uses the 
+            focal_angle from the attached PerceptionModel.
 
         Returns
         -------
@@ -919,13 +929,17 @@ class IsingExtModel:
         angles, signals = self.percep_model.get_target_signals(self.theta_mesh)
         if angles.size == 0:
             return 0.0
-        # theta_i in formula is allocentric; angles plus focal angle gives 
-        #   allocentric angles, which cancels with subtractino with focal angle
-        #   in forumula.
-        return np.sum(angles/(1+np.exp(
-            -2*angles.size*signals*self.weighting(angles)/self.T)
-            ))/angles.size
-
+        # The angles recieved above are egocentric.
+        if theta is None:
+            return np.sum(angles/(1+np.exp(
+                -2*angles.size*signals*self.weighting(angles)/self.T)
+                ))/angles.size
+        else:
+            return np.sum((angles+self.percep_model.focal_angle)/(1+np.exp(
+                -2*angles.size*signals*
+                self.weighting(angles+self.percep_model.focal_angle-theta)/self.T)
+                ))/angles.size - theta
+    
 
     def get_direction(self, dt):
         '''Integrate the Ising model for one time step dt to get new direction.
@@ -938,8 +952,99 @@ class IsingExtModel:
         
         return solve_ivp(self.dtheta_dt, [0, dt], 
                          [self.percep_model.focal_angle]).y[0,-1]
+    
 
+    def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,20), num_y=21, 
+                            return_theta=False, wb_plot=False):
+        '''Create a mesh of starting locations and, for each point in the mesh, 
+        get the steady-state direction of travel as a scalar theta. Then plot 
+        the result as a vector field of unit vectors.
+        
+        There may be multiple solutions, so do a brute-force search over a mesh 
+        of initial angles and record each final angle. If multiple final angles
+        are found (within a tolerance), pick one at random and color the vector
+        accordingly.
 
+        Set wb_plot to True if plotting in a Jupyter notebook
+
+        Parameters
+        ----------
+        xlim : (xmin,xmax) tuple of floats
+            x limits for mesh, inclusive
+        num_x : number of steps in x direction
+        ylim : (ymin,ymax) tuple of floats
+            y limits for mesh, inclusive
+        num_y : number of steps in y direction
+        return_theta : bool
+            if True, return the theta_mesh array of steady-state angles
+        '''
+
+        # save current focal location and angle
+        current_focal_loc = self.percep_model.focal_loc.copy()
+
+        # create mesh of focal locations
+        xmesh = np.linspace(xlim[0], xlim[1], num_x)
+        ymesh = np.linspace(ylim[0], ylim[1], num_y)
+
+        X, Y = np.meshgrid(xmesh, ymesh)
+        theta_mesh = np.zeros(X.shape)
+        U = np.zeros_like(theta_mesh)
+        V = np.zeros_like(theta_mesh)
+        # boolean mesh for multiple solutions
+        multi_sol = np.full_like(theta_mesh, False, dtype=bool)
+
+        # create mesh of initial angles, perturbed slightly to avoid
+        #   exact angles.
+        init_angles = np.linspace(-np.pi+0.001, np.pi-0.005, 20, endpoint=False)
+
+        
+        for ii in range(num_x):
+            for jj in range(num_y):
+                this_x = X[jj,ii]
+                this_y = Y[jj,ii]
+                self.percep_model.focal_loc = np.array([this_x,this_y])
+                final_thetas = []
+                for init_angle in init_angles:
+                    # find stable equilibria from this initial angle
+                    sol = solve_ivp(self.dtheta_dt, [0, 100], 
+                                    [init_angle], rtol=1e-6, atol=1e-6)
+                    final_thetas.append(sol.y[0,-1])
+                # filter final_thetas to unique values
+                if len(final_thetas) > 1:
+                    theta_mesh[jj,ii] = self.rng.choice(
+                        np.unique(np.round(final_thetas, decimals=3)))
+                    multi_sol[jj,ii] = True
+                else:
+                    theta_mesh[jj,ii] = final_thetas[0]
+                U[jj,ii] = np.cos(theta_mesh[jj,ii])
+                V[jj,ii] = np.sin(theta_mesh[jj,ii])
+                    
+
+        # restore current focal location and angle
+        self.percep_model.focal_loc = current_focal_loc
+
+        # plot the vector field
+        if wb_plot:
+            plt.figure(figsize=(6.5,4))
+        else:
+            plt.figure(figsize=(5.5,5))
+
+        ax = plt.subplot()
+        # Plot targets
+        self.percep_model.targets.plot_targets_to_axis(ax)
+        # Plot arrows, coloring multi-solution points differently
+        ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
+                    U[multi_sol==False], V[multi_sol==False], 
+                    angles='xy', color='blue', label='Single Solution')
+        ax.quiver(X[multi_sol], Y[multi_sol], 
+                    U[multi_sol], V[multi_sol], 
+                    angles='xy', color='red', label='Multiple Solutions')
+        ax.legend()
+        ax.set_title("Direction Model")
+        ax.set_aspect('equal')
+        plt.show()
+        if return_theta:
+            return theta_mesh
 
 class AndyDirectionModel:
 

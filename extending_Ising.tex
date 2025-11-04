@@ -21,7 +21,7 @@ Under the hood, we will assume a Hamiltonian of the form
 \[
 H = -\frac{k}{N}\sum_{i\neq j}J_{ij}\sigma_i\sigma_j
 \]
-where $\sigma_i$ is one of $N$ total spins in the system among $k$ groups (directions). This is exactly the same as the Gorbonos PNAS paper. However, we will choose a slightly different interaction kernel $J_{ij}$.
+where $\sigma_i$ is one of $N$ total spins in the system among $k$ groups (directions). This is exactly the same as the Gorbonos PNAS paper. However, we will choose a slightly different interaction kernel $J_{ij}$, where $\theta_{ij}$ is the angle between $\theta_i$ and $\theta_j$.
 \[
 J_{ij} = s_i\cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right)
 \]
@@ -36,13 +36,26 @@ where the dot product is shorthand notation for the cosine part of $J_{ij}$ and 
 \begin{equation}
 	\frac{d\Theta_{foc}}{dt} = \sum_{i=1}^{k}\theta_i\frac{dn_i}{dt} = \frac{1}{k}\sum_{i=1}^{k}\frac{\theta_i}{\left(1+\exp\left(-\frac{2ks_i\hat{V}\cdot\hat{p}_i}{T}\right)\right)} - \Theta_{foc}
 \end{equation}
-This can be interpreted directly as a torque model by interpreting $\Theta_{foc}$ as the current direction the locust is facing. Also, $\theta_i - \Theta_{foc}$ is then the angle of target $i$ relative to the current heading of the locust, $\theta_{i,foc}$ and using an expanded definition of dot product based on interaction kernel $J_{ij}$,
+This can be interpreted directly as a torque model by interpreting $\Theta_{foc}$ as the current direction the locust is facing. Also, $\theta_{i,foc}=\theta_i - \Theta_{foc}$ is then the angle of target $i$ relative to the current heading of the locust, and using an expanded definition of dot product based on interaction kernel $J_{ij}$,
 \[
 s_i\hat{V}\cdot\hat{p}_i = J_{i,foc}.
 \]
+So,
+\begin{equation}
+	\frac{d\Theta_{foc}}{dt} = \sum_{i=1}^{k}\theta_i\frac{dn_i}{dt} = \frac{1}{k}\sum_{i=1}^{k}\frac{\theta_{i,foc}}{\left(1+\exp\left(-\frac{2kJ_{i,foc}}{T}\right)\right)}.
+\end{equation}
+Steady-state angles of motion are given by
+\begin{equation}
+	\Theta^*_{foc} = \frac{1}{k}\sum_{i=1}^{k}\frac{\theta_{i}}{\left(1+\exp\left(-\frac{2kJ_{i,foc}}{T}\right)\right)},
+\end{equation}
+and there are likely multiple solutions to this equation.
 
 \subsection*{Signal strengths}
 This discrete version assumes that radial target locations are identified by a separate perception process. If signal strength does not vary with distance, then the underlying assumption is that all targets are delta functions. Avoiding this, the best choice for signal strength is probably some measure of the perceived angular width of the target. The problem of not being able to tell two overlapping locusts from one close locust is avoided by the prior target identification, and size scales with distance in the proper manner (closer yields larger numbers while staying bounded) and is also biological in the sense that visual size of the object IS the actual signal reaching the eye.
+
+Consider the special case of two identical targets that are equidistant and at the same visual angle from a focal locust (the standard setup in the Ising papers). With signal strength, these are delta functions and the $T$ parameter controls whether or not there is a hysteresis region (see PRXLife paper - hysteresis region means that there is tri-stability between the two targets and a consensus direction). With signal strength, as a locust travels down the middle compromise trajectory, all $s_i$ are equal but growing as the targets get closer. From the standpoint of delta function targets, this would translate to $T$ being a decreasing function of distance to targets, but with a strictly positive lower bound. I don't know if this is biologically interesting or not, but it suggests that if a locust is close to several targets but not too close to any of them, the addition of signal strength makes the decision-making stable earlier and may allow a locust to stochastically change its mind more easily.
+
+It does mean that we need to be careful with how signal is normalized in order to be able to make sense of $T$ though. It would be particularly convenient if it approximately corresponded to the PRXLife paper somehow, but ultimately it will need to be fit to data because it has to do with decision making as a function of proximity of targets located at a fixed angle from each other.
 
 \section*{Continuous version}
 An issue here is that since there are angles that don't have targets, you need this $\eta$ term in Gorbonos [41] to inhibit angles which don't have signal. Given that we are supposed to take $\eta N >> J$ and $N\rightarrow\infty$, maybe it isn't important, but it's hard to say.
