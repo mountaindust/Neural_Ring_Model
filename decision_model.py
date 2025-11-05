@@ -894,21 +894,81 @@ class IsingExtModel:
         self.rng = np.random.default_rng()
 
 
-    def trunccosine(self, left=-np.pi, right=np.pi, nu=1):
-        '''Function generator that returns a cos(pi*(x/pi)^nu) with support on the
-        interval [left,right]. Outside this interval, the function returns zero.
+    def trunccosine(self, left_off=-np.pi+0.1, left_on=-np.pi+0.5, 
+                    right_on=np.pi-0.5, right_off=np.pi-0.1, nu=1):
+        r'''Function generator that returns cos(pi*(x/pi)^nu) multipled by a smooth 
+        cutoff function. On the interval left_on to right_on, the function is
+        cos(pi*(x/pi)^nu). Outside of left_off to right_off, the function is 0.
+        Between left_off and left_on, the function ramps up smoothly from 0 in a 
+        way that is Cinf.
+        
+        Let \eta(t) be the standard bump function defined by:
+        .. math::
+
+            \eta(t) = 
+            \begin{cases}
+                \exp\left( -\frac{1}{t} \right) & \text{if } t > 0, \\
+                0 & \text{if } t \leq 0.
+            \end{cases}
+
+        A smooth transition from 0 to 1 can be defined by:
+        .. math::
+
+            s(t) = \frac{\eta(t)}{\eta(t) + \eta(1 - t)}
+
+        Then define the smooth cutoff function \psi(x) by:
+        .. math::
+
+            \psi(x) = s\left( \frac{x - a_2}{a_1 - a_2} \right) \cdot
+                      s\left( \frac{b_1 - x}{b_2 - b_1} \right)
+
+        where :math:`a_2 < a_1 < 0` are the outer and inner cutoff points on the 
+        left, and :math:`0 < b_1 < b_2` are the inner and outer cutoff points on 
+        the right. Then the truncated cosine function is then given by multiplying.
         
         The idea here is to rescale theta to be between 0 and 1, then raise to the
         power nu to control the steepness of the function, then scale back to
         between -pi and pi and take the cosine. Truncation allows for a blindspot.'''
 
-        def trunccos(x):
-            result = np.zeros_like(x)
-            result[(x>=left) & (x<=right)] = np.cos(
-                np.pi*(x[(x>=left) & (x<=right)]/np.pi)**nu)
+        def bump(t):
+            result = np.zeros_like(t)
+            result[t>0] = np.exp(-1/t[t>0])
             return result
+        
+        def smoothstep(x):
+            return bump(x)/(bump(x)+bump(1-x))
+        
+        def cutoff(x, left_off, left_on, right_on, right_off):
+            return smoothstep(
+                (x - left_off)/(left_on - left_off) ) * smoothstep(
+                (right_off - x)/(right_off - right_on) )
+
+        def trunccos(x):
+            return cutoff(x, left_off, left_on, right_on, right_off)*np.cos(np.pi*(x/np.pi)**nu)
 
         return trunccos
+    
+
+    def plot_trunccosine(self, wb_plot=False):
+        '''Plot the truncated cosine weighting function over [-pi,pi].
+        
+        Set wb_plot to True if plotting in a Jupyter notebook
+        '''
+
+        xmesh = np.linspace(-np.pi, np.pi, 1000)
+        ymesh = self.weighting(xmesh)
+
+        if wb_plot:
+            plt.figure(figsize=(6.5,3.25))
+        else:
+            plt.figure(figsize=(8,4))
+        plt.plot(xmesh, ymesh)
+        plt.title('Truncated Cosine Weighting Function')
+        plt.xlabel('Angle (radians)')
+        plt.ylabel('Weighting')
+        plt.ylim(-1.1,1.1)
+        plt.grid()
+        plt.show()
 
 
     def dtheta_dt(self, t=None, theta=None):
@@ -996,93 +1056,55 @@ class IsingExtModel:
         # create mesh of initial angles, perturbed slightly to avoid
         #   exact angles.
         init_angles = np.linspace(-np.pi+0.03, np.pi-0.05, 10, endpoint=False)
-
-        # debugging
-        self.percep_model.focal_loc = np.array([19,5])
-        theta_mesh = np.linspace(-np.pi, np.pi, 1000, endpoint=False)
-        dtheta1 = []
-        for theta0 in theta_mesh:
-            dtheta1.append(self.dtheta_dt(0,theta0))
-        plt.figure()
-        plt.plot(theta_mesh,dtheta1)
-        # plot x and y axes lines
-        plt.axhline(0, color='k', linestyle='--')
-        plt.axvline(0, color='k', linestyle='--')
-        plt.show()
-
-        self.percep_model.focal_loc = np.array([21,5])
-        dtheta2 = []
-        for theta0 in theta_mesh:
-            dtheta2.append(self.dtheta_dt(0,theta0))
-        plt.figure()
-        plt.plot(theta_mesh,dtheta2)
-        # plot x and y axes lines
-        plt.axhline(0, color='k', linestyle='--')
-        plt.axvline(0, color='k', linestyle='--')
-        plt.show()
-        # solve_ivp(self.dtheta_dt, [0, 10], [-np.pi+0.001], rtol=1e-6, atol=1e-6)
-        ##################
-
-        # I THINK what is going on here is that a target located directly behind
-        #   the locust is creating a discontinuity in the dtheta_dt function, which is
-        #   messing up the solve_ivp function. This is based on a decision whether to
-        #   turn right or left toward the target, and at exactly behind, the decision
-        #   flips. Need to find a way to smooth this out.
-
-        # This could actually be fixed with truncated cosine, by adding a blind spot
-        #   directly behind the locust. But the current implementation of truncated cosine
-        #   is not smooth - it goes to zero abruptly at the cutoff angles.
-        #   Need to implement a smooth cutoff.
         
-        # for ii in range(num_x):
-        #     for jj in range(num_y):
-        #         # this is getting stuck at (21,5) with the first theta value
-        #         print("Processing point ({},{})".format(ii,jj))
-        #         this_x = X[jj,ii]
-        #         this_y = Y[jj,ii]
-        #         self.percep_model.focal_loc = np.array([this_x,this_y])
-        #         final_thetas = []
-        #         for init_angle in init_angles:
-        #             # find stable equilibria from this initial angle
-        #             sol = solve_ivp(self.dtheta_dt, [0, 10], 
-        #                             [init_angle], rtol=1e-6, atol=1e-6)
-        #             final_thetas.append(sol.y[0,-1])
-        #         # filter final_thetas to unique values
-        #         if len(final_thetas) > 1:
-        #             theta_mesh[jj,ii] = self.rng.choice(
-        #                 np.unique(np.round(final_thetas, decimals=3)))
-        #             multi_sol[jj,ii] = True
-        #         else:
-        #             theta_mesh[jj,ii] = final_thetas[0]
-        #         U[jj,ii] = np.cos(theta_mesh[jj,ii])
-        #         V[jj,ii] = np.sin(theta_mesh[jj,ii])
+        for ii in range(num_x):
+            for jj in range(num_y):
+                # print("Processing point ({},{})".format(ii,jj))
+                this_x = X[jj,ii]
+                this_y = Y[jj,ii]
+                self.percep_model.focal_loc = np.array([this_x,this_y])
+                final_thetas = []
+                for init_angle in init_angles:
+                    # find stable equilibria from this initial angle
+                    sol = solve_ivp(self.dtheta_dt, [0, 10], 
+                                    [init_angle], rtol=1e-6, atol=1e-6)
+                    final_thetas.append(sol.y[0,-1])
+                # filter final_thetas to unique values
+                if len(final_thetas) > 1:
+                    theta_mesh[jj,ii] = self.rng.choice(
+                        np.unique(np.round(final_thetas, decimals=3)))
+                    multi_sol[jj,ii] = True
+                else:
+                    theta_mesh[jj,ii] = final_thetas[0]
+                U[jj,ii] = np.cos(theta_mesh[jj,ii])
+                V[jj,ii] = np.sin(theta_mesh[jj,ii])
                     
 
-        # # restore current focal location and angle
-        # self.percep_model.focal_loc = current_focal_loc
+        # restore current focal location and angle
+        self.percep_model.focal_loc = current_focal_loc
 
-        # # plot the vector field
-        # if wb_plot:
-        #     plt.figure(figsize=(6.5,4))
-        # else:
-        #     plt.figure(figsize=(5.5,5))
+        # plot the vector field
+        if wb_plot:
+            plt.figure(figsize=(6.5,4))
+        else:
+            plt.figure(figsize=(5.5,5))
 
-        # ax = plt.subplot()
-        # # Plot targets
-        # self.percep_model.targets.plot_targets_to_axis(ax)
-        # # Plot arrows, coloring multi-solution points differently
-        # ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
-        #             U[multi_sol==False], V[multi_sol==False], 
-        #             angles='xy', color='blue', label='Single Solution')
-        # ax.quiver(X[multi_sol], Y[multi_sol], 
-        #             U[multi_sol], V[multi_sol], 
-        #             angles='xy', color='red', label='Multiple Solutions')
-        # ax.legend()
-        # ax.set_title("Direction Model")
-        # ax.set_aspect('equal')
-        # plt.show()
-        # if return_theta:
-        #     return theta_mesh
+        ax = plt.subplot()
+        # Plot targets
+        self.percep_model.targets.plot_targets_to_axis(ax)
+        # Plot arrows, coloring multi-solution points differently
+        ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
+                    U[multi_sol==False], V[multi_sol==False], 
+                    angles='xy', color='blue', label='Single Solution')
+        ax.quiver(X[multi_sol], Y[multi_sol], 
+                    U[multi_sol], V[multi_sol], 
+                    angles='xy', color='red', label='Multiple Solutions')
+        ax.legend()
+        ax.set_title("Direction Model")
+        ax.set_aspect('equal')
+        plt.show()
+        if return_theta:
+            return theta_mesh
 
 class AndyDirectionModel:
 

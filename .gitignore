@@ -1,6 +1,7 @@
 .DS_Store
 .vscode
 .virtual_documents
+.~*
 *.swp
 __pycache__/
 *.mat

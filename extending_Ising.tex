@@ -57,6 +57,34 @@ Consider the special case of two identical targets that are equidistant and at t
 
 It does mean that we need to be careful with how signal is normalized in order to be able to make sense of $T$ though. It would be particularly convenient if it approximately corresponded to the PRXLife paper somehow, but ultimately it will need to be fit to data because it has to do with decision making as a function of proximity of targets located at a fixed angle from each other.
 
+\subsection*{Interaction kernel and visual range}
+
+Before, we defined the interaction kernel as
+\[
+J_{ij} = s_i\cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right).
+\]
+However, this actually presents us with a mathematical problem when a target is located directly behind a focal locust. In this case, the resulting torque model will have a discontinuity because, essentially, the locust cannot decide whether to turn to the left or the right in order to turn toward the target.
+
+This can be avoided by introducing a blind spot directly behind the locust, which is more biological anyway. However, this needs to be done in a smooth manner. We utilize a smooth cutoff function to accomplish this. Let $\eta(t)$ be the standard bump function defined by:
+\[
+\eta(t) = 
+\begin{cases}
+	\exp\left( -\frac{1}{t} \right) & \text{if } t > 0, \\
+	0 & \text{if } t \leq 0.
+\end{cases}
+\]
+A smooth transition from 0 to 1 can be defined by:
+\[
+s(t) = \frac{\eta(t)}{\eta(t) + \eta(1 - t)}
+\]
+Then the smooth cutoff function $\psi(x)$ that equals 1 on $[a_1, b_1]$ and 0 outside $[a_2, b_2]$ (with $a_2 < a_1 < b_1 < b_2$) is given by:
+\[
+\psi(x) = s\left( \frac{x - a_2}{a_1 - a_2} \right) \cdot
+s\left( \frac{b_2 - x}{b_2 - b_1} \right)
+\]
+Then the new interaction kernel is $\tilde{J}_{ij}(\theta_{ij}) = \psi(\theta_{ij})J_{ij}(\theta_{ij})$.
+
+
 \section*{Continuous version}
 An issue here is that since there are angles that don't have targets, you need this $\eta$ term in Gorbonos [41] to inhibit angles which don't have signal. Given that we are supposed to take $\eta N >> J$ and $N\rightarrow\infty$, maybe it isn't important, but it's hard to say.
 
