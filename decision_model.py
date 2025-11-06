@@ -969,16 +969,16 @@ class IsingExtModel:
         plt.show()
 
 
-    def dtheta_dt(self, t=None, theta=None):
+    def dtheta_dt(self, t=None, Theta=None):
         '''Get the time derivative of theta according to the Ising model.
 
         Parameters
         ----------
-        theta : float
-            current angles of targets in allocentric coordinates centered 
-            around the focal locust. If None, uses the focal_angle from 
-            the attached PerceptionModel, which will be converted to 
-            allocentric using the heading of the focal locust.
+        t : float, optional
+            time variable for ODE solver compatibility. Not used.
+        Theta : float, optional
+            current angle of the focal locust in allocentric coordinates. 
+            If None, use self.percep_model.focal_angle.
 
         Returns
         -------
@@ -989,18 +989,19 @@ class IsingExtModel:
         angles_rel, signals = self.percep_model.get_target_signals(self.theta_mesh)
         if angles_rel.size == 0:
             return 0.0
-        # The angles recieved above are egocentric. Convert to allocentric.
+        # The angles recieved above are egocentric, based on a heading of 
+        #   self.percep_model.focal_angle. Convert to allocentric.
         angles = convert_angles(angles_rel+self.percep_model.focal_angle)
-        if theta is None:
+        if Theta is None:
             return np.sum(signals*angles/(1+np.exp(
                 -2*angles.size*self.weighting(angles_rel)/self.T)
-                ))/angles.size - self.percep_model.focal_angle
+                ))/(signals.sum()*angles.size) - self.percep_model.focal_angle
         else:
-            angles_rel = convert_angles(angles-theta)
+            angles_rel = convert_angles(angles-Theta)
             return np.sum((signals*angles)/(1+np.exp(
                 -2*angles.size*
                 self.weighting(angles_rel)/self.T)
-                ))/angles.size - theta
+                ))/(signals.sum()*angles.size) - Theta
     
 
     def get_direction(self, dt):
@@ -1016,8 +1017,8 @@ class IsingExtModel:
                               [self.percep_model.focal_angle]).y[0,-1])
     
 
-    def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,20), num_y=21, 
-                            return_theta=False, wb_plot=False):
+    def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
+                            return_thetas=False, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         get the steady-state direction of travel as a scalar theta. Then plot 
         the result as a vector field of unit vectors.
@@ -1037,8 +1038,10 @@ class IsingExtModel:
         ylim : (ymin,ymax) tuple of floats
             y limits for mesh, inclusive
         num_y : number of steps in y direction
-        return_theta : bool
-            if True, return the theta_mesh array of steady-state angles
+        return_thetas : bool
+            if True, return all multiple solutions of stable equilibria found 
+            as a list of lists. The first value in each list is the (x,y) 
+            coordinate in the mesh, and the second value is a list of stable equilibria.
         '''
 
         # save current focal location and angle
@@ -1056,9 +1059,11 @@ class IsingExtModel:
         multi_sol = np.full_like(theta_mesh, False, dtype=bool)
 
         # create mesh of initial angles, perturbed slightly to avoid
-        #   exact angles.
-        init_angles = np.linspace(-np.pi+0.03, np.pi-0.05, 10, endpoint=False)
+        #   exact angles. This is to try and avoid hitting an unstable
+        #   equilibrium exactly.
+        init_angles = np.linspace(-np.pi+0.003, np.pi-0.005, 10, endpoint=False)
         
+        multi_thetas = []
         for ii in range(num_x):
             for jj in range(num_y):
                 # print("Processing point ({},{})".format(ii,jj))
@@ -1069,12 +1074,13 @@ class IsingExtModel:
                 for init_angle in init_angles:
                     # find stable equilibria from this initial angle
                     sol = solve_ivp(self.dtheta_dt, [0, 10], 
-                                    [init_angle], rtol=1e-6, atol=1e-6)
-                    final_thetas.append(sol.y[0,-1])
+                                    [init_angle], rtol=1e-6, atol=1e-8)
+                    if not np.round(sol.y[0,-1], decimals=2) in final_thetas:
+                        final_thetas.append(np.round(sol.y[0,-1], decimals=2))
                 # filter final_thetas to unique values
                 if len(final_thetas) > 1:
-                    theta_mesh[jj,ii] = self.rng.choice(
-                        np.unique(np.round(final_thetas, decimals=3)))
+                    multi_thetas.append( ((ii,jj), final_thetas.copy()) )
+                    theta_mesh[jj,ii] = self.rng.choice(final_thetas)
                     multi_sol[jj,ii] = True
                 else:
                     theta_mesh[jj,ii] = final_thetas[0]
@@ -1087,9 +1093,9 @@ class IsingExtModel:
 
         # plot the vector field
         if wb_plot:
-            plt.figure(figsize=(6.5,4))
+            fig = plt.figure(figsize=(6.5,4))
         else:
-            plt.figure(figsize=(5.5,5))
+            fig = plt.figure(figsize=(5.5,5))
 
         ax = plt.subplot()
         # Plot targets
@@ -1101,12 +1107,12 @@ class IsingExtModel:
         ax.quiver(X[multi_sol], Y[multi_sol], 
                     U[multi_sol], V[multi_sol], 
                     angles='xy', color='red', label='Multiple Solutions')
-        ax.legend()
+        fig.legend(loc='outside center right')
         ax.set_title("Direction Model")
         ax.set_aspect('equal')
         plt.show()
-        if return_theta:
-            return theta_mesh
+        if return_thetas:
+            return multi_thetas
 
 class AndyDirectionModel:
 
