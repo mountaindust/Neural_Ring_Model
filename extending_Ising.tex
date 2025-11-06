@@ -10,58 +10,84 @@
 \begin{document}
 	
 \section*{Discrete version}
-Assume that $k$ targets have been identified at radial positions $\theta_i$ with signal strength $s_i$. Let $\vec{p}_i = (\theta_i,s_i)$. A consensus direction will be chosen from among these targets.
+Assume that $k$ targets have been identified at radial positions $\theta_i$, each with signal strength $s_i$. A consensus direction will be chosen from among these discrete targets using a neural model.
 
-Let $0\leq n_i\leq 1$ be the fraction of spins active toward each $\vec{p}_i$. The consensus direction will be chosen based on these spins:
-\begin{equation}
-\Theta_{foc} = \sum_{i=1}^{k}\theta_in_i\label{eqn:Theta}
-\end{equation}
+\subsection*{Background}
+Consider a brain characterized by a recurrent neural network composed of $N$ spins. Each spin is associated with one of the $k$ targets (so there are $k$ groups of spins) and exists in one of two states: $\sigma_i=0$ or $\sigma_i=1$ - e.g., a neuron that is not firing or firing. The energy of the system is given by its Hamiltonian,
+\[
+H = -\frac{k}{N}\sum_{i\neq j}J_{ij}\sigma_i\sigma_j,
+\]
+where $J_{ij}$ is the interaction strength between spins $i$ and $j$. The sum over all $i\neq j$ assumes a fully-connected network of spins/neurons (all interact with all), and only pairs of ``on'' spins contribute to the energy. A positive $J_{ij}$ indicates an excitatory interaction between spin $i$ and spin $j$ which lowers energy (consensus lowers the energy of the system) while a negative $J_{ij}$ indicates an inhibitory interaction that raises the energy.
 
-Under the hood, we will assume a Hamiltonian of the form
+The idea is that the neurons will seek to find a state which minimizes the energy of the system, and this state will represent a consensus direction given by averaging all ``votes''/on-states:
 \[
-H = -\frac{k}{N}\sum_{i\neq j}J_{ij}\sigma_i\sigma_j
+\theta_{\text{chosen}} = \frac{1}{N}\sum_{i=1}^{N}\theta_{\sigma_i}\sigma_i
 \]
-where $\sigma_i$ is one of $N$ total spins in the system among $k$ groups (directions). This is exactly the same as the Gorbonos PNAS paper. However, we will choose a slightly different interaction kernel $J_{ij}$, where $\theta_{ij}$ is the angle between $\theta_i$ and $\theta_j$.
-\[
-J_{ij} = s_i\cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right)
-\]
-If all signal strengths in all directions are equal, we recover the PNAS model. $\nu=0.5$ was used in the PNAS paper and is similar to Mexican hat (see Fig. S1, Table S1, and Fig. 1 for comparison with experiments).
+where here, $\theta_{\sigma_i}$ is the $\theta_i$ associated with $\sigma_i$.
 
-This change easily trickles through the entire framework. To re-purpose Gorbonos's notation, let $\hat{p}_i$ be a unit vector in the direction of $\theta_i$, and let $\hat{V}_{foc}$ be a unit vector in the direction of $\Theta_{foc}$.
-Then
+Computationally, this minimum can be found using the Metropolis-Hastings algorithm, where a change in neural state $\sigma_i$ is dependent on the change of energy $\Delta H$ that accompanies it according to the Boltzmann weight
 \[
-\frac{dn_i}{dt} = \frac{1}{k\left(1+\exp\left(-\frac{2ks_i\hat{V}\cdot\hat{p}_i}{T}\right)\right)} - n_i
+P^{(i)}_{1\rightarrow0/0\rightarrow 1} = 
+\begin{cases}
+	\exp(-\Delta H/T) & \Delta H \geq 0\\
+	1 & \Delta H < 0
+\end{cases}
 \]
-where the dot product is shorthand notation for the cosine part of $J_{ij}$ and $T$ is the temperature. Assume a separation of time-scales where neural updates of spins occurs far faster than the physical rotation of an insect. In that case, we can treat the radial positions $\theta_i$ of the targets as roughly constant on the time-scale of updating the mental torque (consensus direction). Then, taking the derivative of Eqn. \eqref{eqn:Theta} and plugging in, we get
-\begin{equation}
-	\frac{d\Theta_{foc}}{dt} = \sum_{i=1}^{k}\theta_i\frac{dn_i}{dt} = \frac{1}{k}\sum_{i=1}^{k}\frac{\theta_i}{\left(1+\exp\left(-\frac{2ks_i\hat{V}\cdot\hat{p}_i}{T}\right)\right)} - \Theta_{foc}
-\end{equation}
-This can be interpreted directly as a torque model by interpreting $\Theta_{foc}$ as the current direction the locust is facing. Also, $\theta_{i,foc}=\theta_i - \Theta_{foc}$ is then the angle of target $i$ relative to the current heading of the locust, and using an expanded definition of dot product based on interaction kernel $J_{ij}$,
-\[
-s_i\hat{V}\cdot\hat{p}_i = J_{i,foc}.
-\]
-So,
-\begin{equation}
-	\frac{d\Theta_{foc}}{dt} = \sum_{i=1}^{k}\theta_i\frac{dn_i}{dt} = \frac{1}{k}\sum_{i=1}^{k}\frac{\theta_{i,foc}}{\left(1+\exp\left(-\frac{2kJ_{i,foc}}{T}\right)\right)}.
-\end{equation}
-Steady-state angles of motion are given by
-\begin{equation}
-	\Theta^*_{foc} = \frac{1}{k}\sum_{i=1}^{k}\frac{\theta_{i}}{\left(1+\exp\left(-\frac{2kJ_{i,foc}}{T}\right)\right)},
-\end{equation}
-and there are likely multiple solutions to this equation.
+where $P^{(i)}_{1\rightarrow0/0\rightarrow 1}$ is the probability that a spin switches its state and $\Delta H$ is the change in energy if the spin switches its state. I'm not sure how candidate spins are chosen each time. $T$ is the temperature parameter which can be interpreted as neural noise. As $T\rightarrow\infty$, all spins always turn on, and the decision will always be the average direction weighted by the number of spins associated with each target. As $T\rightarrow 0$, spins always turn on when the energy is lowered and never turn on otherwise. This will find local minima but won't explore the state space.
 
-\subsection*{Signal strengths}
+Another way of simulating this is to use Glauber dynamics. In this framework, a (uniform) random spin is chosen and the probability that the spin is flipped is given by the Fermi function,
+\[
+P^{(i)}_{1\rightarrow0/0\rightarrow 1} = \frac{1}{1 + e^{\Delta H/T}}.
+\]
+This is quite similar to Metropolis-Hastings for low temperature ($T<2$), and particularly for $\Delta H > 0$. The difference is that $\Delta H = 0$ always has a switching probability of $0.5$ and there is a similar likelihood of failing to accept a lower energy state as there is failing to reject a higher one. The case where $T\rightarrow\infty$ is the same as in Metropolis-Hastings (all spins turn on and the decision is the average direction), but now $T\rightarrow 0$ has a similar result: turning on/off is reduced to a coin-flip in all cases, so the expected value result is again the average direction, but with only half the spins on. This means that in the derivation below, $T\rightarrow 0$ recovers an averaging model. We use Glauber dynamics below because it has the advantage of not being a piece-wise defined function: we don't have to know the sign of $\Delta H$ in order to specify the transition probabilities.
+
+\subsection*{Derivation of model}
+
+Now suppose we let the number of neurons/spins $N$ get large. However, in a departure from Couzin's group, we will not assume that the size of each of the $k$ groups is the same. Instead, let's suppose that groups' relative sizes are given by the signal strength $s_i$ paired with the spins' associated direction $\theta_i$. Then the fraction of the total number of active neurons associated with $\theta_i$ is given by
+\[
+n_i = \frac{1}{N}\sum_{j\in G_i}\sigma_j
+\]
+where $G_i$ is the group of neurons associated with $\theta_i$, and the consensus direction will be given by the arithmetic average direction among active neurons
+\[
+\theta_{\text{chosen}} = \sum_{i=1}^{N}\theta_i\frac{s_in_i}{s_{\text{total}}}
+\]
+where $s_{\text{total}}$ is the sum of all signals $s_i$.
+
+Instead of simulating each individual neuron, we would like to put together a mean-field model. Assume we have a current consensus direction, $\Theta$. This means that on average, active neurons are pointing toward $\Theta$. We would like to know the change in energy associated with turning on or off one additional neuron, but this is a function of how many total neurons there are, $N$. I suspect that division by $N$ in the Hamiltonian is really just for scaling purposes - e.g., so that as we let $N\rightarrow\infty$, the energy doesn't drop to negative infinity. So instead, assume $N$ is equal to the number of active neurons for our consensus direction, $\Theta$. Then if we turn on one additional neuron associated with direction $\theta_i$, $\Delta H = -2kJ_{\Theta,i}$ (the 2 is there because the new neuron interacts with $N$ neurons twice, once on the left and once on the right). Similarly, if we turn one neuron off, the change in energy is approximately $\Delta H = 2kJ_{\Theta,i}$. Here I have construed $J_{\Theta,i}$ to be the interaction kernel between directions $\Theta$ and $\theta_i$.
+
+So, Glauber dynamics give us approximate rates of switching equal to
+\[
+r^{(i)}_{1\rightarrow 0} = \frac{1}{1+\exp\left(\frac{2kJ_{\Theta,i}}{T}\right)}\ \ \ \ \ \ r^{(i)}_{0\rightarrow 1} = \frac{1}{1+\exp\left(-\frac{2kJ_{\Theta,i}}{T}\right)}.
+\]
+Now we find the master equation in the limit as $N\rightarrow\infty$ as in the PNAS paper, and rearrange.
+\[
+\frac{dn_i}{dt} = \frac{1}{k\left(1+\exp\left(-\frac{2kJ_{\Theta,i}}{T}\right)\right)} - n_i
+\]
+
+Recall that the consensus direction is given by
+\[
+\Theta = \sum_{i=1}^{N}\theta_i\frac{s_in_i}{s_{\text{total}}}.
+\]
+Assume that a separation of time-scales exists where neural updates occur far faster than the physical movement of the organism. On this time-scale, $\theta_i$ is roughly constant in time, so we can take the derivative of this last equation and then plug in the master equation to get:
+\begin{equation}
+	\frac{d\Theta}{dt} = \sum_{i=1}^{k}\theta_i\frac{s_i}{s_{\text{total}}}\frac{dn_i}{dt} = \frac{1}{k}\sum_{i=1}^{k}\frac{s_i\theta_i}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,i}}{T}\right)\right)} - \Theta
+\end{equation}
+This can be interpreted directly as a torque model by interpreting $\Theta$ as the current direction the locust is facing. \textbf{Note:} One could easily relax the assumption of separation of time-scales within the context of a motion model; you just need to apply a product rule and feed the torque model information about how the target positions are changing as a function of locust movement.
+
+We will work with the interaction kernel from the PNAS paper, where $\theta_{ij}$ is the angle between $\theta_i$ and $\theta_j$.
+\[
+J_{ij} = \cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right)
+\]
+$\nu=0.5$ was used in the PNAS paper and is similar to Mexican hat (see Fig. S1, Table S1, and Fig. 1 for comparison with experiments).
+
+\subsection*{Note about signal strengths}
 This discrete version assumes that radial target locations are identified by a separate perception process. If signal strength does not vary with distance, then the underlying assumption is that all targets are delta functions. Avoiding this, the best choice for signal strength is probably some measure of the perceived angular width of the target. The problem of not being able to tell two overlapping locusts from one close locust is avoided by the prior target identification, and size scales with distance in the proper manner (closer yields larger numbers while staying bounded) and is also biological in the sense that visual size of the object IS the actual signal reaching the eye.
-
-Consider the special case of two identical targets that are equidistant and at the same visual angle from a focal locust (the standard setup in the Ising papers). With signal strength, these are delta functions and the $T$ parameter controls whether or not there is a hysteresis region (see PRXLife paper - hysteresis region means that there is tri-stability between the two targets and a consensus direction). With signal strength, as a locust travels down the middle compromise trajectory, all $s_i$ are equal but growing as the targets get closer. From the standpoint of delta function targets, this would translate to $T$ being a decreasing function of distance to targets, but with a strictly positive lower bound. I don't know if this is biologically interesting or not, but it suggests that if a locust is close to several targets but not too close to any of them, the addition of signal strength makes the decision-making stable earlier and may allow a locust to stochastically change its mind more easily.
-
-It does mean that we need to be careful with how signal is normalized in order to be able to make sense of $T$ though. It would be particularly convenient if it approximately corresponded to the PRXLife paper somehow, but ultimately it will need to be fit to data because it has to do with decision making as a function of proximity of targets located at a fixed angle from each other.
 
 \subsection*{Interaction kernel and visual range}
 
 Before, we defined the interaction kernel as
 \[
-J_{ij} = s_i\cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right).
+J_{ij} = \cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right).
 \]
 However, this actually presents us with a mathematical problem when a target is located directly behind a focal locust. In this case, the resulting torque model will have a discontinuity because, essentially, the locust cannot decide whether to turn to the left or the right in order to turn toward the target.
 

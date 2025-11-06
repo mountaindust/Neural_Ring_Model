@@ -11,6 +11,13 @@ from matplotlib import cm
 from matplotlib.image import NonUniformImage
 from basic_units import radians
 
+def convert_angles(theta):
+    '''Given a scalar or array of angles, convert to angles in 
+    [-np.pi,np.pi]
+    '''
+    return theta - (theta+np.pi)//(2*np.pi)*2*np.pi
+
+
 class Targets:
 
     def __init__(self, locs=None, geom_name=None, r=None, l=None, theta=0):
@@ -70,9 +77,9 @@ class Targets:
             self.l = l
         if hasattr(theta,'__iter__'):
             assert len(theta) == self.locs.shape[0], "length of theta must match first dim of locs"
-            self.theta = self.convert_angles(np.array(theta))
+            self.theta = convert_angles(np.array(theta))
         else:
-            self.theta = self.convert_angles(theta)
+            self.theta = convert_angles(theta)
 
     
     def get_percep_angles(self,loc,angle=0):
@@ -102,9 +109,9 @@ class Targets:
             if np.any(on_target_bool):
                 angle_to_targets = self.get_angles_to_targets(loc,angle)
                 angle_to_targets[on_target_bool] = angle
-                return self.convert_angles(angle_to_targets)
+                return convert_angles(angle_to_targets)
             else:
-                return self.convert_angles(self.get_angles_to_targets(loc,angle))
+                return convert_angles(self.get_angles_to_targets(loc,angle))
         
         elif self.geom_name == 'circle':
             on_target_bool = self.check_target_overlap(loc)
@@ -120,7 +127,7 @@ class Targets:
                 vecs_length = np.linalg.norm(vecs)
             if not np.any(on_target_bool):
                 pm_theta = np.arcsin(self.r/vecs_length)
-                return self.convert_angles(np.column_stack([target_angles-pm_theta-angle,
+                return convert_angles(np.column_stack([target_angles-pm_theta-angle,
                                                             target_angles+pm_theta-angle]))
             else:
                 if isinstance(self.r,np.ndarray):
@@ -130,7 +137,7 @@ class Targets:
                 angle_to_targets = np.zeros(self.locs.shape)
                 angle_to_targets[on_target_bool,:] = np.array([-np.pi,np.pi])
                 angle_to_targets[~on_target_bool,:] = \
-                    self.convert_angles(np.column_stack([target_angles-pm_theta-angle,
+                    convert_angles(np.column_stack([target_angles-pm_theta-angle,
                                                          target_angles+pm_theta-angle]))
                 return angle_to_targets
 
@@ -147,8 +154,8 @@ class Targets:
             vecs1 = endpt1[~on_target_bool] - loc
             vecs2 = endpt2[~on_target_bool] - loc
             # get angles to each
-            angles1 = self.convert_angles(np.arctan2(vecs1[:,1],vecs1[:,0])-angle)
-            angles2 = self.convert_angles(np.arctan2(vecs2[:,1],vecs2[:,0])-angle)
+            angles1 = convert_angles(np.arctan2(vecs1[:,1],vecs1[:,0])-angle)
+            angles2 = convert_angles(np.arctan2(vecs2[:,1],vecs2[:,0])-angle)
             # store sorted
             target_angles = np.zeros((len(angles1),2))
             one_two = np.logical_and(angles1 <= angles2, angles2-angles1 < np.pi)
@@ -189,7 +196,7 @@ class Targets:
         # Get a vector toward each target
         vecs = self.locs - loc
         target_angles = np.arctan2(vecs[:,1],vecs[:,0])
-        return self.convert_angles(target_angles - angle)
+        return convert_angles(target_angles - angle)
     
 
     def get_dist_to_targets(self,loc):
@@ -238,14 +245,6 @@ class Targets:
                   (loc[1]-pt1[:,1])*(pt2[:,1]-pt1[:,1])
             sqdist = (pt2[:,0]-pt1[:,0])**2 + (pt2[:,1]-pt1[:,1])**2
             return np.abs(cross)<eps & dot>=0 & dot<=sqdist
-
-
-    @staticmethod
-    def convert_angles(theta):
-        '''Given a scalar or array of angles, convert to angles in 
-        [-np.pi,np.pi]
-        '''
-        return theta - (theta+np.pi)//(2*np.pi)*2*np.pi
     
 
     @staticmethod
@@ -776,8 +775,7 @@ class PerceptionModel:
 #             theta = self.get_direction(dt) + noise
 #             mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
 #             self.percep_model.focal_loc += mv_vec
-#             self.percep_model.focal_angle = \
-#                 self.percep_model.targets.convert_angles(theta)
+#             self.percep_model.focal_angle = convert_angles(theta)
 #             # append location to walk list
 #             walk.append(self.percep_model.focal_loc.copy())
 #         # done. save to all_walks
@@ -977,8 +975,10 @@ class IsingExtModel:
         Parameters
         ----------
         theta : float
-            current angle in allocentric coordinates. If None, uses the 
-            focal_angle from the attached PerceptionModel.
+            current angles of targets in allocentric coordinates centered 
+            around the focal locust. If None, uses the focal_angle from 
+            the attached PerceptionModel, which will be converted to 
+            allocentric using the heading of the focal locust.
 
         Returns
         -------
@@ -986,18 +986,20 @@ class IsingExtModel:
             time derivative of theta according to the Ising model
         '''
 
-        angles, signals = self.percep_model.get_target_signals(self.theta_mesh)
-        if angles.size == 0:
+        angles_rel, signals = self.percep_model.get_target_signals(self.theta_mesh)
+        if angles_rel.size == 0:
             return 0.0
-        # The angles recieved above are egocentric.
+        # The angles recieved above are egocentric. Convert to allocentric.
+        angles = convert_angles(angles_rel+self.percep_model.focal_angle)
         if theta is None:
-            return np.sum(angles/(1+np.exp(
-                -2*angles.size*signals*self.weighting(angles)/self.T)
-                ))/angles.size
+            return np.sum(signals*angles/(1+np.exp(
+                -2*angles.size*self.weighting(angles_rel)/self.T)
+                ))/angles.size - self.percep_model.focal_angle
         else:
-            return np.sum((angles+self.percep_model.focal_angle)/(1+np.exp(
-                -2*angles.size*signals*
-                self.weighting(angles+self.percep_model.focal_angle-theta)/self.T)
+            angles_rel = convert_angles(angles-theta)
+            return np.sum((signals*angles)/(1+np.exp(
+                -2*angles.size*
+                self.weighting(angles_rel)/self.T)
                 ))/angles.size - theta
     
 
@@ -1010,8 +1012,8 @@ class IsingExtModel:
             time step for integration of torque model.
         '''
         
-        return solve_ivp(self.dtheta_dt, [0, dt], 
-                         [self.percep_model.focal_angle]).y[0,-1]
+        return convert_angles(solve_ivp(self.dtheta_dt, [0, dt], 
+                              [self.percep_model.focal_angle]).y[0,-1])
     
 
     def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,20), num_y=21, 
@@ -1565,8 +1567,7 @@ class AndyDirectionModel:
                 theta = self.get_direction(dt) + noise
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
-                self.percep_model.focal_angle = \
-                    self.percep_model.targets.convert_angles(theta)
+                self.percep_model.focal_angle = convert_angles(theta)
                 # append location to walk list
                 walk.append(self.percep_model.focal_loc.copy())
             # done. save to all_walks
