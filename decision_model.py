@@ -855,7 +855,6 @@ class IsingExtModel:
         '''From a PerceptionModel with its Targets object, establishes a model 
         for chosing direction based on discrete Ising. Relies on get_target_signals 
         from the PerceptionModel to obtain perceived target angles and signal strength.
-        TODO: continuous Ising
         
         Parameters
         ----------
@@ -1042,6 +1041,8 @@ class IsingExtModel:
             if True, return all multiple solutions of stable equilibria found 
             as a list of lists. The first value in each list is the (x,y) 
             coordinate in the mesh, and the second value is a list of stable equilibria.
+        wb_plot : bool
+            whether or not plotting in a Jupyter notebook
         '''
 
         # save current focal location and angle
@@ -1073,7 +1074,7 @@ class IsingExtModel:
                 final_thetas = []
                 for init_angle in init_angles:
                     # find stable equilibria from this initial angle
-                    sol = solve_ivp(self.dtheta_dt, [0, 10], 
+                    sol = solve_ivp(self.dtheta_dt, [0, 50], 
                                     [init_angle], rtol=1e-6, atol=1e-8)
                     if not np.round(sol.y[0,-1], decimals=2) in final_thetas:
                         final_thetas.append(np.round(sol.y[0,-1], decimals=2))
