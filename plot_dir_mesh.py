@@ -38,6 +38,4 @@ def run_direction_mesh(pool):
     # Plot the direction mesh by running the dynamical system to steady state
     dir_model.plot_direction_mesh()
 
-    # TODO: parallelize the above function call using the provided pool
-    #  A problem with this is the current dependence on setting and resetting
-    #  the focal location (self.percep_model.focal_loc) within the function.
+    # TODO: parallelize the above function call using the provided pool.

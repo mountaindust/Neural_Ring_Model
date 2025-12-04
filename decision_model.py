@@ -321,7 +321,7 @@ class Targets:
 
 class PerceptionModel:
 
-    def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, type=None):
+    def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction 
         given by focal_angle, at targets given by the targets object. All three 
         of these can be changed at any time as attributes.
@@ -336,11 +336,9 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        type : TODO
-            how the angular extent of targets should be translated into 
-            observation signal. None corresponds to an indicator function, but 
-            this could be other things (blurred vision, higher weighting toward 
-            the front of the observed object, etc.)
+        theta_mesh : float or 1D ndarray
+            the number of equally spaced mesh points on [-pi,pi) to evaluate at 
+            or a mesh of theta values to evaluate at
         '''
 
         self.focal_loc = np.array(focal_loc, dtype=float)
@@ -350,19 +348,16 @@ class PerceptionModel:
         else:
             assert isinstance(targets,Targets), "targets must be a Targets object."
             self.targets = targets
-        self.type = type
+        if isinstance(theta_mesh, int):
+            self.theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
+        else:
+            self.theta_mesh = theta_mesh
 
 
-    def get_binary_signal(self,theta_mesh=2000):
+    def get_binary_signal(self):
         '''Translates the focal position/angle and information about targets 
         into an EGOCENTRIC perception signal (1D mesh) with length res_num that 
         is binary.
-
-        Parameters
-        ----------
-        theta_mesh : float or 1D ndarray
-            the number of equally spaced mesh points on [-pi,pi) to evaluate at 
-            or a mesh of theta values to evaluate at
 
         Returns
         -------
@@ -371,49 +366,39 @@ class PerceptionModel:
         '''
 
         angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
-        if isinstance(theta_mesh, int):
-            signal = np.zeros(theta_mesh)
-            theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
-        else:
-            signal = np.zeros(theta_mesh.shape)
+        signal = np.zeros(self.theta_mesh.shape)
 
         if self.targets.geom_name is None:
             for theta in angles:
-                idx = np.searchsorted(theta_mesh,theta)
-                if idx == len(theta_mesh):
+                idx = np.searchsorted(self.theta_mesh,theta)
+                if idx == len(self.theta_mesh):
                     idx = 0
-                if self.type is None:
-                    # step function perception
-                    if idx != 0 and \
-                    theta-theta_mesh[idx-1] < theta_mesh[idx]-theta:
-                        signal[idx-1] = 1
-                    elif idx == 0 and \
-                    theta-theta_mesh[-1] < -theta_mesh[0]-theta:
-                        signal[-1] = 1
-                    else:
-                        signal[idx] = 1
+                # step function perception
+                if idx != 0 and \
+                theta-self.theta_mesh[idx-1] < self.theta_mesh[idx]-theta:
+                    signal[idx-1] = 1
+                elif idx == 0 and \
+                theta-self.theta_mesh[-1] < -self.theta_mesh[0]-theta:
+                    signal[-1] = 1
                 else:
-                    raise NotImplementedError("Unknown perception type.")
+                    signal[idx] = 1
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             for thetas in angles:
-                if self.type is None:
-                    # step function perception
-                    if thetas[1] > thetas[0]:
-                        theta_bool = np.logical_and(thetas[0]<=theta_mesh,
-                                                    theta_mesh<=thetas[1])
-                    else:
-                        theta_bool = np.logical_or(thetas[0]<=theta_mesh,
-                                                   theta_mesh<=thetas[1])
-                    signal[theta_bool] = 1
+                # step function perception
+                if thetas[1] > thetas[0]:
+                    theta_bool = np.logical_and(thetas[0]<=self.theta_mesh,
+                                                self.theta_mesh<=thetas[1])
                 else:
-                    raise NotImplementedError("Unknown perception type.")
+                    theta_bool = np.logical_or(thetas[0]<=self.theta_mesh,
+                                                self.theta_mesh<=thetas[1])
         else:
             raise NotImplementedError("Unknown target geometry name.")
         
         return signal
 
 
-    def get_target_signals(self,theta_mesh=2000,norm=np.pi/8,full_signal=False):
+    def get_target_signals(self, focal_angle=None, focal_loc=None, 
+                           norm=np.pi/8, full_signal=False):
         '''Returns the egocentric angular location of the center of each VISIBLE 
         target (closer targets that are not delta functions block ones behind) as 
         a length N array, and a visual signal for each that is either a scalar or 
@@ -424,16 +409,19 @@ class PerceptionModel:
         
         Uses a mesh of theta values to determine blocking, resulting in an 
         approximation of extents. This adds noise, but maybe the right kind of 
-        noise (i.e., if less than 2pi/theta_mesh is visible to the right or left 
-        of a blocking locust, then the blocked locust is treated as not visible). 
-        theta_mesh is the size of the mesh, so larger values result in a finer 
-        mesh and a better approximation of exact blocking.
+        noise (i.e., if less than 2pi/len(self.theta_mesh) is visible to the right 
+        or left of a blocking locust, then the blocked locust is treated as not 
+        visible). Larger meshes result in a finer mesh and a better approximation 
+        of exact blocking.
 
         Parameters
         ----------
-        theta_mesh : float or 1D ndarray
-            the number of equally spaced mesh points on [-pi,pi) to evaluate at 
-            or a mesh of theta values to evaluate at
+        focal_angle : float, optional
+            the focal angle for egocentric perception. If None, uses the object's 
+            focal_angle attribute.
+        focal_loc : array-like, optional
+            the (x,y) focal location for egocentric perception. If None, uses the 
+            object's focal_loc attribute.
         norm : float, default=np.pi/8
             the normalization factor for the scalar visual signal. Default is 
             chosen as some sort of approximation for how much visual space 
@@ -446,36 +434,41 @@ class PerceptionModel:
         -------
         angles : length N ndarray
             angles to the centers of visible targets
-        signals : length N or Nxtheta_mesh ndarray
+        signals : length N or Nxlen(theta_mesh) ndarray
             perception signals for each visible target, with amplitude equal 
             to 1/distance to target
         '''
 
-        dists = self.targets.get_dist_to_targets(self.focal_loc)
-        c_angles = self.targets.get_angles_to_targets(self.focal_loc, self.focal_angle)
-        angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
-        if isinstance(theta_mesh, int):
-            theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
-        signals = np.zeros((angles.shape[0], theta_mesh.size))
+        if focal_angle is None:
+            focal_angle = self.focal_angle
+        if focal_loc is None:
+            focal_loc = self.focal_loc
+        else:
+            focal_loc = np.array(focal_loc, dtype=float)
+
+        dists = self.targets.get_dist_to_targets(focal_loc)
+        c_angles = self.targets.get_angles_to_targets(focal_loc, focal_angle)
+        angles = self.targets.get_percep_angles(focal_loc, focal_angle)
+        signals = np.zeros((angles.shape[0], self.theta_mesh.size))
 
         if self.targets.geom_name is None:
             for n, theta in enumerate(angles):
-                idx = np.searchsorted(theta_mesh,theta)
-                if idx == len(theta_mesh):
+                idx = np.searchsorted(self.theta_mesh,theta)
+                if idx == len(self.theta_mesh):
                     idx = 0
                 # step function perception
                 if idx != 0 and \
-                theta-theta_mesh[idx-1] < theta_mesh[idx]-theta:
+                theta-self.theta_mesh[idx-1] < self.theta_mesh[idx]-theta:
                     signals[n,idx-1] = 1
                 elif idx == 0 and \
-                theta-theta_mesh[-1] < -theta_mesh[0]-theta:
+                theta-self.theta_mesh[-1] < -self.theta_mesh[0]-theta:
                     signals[n,-1] = 1
                 else:
                     signals[n,idx] = 1
             if full_signal:
                 return c_angles, signals
             else:
-                return c_angles, 2*np.pi/theta_mesh.size*signals.sum(axis=1)/norm
+                return c_angles, 2*np.pi/self.theta_mesh.size*signals.sum(axis=1)/norm
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             # sort by distance
             arg_srt = dists.argsort()
@@ -484,11 +477,11 @@ class PerceptionModel:
             # determine blocking by creating binary signals for each angle extent
             for n, thetas in enumerate(angles):
                 if thetas[1] > thetas[0]:
-                    theta_bool = np.logical_and(thetas[0]<=theta_mesh,
-                                                theta_mesh<=thetas[1])
+                    theta_bool = np.logical_and(thetas[0]<=self.theta_mesh,
+                                                self.theta_mesh<=thetas[1])
                 else:
-                    theta_bool = np.logical_or(thetas[0]<=theta_mesh,
-                                            theta_mesh<=thetas[1])
+                    theta_bool = np.logical_or(thetas[0]<=self.theta_mesh,
+                                               self.theta_mesh<=thetas[1])
                 signals[n,theta_bool] = 1
             # determine blocking based on sorted order
             # closest targets are earlier in the signals array
@@ -501,7 +494,7 @@ class PerceptionModel:
             if full_signal:
                 return c_angles[vis], signals[vis,:]
             else:
-                return c_angles[vis], 2*np.pi/theta_mesh.size*signals[vis,:].sum(axis=1)/norm
+                return c_angles[vis], 2*np.pi/self.theta_mesh.size*signals[vis,:].sum(axis=1)/norm
         else:
             raise NotImplementedError("Unknown target geometry name.")
 
@@ -573,9 +566,8 @@ class PerceptionModel:
         ax2 = plt.subplot(122, projection='polar')
 
         p_func = self.get_binary_signal(2000)
-        theta_mesh = np.linspace(-np.pi, np.pi, 2000+1)[:-1]
 
-        ax2.plot(theta_mesh,p_func)
+        ax2.plot(self.theta_mesh,p_func)
         ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
         ax2.set_rmin(-0.5)
         ax2.set_rmax(1)
@@ -624,9 +616,8 @@ class PerceptionModel:
         ax2 = plt.subplot(122, projection='polar')
 
         p_func = signals.sum(axis=0)
-        theta_mesh = np.linspace(-np.pi, np.pi, 2000+1)[:-1]
 
-        ax2.plot(theta_mesh,p_func)
+        ax2.plot(self.theta_mesh,p_func)
         ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
         ax2.set_rmin(-0.5)
         ax2.set_rlabel_position(0)
@@ -851,7 +842,7 @@ class IsingExtModel:
     center. Hard to know if this is better or worse.
     '''
 
-    def __init__(self, percep_model=None, T=0.2, theta_mesh=2000, *args, **kwargs):
+    def __init__(self, percep_model=None, T=0.2, *args, **kwargs):
         '''From a PerceptionModel with its Targets object, establishes a model 
         for chosing direction based on discrete Ising. Relies on get_target_signals 
         from the PerceptionModel to obtain perceived target angles and signal strength.
@@ -865,9 +856,6 @@ class IsingExtModel:
             consensus directions for different layouts or focal locations/angles.
         T : float
             Temperature for Ising model
-        theta_mesh : int
-            the number of equally spaced mesh points on [-pi,pi) that will be 
-            used to evaluate target location for the purposes of blocking.
         Optional Arguments for trunccosine kernel
             - left=-np.pi : left cutoff
             - right=np.pi : right cutoff
@@ -875,7 +863,6 @@ class IsingExtModel:
         '''
 
         self.T = T
-        self.theta_mesh = theta_mesh
         self.weighting = self.trunccosine(*args, **kwargs)
         self.weighting_name = "Truncated Cosine"
 
@@ -968,7 +955,7 @@ class IsingExtModel:
         plt.show()
 
 
-    def dtheta_dt(self, t=None, Theta=None):
+    def dtheta_dt(self, t=None, Theta=None, focal_loc=None):
         '''Get the time derivative of theta according to the Ising model.
 
         Parameters
@@ -985,22 +972,17 @@ class IsingExtModel:
             time derivative of theta according to the Ising model
         '''
 
-        angles_rel, signals = self.percep_model.get_target_signals(self.theta_mesh)
+        angles_rel, signals = self.percep_model.get_target_signals(Theta, focal_loc)
         if angles_rel.size == 0:
             return 0.0
-        # The angles recieved above are egocentric, based on a heading of 
-        #   self.percep_model.focal_angle. Convert to allocentric.
-        angles = convert_angles(angles_rel+self.percep_model.focal_angle)
+        # The angles recieved above are egocentric, based on a heading of Theta. 
+        #     Convert to allocentric.
         if Theta is None:
-            return np.sum(signals*angles/(1+np.exp(
-                -2*angles.size*self.weighting(angles_rel)/self.T)
-                ))/(signals.sum()*angles.size) - self.percep_model.focal_angle
-        else:
-            angles_rel = convert_angles(angles-Theta)
-            return np.sum((signals*angles)/(1+np.exp(
-                -2*angles.size*
-                self.weighting(angles_rel)/self.T)
-                ))/(signals.sum()*angles.size) - Theta
+            Theta = self.percep_model.focal_angle
+        angles = convert_angles(angles_rel+Theta)
+        return np.sum(signals*angles/(1+np.exp(
+            -2*angles.size*self.weighting(angles_rel)/self.T)
+            ))/(signals.sum()*angles.size) - Theta
     
 
     def get_direction(self, dt):
@@ -1045,9 +1027,6 @@ class IsingExtModel:
             whether or not plotting in a Jupyter notebook
         '''
 
-        # save current focal location and angle
-        current_focal_loc = self.percep_model.focal_loc.copy()
-
         # create mesh of focal locations
         xmesh = np.linspace(xlim[0], xlim[1], num_x)
         ymesh = np.linspace(ylim[0], ylim[1], num_y)
@@ -1067,15 +1046,16 @@ class IsingExtModel:
         multi_thetas = []
         for ii in range(num_x):
             for jj in range(num_y):
-                # print("Processing point ({},{})".format(ii,jj))
+                print("Processing point ({},{})".format(ii,jj))
                 this_x = X[jj,ii]
                 this_y = Y[jj,ii]
-                self.percep_model.focal_loc = np.array([this_x,this_y])
+                focal_loc = np.array([this_x,this_y])
                 final_thetas = []
                 for init_angle in init_angles:
                     # find stable equilibria from this initial angle
                     sol = solve_ivp(self.dtheta_dt, [0, 50], 
-                                    [init_angle], rtol=1e-6, atol=1e-8)
+                                    [init_angle], args=(focal_loc,),
+                                    rtol=1e-6, atol=1e-8)
                     if not np.round(sol.y[0,-1], decimals=2) in final_thetas:
                         final_thetas.append(np.round(sol.y[0,-1], decimals=2))
                 # filter final_thetas to unique values
@@ -1087,10 +1067,6 @@ class IsingExtModel:
                     theta_mesh[jj,ii] = final_thetas[0]
                 U[jj,ii] = np.cos(theta_mesh[jj,ii])
                 V[jj,ii] = np.sin(theta_mesh[jj,ii])
-                    
-
-        # restore current focal location and angle
-        self.percep_model.focal_loc = current_focal_loc
 
         # plot the vector field
         if wb_plot:
@@ -1115,9 +1091,11 @@ class IsingExtModel:
         if return_thetas:
             return multi_thetas
 
+
+
 class AndyDirectionModel:
 
-    def __init__(self, percep_model=None, consensus_type='additive', res_num=2000,
+    def __init__(self, percep_model=None, consensus_type='additive', 
                  weighting_name='truncnorm', *args, **kwargs):
         '''From a PerceptionModel with its Targets object, establishes a model 
         for chosing direction based on a weighting of a binary signal via convolution 
@@ -1212,14 +1190,9 @@ class AndyDirectionModel:
     ############################################################################
 
 
-    def hamiltonian(self, theta_mesh):
+    def hamiltonian(self):
         '''Convolution of the weighting kernel with the signal over [-pi,pi]. 
         Since the signal is egocentric, the hamiltonian will be as well.
-
-        Parameters
-        ----------
-        theta_mesh : 1D ndarray
-            a mesh of points on [-pi,pi) to evaluate the hamiltonian at
 
         Returns
         -------
@@ -1227,8 +1200,8 @@ class AndyDirectionModel:
         the returned array will match the input array.
         '''
 
-        kernel = self.weighting(theta_mesh)
-        signal = self.percep_model.get_binary_signal(theta_mesh)
+        kernel = self.weighting(self.percep_model.theta_mesh)
+        signal = self.percep_model.get_binary_signal()
         # Periodic convolution via convolution theorem.
         # Results must be shifted because numpy fft puts the zero frequency
         #   at the left-most position of the array.
@@ -1259,8 +1232,8 @@ class AndyDirectionModel:
         '''
         eps = np.finfo(np.float32).eps
 
-        theta_mesh = np.linspace(-np.pi, np.pi, self.res_num+1)[:-1]
-        H = self.hamiltonian(theta_mesh)
+        theta_mesh = self.percep_model.theta_mesh
+        H = self.hamiltonian()
         
         if H.max()-H.min() < eps:
             if return_H:
@@ -1321,8 +1294,8 @@ class AndyDirectionModel:
         with_signal : bool, default=False
             Include a plot of the signal alongside the Hamiltonian for comparison.
         '''
-        res_num = 3000
-        theta_mesh = np.linspace(-np.pi, np.pi, res_num+1)[:-1]
+        theta_mesh = self.percep_model.theta_mesh
+        res_num = theta_mesh.size
 
         if focal_loc_mesh is None:
             if with_signal:
@@ -1344,7 +1317,7 @@ class AndyDirectionModel:
             idx = np.searchsorted(theta_mesh, dir_angle)
             axs[0].plot(dir_angle*radians, H_array[idx], 'ok')
             if with_signal:
-                signal = self.percep_model.get_binary_signal(theta_mesh)
+                signal = self.percep_model.get_binary_signal()
                 axs[1].plot(theta_mesh*radians, signal, xunits=radians)
                 axs[1].plot(dir_angle*radians, signal[idx], 'ok')
                 axs[1].set_title('Perceived Signal')
@@ -1384,7 +1357,7 @@ class AndyDirectionModel:
             for n,loc in enumerate(focal_loc_mesh):
                 self.percep_model.focal_loc = loc
                 if with_signal:
-                    signal_array[n,:] = self.percep_model.get_binary_signal(theta_mesh)
+                    signal_array[n,:] = self.percep_model.get_binary_signal()
                 # Get direction angle and hamiltonian
                 dir_angle[n], H_array[n,:] = self.get_direction(return_H=True)
                 idx_array[n] = np.searchsorted(theta_mesh, dir_angle[n])
@@ -1431,7 +1404,7 @@ class AndyDirectionModel:
             plt.figure(figsize=(6.5,2))
         else:
             plt.figure(figsize=(8,5))
-        theta_mesh = np.linspace(-np.pi, np.pi, 2001)
+        theta_mesh = self.percep_model.theta_mesh
         plt.plot(theta_mesh,self.weighting(theta_mesh))
         plt.title(self.weighting_name)
         plt.show()
