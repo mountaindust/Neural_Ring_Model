@@ -842,7 +842,9 @@ class IsingExtModel:
     center. Hard to know if this is better or worse.
     '''
 
-    def __init__(self, percep_model=None, T=0.2, *args, **kwargs):
+    def __init__(self, percep_model=None, T=0.2, 
+                 left_off=-np.pi+0.1, left_on=-np.pi+0.5, 
+                 right_on=np.pi-0.5, right_off=np.pi-0.1, nu=1):
         '''From a PerceptionModel with its Targets object, establishes a model 
         for chosing direction based on discrete Ising. Relies on get_target_signals 
         from the PerceptionModel to obtain perceived target angles and signal strength.
@@ -856,14 +858,20 @@ class IsingExtModel:
             consensus directions for different layouts or focal locations/angles.
         T : float
             Temperature for Ising model
-        Optional Arguments for trunccosine kernel
-            - left=-np.pi : left cutoff
-            - right=np.pi : right cutoff
+        Optional Keyword Arguments for trunccosine kernel
+            - left_off=-np.pi+0.1 : left blindspot
+            - left_on=-np.pi+0.5 : left endpoint for fully on
+            - right_on=np.pi-0.5 : right endpoint for fully on
+            - right_off=np.pi-0.1 : right blindspot
             - nu=1 : warping
         '''
 
         self.T = T
-        self.weighting = self.trunccosine(*args, **kwargs)
+        self.left_off = left_off
+        self.left_on = left_on
+        self.right_on = right_on
+        self.right_off = right_off
+        self.nu = nu
         self.weighting_name = "Truncated Cosine"
 
         if percep_model is None:
@@ -878,8 +886,7 @@ class IsingExtModel:
         self.rng = np.random.default_rng()
 
 
-    def trunccosine(self, left_off=-np.pi+0.1, left_on=-np.pi+0.5, 
-                    right_on=np.pi-0.5, right_off=np.pi-0.1, nu=1):
+    def trunccosine(self, x):
         r'''Function generator that returns cos(pi*(x/pi)^nu) multipled by a smooth 
         cutoff function. On the interval left_on to right_on, the function is
         cos(pi*(x/pi)^nu). Outside of left_off to right_off, the function is 0.
@@ -914,24 +921,28 @@ class IsingExtModel:
         power nu to control the steepness of the function, then scale back to
         between -pi and pi and take the cosine. Truncation allows for a blindspot.'''
 
-        def bump(t):
-            result = np.zeros_like(t)
-            result[t>0] = np.exp(-1/t[t>0])
-            return result
-        
-        def smoothstep(x):
-            return bump(x)/(bump(x)+bump(1-x))
-        
-        def cutoff(x, left_off, left_on, right_on, right_off):
-            return smoothstep(
-                (x - left_off)/(left_on - left_off) ) * smoothstep(
-                (right_off - x)/(right_off - right_on) )
+        return self._cutoff(x, self.left_off, self.left_on, 
+                            self.right_on, self.right_off)*np.cos(np.pi*(x/np.pi)**self.nu)
 
-        def trunccos(x):
-            return cutoff(x, left_off, left_on, right_on, right_off)*np.cos(np.pi*(x/np.pi)**nu)
 
-        return trunccos
+    @staticmethod
+    def _bump(t):
+        result = np.zeros_like(t)
+        result[t>0] = np.exp(-1/t[t>0])
+        return result
     
+
+    @staticmethod
+    def _smoothstep(x):
+        return IsingExtModel._bump(x)/(IsingExtModel._bump(x)+IsingExtModel._bump(1-x))
+    
+
+    @staticmethod
+    def _cutoff(x, left_off, left_on, right_on, right_off):
+        return IsingExtModel._smoothstep(
+            (x - left_off)/(left_on - left_off) ) * IsingExtModel._smoothstep(
+            (right_off - x)/(right_off - right_on) )
+
 
     def plot_trunccosine(self, wb_plot=False):
         '''Plot the truncated cosine weighting function over [-pi,pi].
@@ -940,7 +951,7 @@ class IsingExtModel:
         '''
 
         xmesh = np.linspace(-np.pi, np.pi, 1000)
-        ymesh = self.weighting(xmesh)
+        ymesh = self.trunccosine(xmesh)
 
         if wb_plot:
             plt.figure(figsize=(6.5,3.25))
@@ -981,7 +992,7 @@ class IsingExtModel:
             Theta = self.percep_model.focal_angle
         angles = convert_angles(angles_rel+Theta)
         return np.sum(signals*angles/(1+np.exp(
-            -2*angles.size*self.weighting(angles_rel)/self.T)
+            -2*angles.size*self.trunccosine(angles_rel)/self.T)
             ))/(signals.sum()*angles.size) - Theta
     
 
@@ -998,8 +1009,25 @@ class IsingExtModel:
                               [self.percep_model.focal_angle]).y[0,-1])
     
 
+    def _process_point(self, args):
+            ii, jj, X, Y = args
+            this_x = X[jj,ii]
+            this_y = Y[jj,ii]
+            focal_loc = np.array([this_x,this_y])
+            init_angles = np.linspace(-np.pi+0.003, np.pi-0.005, 10, endpoint=False)
+            final_thetas = []
+            for init_angle in init_angles:
+                # find stable equilibria from this initial angle
+                sol = solve_ivp(self.dtheta_dt, [0, 50], 
+                                [init_angle], args=(focal_loc,),
+                                rtol=1e-6, atol=1e-8)
+                if not np.round(sol.y[0,-1], decimals=2) in final_thetas:
+                    final_thetas.append(np.round(sol.y[0,-1], decimals=2))
+            return (ii, jj, final_thetas)
+    
+
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            return_thetas=False, wb_plot=False):
+                            return_thetas=False, wb_plot=False, pool=None):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         get the steady-state direction of travel as a scalar theta. Then plot 
         the result as a vector field of unit vectors.
@@ -1025,6 +1053,8 @@ class IsingExtModel:
             coordinate in the mesh, and the second value is a list of stable equilibria.
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
+        pool : multiprocessing.Pool, optional
+            If provided, use this pool to parallelize the solving of the ODEs.
         '''
 
         # create mesh of focal locations
@@ -1041,23 +1071,29 @@ class IsingExtModel:
         # create mesh of initial angles, perturbed slightly to avoid
         #   exact angles. This is to try and avoid hitting an unstable
         #   equilibrium exactly.
-        init_angles = np.linspace(-np.pi+0.003, np.pi-0.005, 10, endpoint=False)
-        
         multi_thetas = []
-        for ii in range(num_x):
-            for jj in range(num_y):
-                print("Processing point ({},{})".format(ii,jj))
-                this_x = X[jj,ii]
-                this_y = Y[jj,ii]
-                focal_loc = np.array([this_x,this_y])
-                final_thetas = []
-                for init_angle in init_angles:
-                    # find stable equilibria from this initial angle
-                    sol = solve_ivp(self.dtheta_dt, [0, 50], 
-                                    [init_angle], args=(focal_loc,),
-                                    rtol=1e-6, atol=1e-8)
-                    if not np.round(sol.y[0,-1], decimals=2) in final_thetas:
-                        final_thetas.append(np.round(sol.y[0,-1], decimals=2))
+        
+        if pool is None:
+            for ii in range(num_x):
+                for jj in range(num_y):
+                    print("Processing point ({},{})".format(ii,jj))
+                    result = self._process_point((ii,jj,X,Y))
+                    final_thetas = result[2]
+                    # filter final_thetas to unique values
+                    if len(final_thetas) > 1:
+                        multi_thetas.append( ((ii,jj), final_thetas.copy()) )
+                        theta_mesh[jj,ii] = self.rng.choice(final_thetas)
+                        multi_sol[jj,ii] = True
+                    else:
+                        theta_mesh[jj,ii] = final_thetas[0]
+                    U[jj,ii] = np.cos(theta_mesh[jj,ii])
+                    V[jj,ii] = np.sin(theta_mesh[jj,ii])
+        else:
+            args_list = [(ii, jj, X, Y) for ii in range(num_x) for jj in range(num_y)]
+            print("Processing points in parallel using pool...")
+            results = pool.map(self._process_point, args_list)
+            for result in results:
+                ii, jj, final_thetas = result
                 # filter final_thetas to unique values
                 if len(final_thetas) > 1:
                     multi_thetas.append( ((ii,jj), final_thetas.copy()) )
@@ -1089,7 +1125,9 @@ class IsingExtModel:
         ax.set_aspect('equal')
         plt.show()
         if return_thetas:
-            return multi_thetas
+            return multi_thetas, multi_sol, X, Y, U, V
+        else:
+            return multi_sol, X, Y, U, V
 
 
 

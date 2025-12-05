@@ -36,6 +36,14 @@ def run_direction_mesh(pool):
     # dir_model.plot_trunccosine()
 
     # Plot the direction mesh by running the dynamical system to steady state
-    dir_model.plot_direction_mesh()
+    dir_model.plot_direction_mesh(pool=pool) 
 
-    # TODO: parallelize the above function call using the provided pool.
+    # TODO: This is acting very stiff. May need to use a stiff solver.
+    #     Also, output data from this function call so we don't have to recompute
+    #     while adjusting plotting parameters.
+
+
+if __name__ == "__main__":
+    # Create a multiprocessing pool to parallelize the computation
+    with Pool(10) as pool:
+        run_direction_mesh(pool)
