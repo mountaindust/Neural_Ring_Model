@@ -5,6 +5,7 @@
 *.swp
 __pycache__/
 *.mat
+*.pkl
 *.asv
 # OSX / *nix default autosave extension
 *.m~

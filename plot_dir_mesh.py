@@ -10,12 +10,13 @@ faster.
 '''
 
 from multiprocessing import Pool
+import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 import decision_model as model
 
 
-def run_direction_mesh(pool):
+def run_direction_mesh(pool=None):
     # First, define target locations and geometries as a Targets object.
     target_locs = np.array([[4.33,2.5],[4.33,-2.5]]) # (x,y) coordinates
     targets = model.Targets(locs=target_locs, geom_name='circle', r=0.15)
@@ -36,14 +37,20 @@ def run_direction_mesh(pool):
     # dir_model.plot_trunccosine()
 
     # Plot the direction mesh by running the dynamical system to steady state
-    dir_model.plot_direction_mesh(pool=pool) 
+    data = dir_model.plot_direction_mesh(pool=pool)
+
+    pickle.dump(data, open("direction_mesh_data.pkl", "wb"))    
 
     # TODO: This is acting very stiff. May need to use a stiff solver.
     #     Also, output data from this function call so we don't have to recompute
     #     while adjusting plotting parameters.
 
 
+# if __name__ == "__main__":
+#     # Create a multiprocessing pool to parallelize the computation
+#     with Pool(10) as pool:
+#         run_direction_mesh(pool)
+
+# For testing without multiprocessing
 if __name__ == "__main__":
-    # Create a multiprocessing pool to parallelize the computation
-    with Pool(10) as pool:
-        run_direction_mesh(pool)
+    run_direction_mesh()

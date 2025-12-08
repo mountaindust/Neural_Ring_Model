@@ -6,6 +6,7 @@ it wants to go based on static targets with certain geometry
 import numpy as np
 from scipy import stats
 from scipy.integrate import solve_ivp
+from scipy.optimize import root_scalar
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.image import NonUniformImage
@@ -996,6 +997,11 @@ class IsingExtModel:
             ))/(signals.sum()*angles.size) - Theta
     
 
+    def _dtheta_dt(self, Theta=None, focal_loc=None):
+        '''Helper function for root finding. Wrapper around dtheta_dt.'''
+        return self.dtheta_dt(None, Theta, focal_loc)
+
+
     def get_direction(self, dt):
         '''Integrate the Ising model for one time step dt to get new direction.
         
@@ -1011,31 +1017,50 @@ class IsingExtModel:
 
     def _process_point(self, args):
             ii, jj, X, Y = args
-            this_x = X[jj,ii]
-            this_y = Y[jj,ii]
-            focal_loc = np.array([this_x,this_y])
-            init_angles = np.linspace(-np.pi+0.003, np.pi-0.005, 10, endpoint=False)
+            focal_loc = np.array([X[jj,ii],Y[jj,ii]])
+            init_angles = np.linspace(-np.pi+0.001, np.pi-0.002, 1000, endpoint=False)
             final_thetas = []
-            for init_angle in init_angles:
-                # find stable equilibria from this initial angle
-                sol = solve_ivp(self.dtheta_dt, [0, 50], 
-                                [init_angle], args=(focal_loc,),
-                                rtol=1e-6, atol=1e-8)
-                if not np.round(sol.y[0,-1], decimals=2) in final_thetas:
-                    final_thetas.append(np.round(sol.y[0,-1], decimals=2))
+            sgn = np.sign(self._dtheta_dt(init_angles[0], focal_loc))
+            last_angle = init_angles[0]
+            for init_angle in init_angles[1:]:
+                this_sgn = np.sign(self._dtheta_dt(init_angle,focal_loc))
+                if np.sign(this_sgn) != sgn:
+                    if this_sgn == 0:
+                        root = init_angle
+                        last_angle = init_angle + 0.00001
+                        sgn = self._dtheta_dt(last_angle, focal_loc)
+                    else:
+                        # Use bracket method to find the root.
+                        sol = root_scalar(self._dtheta_dt, 
+                                          bracket=[last_angle, init_angle],
+                                          args=(focal_loc,),
+                                          method='brentq', xtol=1e-6)
+                        root = sol.root
+                        last_angle = init_angle.copy()
+                        sgn = this_sgn
+                    # Is the root stable? Use an Euler approximation to 
+                    #   the derivative to check.
+                    stability = self._dtheta_dt(root + 0.00001, focal_loc) - \
+                                self._dtheta_dt(root - 0.00001, focal_loc)
+                    if stability < 0:
+                        # stable, save it
+                        if not np.round(root, decimals=3) in final_thetas:
+                            final_thetas.append(np.round(root, decimals=3))
+                else:
+                    last_angle = init_angle.copy()
+                    sgn = this_sgn
+
             return (ii, jj, final_thetas)
     
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            return_thetas=False, wb_plot=False, pool=None):
+                            wb_plot=False, pool=None):
         '''Create a mesh of starting locations and, for each point in the mesh, 
-        get the steady-state direction of travel as a scalar theta. Then plot 
+        find the stable equilibria of the direction model. Then plot 
         the result as a vector field of unit vectors.
         
-        There may be multiple solutions, so do a brute-force search over a mesh 
-        of initial angles and record each final angle. If multiple final angles
-        are found (within a tolerance), pick one at random and color the vector
-        accordingly.
+        There may be multiple solutions, so use a multi-start with a root finding 
+        algorithm.
 
         Set wb_plot to True if plotting in a Jupyter notebook
 
@@ -1062,11 +1087,10 @@ class IsingExtModel:
         ymesh = np.linspace(ylim[0], ylim[1], num_y)
 
         X, Y = np.meshgrid(xmesh, ymesh)
-        theta_mesh = np.zeros(X.shape)
-        U = np.zeros_like(theta_mesh)
-        V = np.zeros_like(theta_mesh)
+        U_list = []
+        V_list = []
         # boolean mesh for multiple solutions
-        multi_sol = np.full_like(theta_mesh, False, dtype=bool)
+        multi_sol = np.full(X.shape, False, dtype=bool)
 
         # create mesh of initial angles, perturbed slightly to avoid
         #   exact angles. This is to try and avoid hitting an unstable
@@ -1079,30 +1103,32 @@ class IsingExtModel:
                     print("Processing point ({},{})".format(ii,jj))
                     result = self._process_point((ii,jj,X,Y))
                     final_thetas = result[2]
-                    # filter final_thetas to unique values
+                    for n, theta in enumerate(final_thetas):
+                        if len(multi_thetas) < n+1:
+                            multi_thetas.append(np.zeros(X.shape))
+                            U_list.append(np.zeros(X.shape))
+                            V_list.append(np.zeros(X.shape))
+                        multi_thetas[n][jj,ii] = theta
+                        U_list[n][jj,ii] = np.cos(theta)
+                        V_list[n][jj,ii] = np.sin(theta)
                     if len(final_thetas) > 1:
-                        multi_thetas.append( ((ii,jj), final_thetas.copy()) )
-                        theta_mesh[jj,ii] = self.rng.choice(final_thetas)
                         multi_sol[jj,ii] = True
-                    else:
-                        theta_mesh[jj,ii] = final_thetas[0]
-                    U[jj,ii] = np.cos(theta_mesh[jj,ii])
-                    V[jj,ii] = np.sin(theta_mesh[jj,ii])
         else:
             args_list = [(ii, jj, X, Y) for ii in range(num_x) for jj in range(num_y)]
             print("Processing points in parallel using pool...")
             results = pool.map(self._process_point, args_list)
             for result in results:
                 ii, jj, final_thetas = result
-                # filter final_thetas to unique values
+                for n, theta in enumerate(final_thetas):
+                    if len(multi_thetas) < n+1:
+                        multi_thetas.append(np.zeros(X.shape))
+                        U_list.append(np.zeros(X.shape))
+                        V_list.append(np.zeros(X.shape))
+                    multi_thetas[n][jj,ii] = theta
+                    U_list[n][jj,ii] = np.cos(theta)
+                    V_list[n][jj,ii] = np.sin(theta)
                 if len(final_thetas) > 1:
-                    multi_thetas.append( ((ii,jj), final_thetas.copy()) )
-                    theta_mesh[jj,ii] = self.rng.choice(final_thetas)
                     multi_sol[jj,ii] = True
-                else:
-                    theta_mesh[jj,ii] = final_thetas[0]
-                U[jj,ii] = np.cos(theta_mesh[jj,ii])
-                V[jj,ii] = np.sin(theta_mesh[jj,ii])
 
         # plot the vector field
         if wb_plot:
@@ -1115,19 +1141,19 @@ class IsingExtModel:
         self.percep_model.targets.plot_targets_to_axis(ax)
         # Plot arrows, coloring multi-solution points differently
         ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
-                    U[multi_sol==False], V[multi_sol==False], 
+                    U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
                     angles='xy', color='blue', label='Single Solution')
         ax.quiver(X[multi_sol], Y[multi_sol], 
-                    U[multi_sol], V[multi_sol], 
+                    U_list[0][multi_sol], V_list[0][multi_sol], 
                     angles='xy', color='red', label='Multiple Solutions')
+        for n in range(1, len(U_list)):
+            ax.quiver(X, Y, U_list[n], V_list[n], 
+                        angles='xy', color='red', label='Multiple Solutions')
         fig.legend(loc='outside center right')
         ax.set_title("Direction Model")
         ax.set_aspect('equal')
         plt.show()
-        if return_thetas:
-            return multi_thetas, multi_sol, X, Y, U, V
-        else:
-            return multi_sol, X, Y, U, V
+        return multi_thetas, X, Y
 
 
 
