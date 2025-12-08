@@ -1147,8 +1147,7 @@ class IsingExtModel:
                     U_list[0][multi_sol], V_list[0][multi_sol], 
                     angles='xy', color='red', label='Multiple Solutions')
         for n in range(1, len(U_list)):
-            ax.quiver(X, Y, U_list[n], V_list[n], 
-                        angles='xy', color='red', label='Multiple Solutions')
+            ax.quiver(X, Y, U_list[n], V_list[n], angles='xy', color='red')
         fig.legend(loc='outside center right')
         ax.set_title("Direction Model")
         ax.set_aspect('equal')
