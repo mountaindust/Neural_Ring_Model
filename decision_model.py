@@ -1080,6 +1080,25 @@ class IsingExtModel:
             whether or not plotting in a Jupyter notebook
         pool : multiprocessing.Pool, optional
             If provided, use this pool to parallelize the solving of the ODEs.
+
+        Returns
+        -------
+        multi_thetas : list of length N arrays
+            Each entry in the list corresponds to one of the multiple solutions
+            found. Each array is of shape (num_y,num_x) and contains the
+            stable equilibrium angle at each mesh point for that solution.
+        X : (num_y,num_x) ndarray
+            x coordinates of the mesh
+        Y : (num_y,num_x) ndarray
+            y coordinates of the mesh
+        U_list : list of (num_y,num_x) ndarrays
+            Each entry in the list corresponds to one of the multiple solutions
+            found. Each array is of shape (num_y,num_x) and contains the
+            x-component of the unit vector at each mesh point for that solution.
+        V_list : list of (num_y,num_x) ndarrays
+            Each entry in the list corresponds to one of the multiple solutions
+            found. Each array is of shape (num_y,num_x) and contains the
+            y-component of the unit vector at each mesh point for that solution.
         '''
 
         # create mesh of focal locations
@@ -1142,17 +1161,22 @@ class IsingExtModel:
         # Plot arrows, coloring multi-solution points differently
         ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
                     U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
-                    angles='xy', color='blue', label='Single Solution')
+                    angles='xy', color='blue', scale=20, width=0.005, 
+                    label='Single Solution')
         ax.quiver(X[multi_sol], Y[multi_sol], 
                     U_list[0][multi_sol], V_list[0][multi_sol], 
-                    angles='xy', color='red', label='Multiple Solutions')
+                    angles='xy', color='red', scale=20, width=0.005,
+                    label='Multiple Solutions')
         for n in range(1, len(U_list)):
-            ax.quiver(X, Y, U_list[n], V_list[n], angles='xy', color='red')
+            nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
+            ax.quiver(X[nonzero_mask], Y[nonzero_mask], 
+                      U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
+                      angles='xy', color='red', scale=20, width=0.005)
         fig.legend(loc='outside center right')
         ax.set_title("Direction Model")
         ax.set_aspect('equal')
         plt.show()
-        return multi_thetas, X, Y
+        return multi_thetas, X, Y, U_list, V_list
 
 
 

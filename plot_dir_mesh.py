@@ -46,11 +46,11 @@ def run_direction_mesh(pool=None):
     #     while adjusting plotting parameters.
 
 
-# if __name__ == "__main__":
-#     # Create a multiprocessing pool to parallelize the computation
-#     with Pool(10) as pool:
-#         run_direction_mesh(pool)
+if __name__ == "__main__":
+    # Create a multiprocessing pool to parallelize the computation
+    with Pool(10) as pool:
+        run_direction_mesh(pool)
 
 # For testing without multiprocessing
-if __name__ == "__main__":
-    run_direction_mesh()
+# if __name__ == "__main__":
+#     run_direction_mesh()
