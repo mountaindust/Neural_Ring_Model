@@ -5,7 +5,7 @@
 \usepackage{graphicx}
 \usepackage{geometry}
 
-\pagestyle{empty}
+%\pagestyle{empty}
 
 \begin{document}
 	
@@ -72,32 +72,43 @@ Now we find the master equation in the limit as $N\rightarrow\infty$ as in the P
 \]
 where $s_j/s_{\text{total}} = |G_j|/N$, $s_{\text{total}} = \sum s_j$.
 
-Assuming neural updates are fast compared to the physical dynamics of the system, we can consider the steady state solution 
-\begin{equation}
-	n_j = \frac{s_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}.
-\end{equation}
-Substituting into \eqref{eq:gamma}, we get
-\begin{equation}
-\gamma = \sum_{j=1}^{k}\frac{s_j e^{i\theta_j}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)},
-\label{eq:model}
-\end{equation}
-Equating real and imaginary parts, we can put together a two equation system for $R$ and $\Theta$.
-
 Regarding the interaction term in the denominator: can work with a type of interaction kernel that is similar to the PNAS paper (see further notes in section below), where $\theta_{ij}$ is the angle between $\theta_i$ and $\theta_j$.
 \[
 J_{ij} = \cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right)
 \]
 $\nu=0.5$ was used in the PNAS paper and is similar to Mexican hat (see Fig. S1, Table S1, and Fig. 1 for comparison with experiments). Note that if $\nu=1$, $J_{\Theta,\theta_j}$ is the same as $\gamma\cdot e^{i\theta_j}$ treating the complex numbers as real valued vectors in $\mathbb{R}^2$.
 
+Assuming neural updates are fast compared to the physical dynamics of the system, we can consider steady state solutions which satisfy
+\begin{equation}
+	n_j = \frac{s_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}.
+	\label{eq:steadystate}
+\end{equation}
+Substituting into Eqn. \eqref{eq:gamma}, we get
+\begin{equation}
+\gamma = \sum_{j=1}^{k}\frac{s_j e^{i\theta_j}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}.
+\label{eq:model}
+\end{equation}
+Equating real and imaginary parts then gives us a two equation system with unknowns $R$ and $\Theta$ that allow us to solve for these variables in steady-state configurations of the neural ring.
+
 Now assume that the agent is facing a direction $\theta$ and updates this direction according to the torque model
+\begin{equation}
+\frac{d\theta}{dt} = KR\sin(\Theta - \theta).\label{eq:torqemodel}
+\end{equation}
+where $K$ is a physical constant related to turning speed. The idea here is that this a physical model of turning which describes the impetus for the animal to change its direction based on the direction it wants to go versus the direction it is currently facing and the coherence of that desired direction. 
+
+Since by Eqns. \eqref{eq:gamma} and \eqref{eq:steadystate},
 \[
-\frac{d\theta}{dt} = KR\sin(\Theta - \theta).
+R(\Theta)e^{i(\Theta-\theta)} = \sum_{j=1}^{k}n_j(\Theta) e^{i\theta_j-\theta} = \sum_{j=1}^{k}\frac{s_j e^{i(\theta_j-\theta)}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)},
 \]
-where $K$ is a physical constant related to turning speed. The idea here is that this a physical model of turning which describes the impetus for the animal to change its direction based on the direction it wants to go versus the direction it is currently facing and the coherence of that desired direction. Note that this is a Kuramoto-type coupling with all directions to targets since equating imaginary parts of \eqref{eq:model} gives us
+we can apply Euler's formula and equate imaginary parts to get
+\[
+R(\Theta)\sin(\Theta-\theta) = \sum_{j=1}^{k}\frac{s_j \sin(\theta_j-\theta)}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}
+\]
+In other words,
 \[
 \frac{d\theta}{dt} = \sum_{j=1}^{k}\frac{Ks_j\sin(\theta_j - \theta)}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}.
 \]
-It's just that the consensus direction is the result of an Ising approach to energy minimization rather than direct averaging. Indeed: this framework contains Kuramoto coupling as a submodel when $T\rightarrow 0$, which is the case mentioned earlier of a gradient descent approach to the energy landscape - it will find local minima, but won't explore the state space at all. This means the Ising approach should give more optimal results in general.
+This reveals that our torque model is a Kuramoto-type coupling with respect to target directions and with the coherence $R$ dependent on the dynamics of the neural ring (and therefore the current consensus direction $\Theta$). We can therefore view the Ising approach to consensus direction through neural energy minimization as a generalization of Kuramoto averaging over the targets. Regular Kuramoto averaging is the case when $T\rightarrow 0$, which corresponds to a gradient descent approach to the energy landscape - it will find local minima, but won't explore the state space. This suggests that the Ising approach may give more optimal results in general, because it allows for more exploration of the geometry before making a decision.
 
 %Now assume that a separation of time-scales exists where neural updates occur far faster than any changes in signal strength (e.g. due to getting physically closer to the target). Furthermore, assume that the turning speed of the organism also takes place on a slower time scale so that $\theta_i$ is roughly constant compared to $dn_i/dt$. Then we can take the derivative of this last equation and then plug in the master equation to get:
 %\begin{equation}

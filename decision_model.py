@@ -627,203 +627,6 @@ class PerceptionModel:
 
 
 
-# def plot_direction_mesh(self, xlim=(0,24), num_x=25, ylim=(0,20), num_y=21, 
-#                         return_theta=False, wb_plot=False):
-#     '''Create a mesh of starting locations and, for each point in the mesh, 
-#     get the allocentric direction of travel as a scalar theta. Plots the 
-#     result as a vector field of unit vectors and optionally returns a scalar 
-#     field of the values theta within [-pi,pi].
-
-#     Set wb_plot to True if plotting in a Jupyber notebook
-
-#     Parameters
-#     ----------
-#     xlim : (xmin,xmax) tuple of floats
-#         x limits for mesh, inclusive
-#     num_x : number of steps in x direction
-#     ylim : (ymin,ymax) tuple of floats
-#         y limits for mesh, inclusive
-#     num_y : number of steps in y direction
-#     return_theta : bool
-#         whether or not to return a theta scalar field
-#     '''
-
-#     current_focal_loc = self.percep_model.focal_loc.copy()
-
-#     xmesh = np.linspace(xlim[0], xlim[1], num_x)
-#     ymesh = np.linspace(ylim[0], ylim[1], num_y)
-
-#     X, Y = np.meshgrid(xmesh, ymesh)
-#     theta_mesh = np.zeros(X.shape)
-#     U = np.zeros_like(theta_mesh)
-#     V = np.zeros_like(theta_mesh)
-
-#     for ii in range(num_x):
-#         for jj in range(num_y):
-#             this_x = X[jj,ii]
-#             this_y = Y[jj,ii]
-#             self.percep_model.focal_loc = np.array([this_x,this_y])
-#             # TODO:
-#             # Better would probably be to calculaute the steady-state direction.
-#             theta_mesh[jj,ii] = self.dtheta_dt()
-#             U[jj,ii] = np.cos(theta_mesh[jj,ii])
-#             V[jj,ii] = np.sin(theta_mesh[jj,ii])
-
-#     self.percep_model.focal_loc = current_focal_loc
-#     if wb_plot:
-#         plt.figure(figsize=(6.5,4))
-#     else:
-#         plt.figure(figsize=(5.5,5))
-#     ax = plt.subplot()
-
-#     # Plot targets
-#     self.percep_model.targets.plot_targets_to_axis(ax)
-#     # Plot arrows
-#     ax.quiver(X, Y, U, V, angles='xy')
-#     ax.set_title("Direction Model")
-#     ax.set_aspect('equal')
-#     plt.show()
-#     if return_theta:
-#         return theta_mesh
-    
-
-# def plot_walker(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
-#                 start_loc=None, start_angle=None, plot_tracks=False):
-#     '''Plot a walker that starts at a specified location looking in a 
-#     specified angle (defaults to the focal_loc and focal_angle in attached 
-#     PerceptionModel) and moves in the direction given by the current 
-#     direction model with a specified step size and angular Gaussian noise 
-#     with standard deviation as specified. Repeat for a number of 
-#     repetitions and plot a heat map of these walks in 2D space.
-
-#     The walker stops whenever it is detected to be overlapping a target or 
-#     after max_steps.
-
-#     Set wb_plot to True if plotting in a Jupyter notebook
-
-#     Parameters
-#     ----------
-#     dt : float
-#         Time step for the walk
-#     v : float
-#         Speed of the walker, assumed constant
-#     std : float
-#         Standard deviation of angular Gaussian noise with mean zero.
-#         If zero (default), run without any angular noise.
-#     repetitions : int
-#         Number of walks to perform and aggregate
-#     max_steps : int
-#         Maximum number of steps for each walker
-#     start_loc : (x,y) coordinates, optional
-#         Starting location of the walk, defaults to focal_loc in the attached 
-#         PerceptionModel
-#     start_angle : float
-#         Starting direction that the walker is facing. Defaults to 
-#         focal_angle in the attached PerceptionModel
-#     plot_tracks : bool
-#         Whether or not to overlay the walker trajectories
-#     '''
-    
-#     if start_loc is None:
-#         start_loc = self.percep_model.focal_loc.copy()
-#     else:
-#         start_loc = np.array(start_loc, dtype=float)
-#     if start_angle is None:
-#         start_angle = self.percep_model.focal_angle
-#     orig_loc = self.percep_model.focal_loc.copy()
-#     orig_angle = self.percep_model.focal_angle
-
-#     all_walks = []
-
-#     for n in range(repetitions):
-#         self.percep_model.focal_loc = start_loc.copy()
-#         self.percep_model.focal_angle = start_angle
-#         walk = [start_loc.copy()]
-#         for step in range(max_steps):
-#             # check for target overlap
-#             if np.any(self.percep_model.targets.check_target_overlap(
-#                         self.percep_model.focal_loc)):
-#                 break
-#             elif self.percep_model.targets.geom_name is None and \
-#             np.any(np.linalg.norm(
-#                     self.percep_model.focal_loc-self.percep_model.targets.locs,
-#                     axis=1)<v*dt):
-#                 break
-#             # if step > 75:
-#             #     import pdb; pdb.set_trace()
-#             # determine allocentric direction and take a step
-#             #   assume turning speed is infinite
-#             if std > 0:
-#                 noise = self.rng.normal(scale=std)
-#             else:
-#                 noise = 0
-#             # NOTE:
-#             # This walk is modeled on a two-step process:
-#             # 1) decide on a direction to face based on an amount of time dt
-#             # 2) move forward in that direction instantaneously
-#             # This is not the same as moving forward while turning;
-#             #   the only reason it is implemented this way is so that the 
-#             #   function can be resused across models. It is TEMPORARY.
-#             theta = self.get_direction(dt) + noise
-#             mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
-#             self.percep_model.focal_loc += mv_vec
-#             self.percep_model.focal_angle = convert_angles(theta)
-#             # append location to walk list
-#             walk.append(self.percep_model.focal_loc.copy())
-#         # done. save to all_walks
-#         all_walks.append(list(walk))
-
-#     # Restore focal location and angle
-#     self.percep_model.focal_loc = orig_loc
-#     self.percep_model.focal_angle = orig_angle
-
-#     # concatenate walks
-#     walks = sum(all_walks, [])
-
-#     # Convert list to 2xN array: row of x-vals then row of y-vals
-#     walks = np.column_stack(walks)
-#     # Detect good bin edges
-#     dim_min = np.floor(walks.min(axis=1))
-#     dim_max = np.ceil(walks.max(axis=1))
-#     n_xedges = round((dim_max[0]-dim_min[0])/0.25)
-#     n_yedges = round((dim_max[1]-dim_min[1])/0.25)
-#     xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
-#     yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
-
-#     H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:], 
-#                                         bins=(xedges,yedges))
-#     H = H.T # for plotting
-
-#     fig = plt.figure(figsize=(5,5))
-
-#     # Display actual historgram
-#     # ax = fig.add_subplot(title='Random walker path histogram',
-#     #                      aspect='equal')
-#     # X, Y = np.meshgrid(xedges, yedges)
-#     # ax.pcolormesh(X, Y, H)
-#     # self.percep_model.targets.plot_targets_to_axis(ax)
-
-#     # Display with interpolation
-#     ax = fig.add_subplot(title='Random walker path histogram, interpolated',
-#                             aspect='equal')
-#     im = NonUniformImage(ax, interpolation='bilinear')
-#     xcenters = (xedges[:-1] + xedges[1:]) / 2
-#     ycenters = (yedges[:-1] + yedges[1:]) / 2
-#     im.set_data(xcenters, ycenters, H)
-#     ax.add_image(im)
-#     self.percep_model.targets.plot_targets_to_axis(ax)
-#     ax.set_xlim(dim_min[0],dim_max[0])
-#     ax.set_ylim(dim_min[1],dim_max[1])
-
-#     # Plot individual walks
-#     if plot_tracks:
-#         for walk in all_walks:
-#             walk = np.column_stack(walk)
-#             ax.plot(walk[0,:], walk[1,:], 'k')
-#     plt.show()
-
-
-
 class IsingExtModel:
     '''
     This only extends Ising slightly. The primary novelty is the underlying 
@@ -1000,6 +803,35 @@ class IsingExtModel:
     def _dtheta_dt(self, Theta=None, focal_loc=None):
         '''Helper function for root finding. Wrapper around dtheta_dt.'''
         return self.dtheta_dt(None, Theta, focal_loc)
+    
+
+    def plot_dtheta_dt(self, focal_loc=None, wb_plot=False):
+        '''Plot dtheta/dt as a function of theta for given focal location.
+        
+        Set wb_plot to True if plotting in a Jupyter notebook
+
+        Parameters
+        ----------
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use the percep_model's 
+            focal_loc.
+        '''
+
+        thetas = np.linspace(-np.pi, np.pi, 1000)
+        dthetas = np.array([self._dtheta_dt(theta, focal_loc) for theta in thetas])
+
+        if wb_plot:
+            plt.figure(figsize=(6.5,3.25))
+        else:
+            plt.figure(figsize=(8,4))
+        plt.plot(thetas, dthetas)
+        plt.axhline(0, color='k', linestyle='--')
+        plt.title('dTheta/dt vs Theta')
+        plt.xlabel('Theta (radians)')
+        plt.ylabel('dTheta/dt')
+        # plt.ylim(-1.1,1.1)
+        plt.grid()
+        plt.show()
 
 
     def get_direction(self, dt):
