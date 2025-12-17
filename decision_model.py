@@ -6,7 +6,8 @@ it wants to go based on static targets with certain geometry
 import numpy as np
 from scipy import stats
 from scipy.integrate import solve_ivp
-from scipy.optimize import root_scalar
+# from scipy.optimize import root_scalar
+from scipy.optimize import root
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.image import NonUniformImage
@@ -646,7 +647,7 @@ class IsingExtModel:
     center. Hard to know if this is better or worse.
     '''
 
-    def __init__(self, percep_model=None, T=0.2, 
+    def __init__(self, percep_model=None, T=0.2, K=1,
                  left_off=-np.pi+0.1, left_on=-np.pi+0.5, 
                  right_on=np.pi-0.5, right_off=np.pi-0.1, nu=1):
         '''From a PerceptionModel with its Targets object, establishes a model 
@@ -662,6 +663,8 @@ class IsingExtModel:
             consensus directions for different layouts or focal locations/angles.
         T : float
             Temperature for Ising model
+        K : float
+            Coupling strength for Kuramoto turning speed.
         Optional Keyword Arguments for trunccosine kernel
             - left_off=-np.pi+0.1 : left blindspot
             - left_on=-np.pi+0.5 : left endpoint for fully on
@@ -671,12 +674,14 @@ class IsingExtModel:
         '''
 
         self.T = T
+        self.K = K
         self.left_off = left_off
         self.left_on = left_on
         self.right_on = right_on
         self.right_off = right_off
         self.nu = nu
         self.weighting_name = "Truncated Cosine"
+        self.gamma = None  # last coherence value found. used by dgamma_dt if none provided
 
         if percep_model is None:
             self.percep_model = PerceptionModel()
@@ -691,11 +696,11 @@ class IsingExtModel:
 
 
     def trunccosine(self, x):
-        r'''Function generator that returns cos(pi*(x/pi)^nu) multipled by a smooth 
-        cutoff function. On the interval left_on to right_on, the function is
-        cos(pi*(x/pi)^nu). Outside of left_off to right_off, the function is 0.
-        Between left_off and left_on, the function ramps up smoothly from 0 in a 
-        way that is Cinf.
+        r'''Function that returns cos(pi*(x/pi)^nu) multipled by a smooth 
+        cutoff function parameterized by object attributes. On the interval 
+        left_on to right_on, the function is cos(pi*(x/pi)^nu). Outside of 
+        left_off to right_off, the function is 0. Between left_off and left_on, 
+        the function ramps up smoothly from 0 in a way that is Cinf.
         
         Let \eta(t) be the standard bump function defined by:
         .. math::
@@ -770,39 +775,178 @@ class IsingExtModel:
         plt.show()
 
 
-    def dtheta_dt(self, t=None, Theta=None, focal_loc=None):
-        '''Get the time derivative of theta according to the Ising model.
+    def dgamma_dt(self, t=None, gamma=None, focal_loc=None):
+        '''Get the time derivative of gamma according to the Ising model.
+        For use directly in ODE solvers.
 
         Parameters
         ----------
         t : float, optional
             time variable for ODE solver compatibility. Not used.
-        Theta : float, optional
-            current angle of the focal locust in allocentric coordinates. 
-            If None, use self.percep_model.focal_angle.
+        gamma : float, optional
+            current (complex) coherence value of the neural band. 
+            If None, use self.percep_model.focal_angle with a coherence 
+            strength of 1.
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use the percep_model's 
+            focal_loc.
 
         Returns
         -------
-        dtheta_dt : float
-            time derivative of theta according to the Ising model
+        dgamma_dt : float complex
+            time derivative of gamma according to the Ising model
         '''
+
+        if gamma is None:
+            Theta = self.percep_model.focal_angle
+            gamma = np.exp(1j*Theta)
+        else:
+            Theta = np.angle(gamma)
 
         angles_rel, signals = self.percep_model.get_target_signals(Theta, focal_loc)
         if angles_rel.size == 0:
-            return 0.0
-        # The angles recieved above are egocentric, based on a heading of Theta. 
-        #     Convert to allocentric.
-        if Theta is None:
-            Theta = self.percep_model.focal_angle
+            return -gamma
+        # The angles recieved above are relative to Theta, i.e., the 
+        #   angle between the polar location of each target and Theta.
+        #   Convert to allocentric polar angles.
         angles = convert_angles(angles_rel+Theta)
-        return np.sum(signals*angles/(1+np.exp(
-            -2*angles.size*self.trunccosine(angles_rel)/self.T)
-            ))/(signals.sum()*angles.size) - Theta
+        
+        # Compute the sum over all target locusts.
+        summands = signals*np.exp(1j*angles)/(1+np.exp(
+            -2*angles.size*self.trunccosine(angles_rel)/self.T))
+        
+        return np.sum(summands)/signals.sum() - gamma
     
 
-    def _dtheta_dt(self, Theta=None, focal_loc=None):
-        '''Helper function for root finding. Wrapper around dtheta_dt.'''
-        return self.dtheta_dt(None, Theta, focal_loc)
+    def dgamma_dt_vec(self, gamma_vec, focal_loc=None):
+        '''Wrapper around dgamma_dt for use in root finding for equilibria.
+        Here, gamma_vec is a length 2 ndarray of real and imaginary parts.
+
+        Parameters
+        ----------
+        gamma_vec : length 2 ndarray of float
+            current (complex) coherence value of the neural band.
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use the percep_model's 
+            focal_loc.
+
+        Returns
+        -------
+        dgamma_dt_vec : length 2 ndarray of float
+            complex time derivative of gamma according to the Ising model
+        '''
+
+        dgamma = self.dgamma_dt(None, gamma_vec[0] + 1j*gamma_vec[1], focal_loc)
+        return np.array([dgamma.real, dgamma.imag])
+    
+
+    def gamma_equilib(self, focal_loc=None):
+        '''Find equilibrium gamma value(s) for the current percep_model and
+        focal_loc from a mesh of starting values on the unit circle.
+
+        Parameters
+        ----------
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use the percep_model's 
+            focal_loc.
+
+        Returns
+        -------
+        gamma_eqs : list of complex
+            list of equilibrium gamma values
+        '''
+
+        init_angles = np.linspace(-np.pi, np.pi-0.01, 60)
+        init_vals = np.zeros((init_angles.size, 2), dtype=np.double)
+        init_vals[:,0] = np.cos(init_angles)
+        init_vals[:,1] = np.sin(init_angles)
+        final_gammas = []
+        for init_val in init_vals:
+            sol = root(self.dgamma_dt_vec, init_val, args=(focal_loc,),
+                       method='hybr', tol=1e-8)
+            # Only store unique solutions
+            if sol.success:
+                gamma_eq = sol.x[0] + 1j*sol.x[1]
+                # Check if close to any existing solution
+                close_check = False
+                for existing_gamma in final_gammas:
+                    if np.abs(gamma_eq - existing_gamma) < 0.1:
+                        close_check = True
+                        break
+                if not close_check:
+                    final_gammas.append(gamma_eq)
+            # else:
+            #     print("Warning: Root finding did not converge for initial value ",
+            #           init_val)
+        return final_gammas
+    
+
+    def run_dgamma_dt(self, focal_loc=None, init_gamma=None, t_Final=30):
+        '''Integrate the dgamma/dt equation in order to approach a stable 
+        equilibrium for the neural ring model. Uses RK45 solver from scipy. 
+        Starts from a unit coherence in the direction of Theta if given,
+        otherwise uses the model's current gamma value if set, otherwise uses 
+        a unit coherence in the direction of the percep_model's focal_angle.
+
+        Parameters
+        ----------
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use the percep_model's 
+            focal_loc.
+        gamma : complex float, optional
+            initial coherence value. If None, use the model's
+            current gamma value if set, otherwise use a unit vector based on 
+            percep_model's focal_angle.
+        t_Final : float, optional
+            final time for integration.
+
+        Returns
+        -------
+        gamma_equilib : complex float
+            Equilibrium gamma value reached by integration.
+        '''
+
+        if init_gamma is None:
+            if hasattr(self, 'gamma') and self.gamma is not None:
+                init_gamma = self.gamma
+            else:
+                init_gamma = np.exp(1j*self.percep_model.focal_angle)
+
+        sol = solve_ivp(self.dgamma_dt, [0, t_Final], [init_gamma], args=(focal_loc,), 
+                        rtol=1e-6, atol=1e-9)
+        if np.abs(sol.y[0,-1]-sol.y[0,-2]) > 1e-4:
+            print("Warning: Integration may not have reached equilibrium.")
+        return sol.y[0,-1]
+    
+
+    def dtheta_dt(self, t=None, theta=None, gamma=None, focal_loc=None):
+        '''Torque model based on the Ising model coherence value.
+        
+        Parameters
+        ----------
+        t : float, optional
+            time variable for ODE solver compatibility. Not used.
+        theta : float, optional
+            current angle of the focal locust in allocentric coordinates. 
+            If None, use self.percep_model.focal_angle.
+        gamma : complex float, optional
+            Coherence value from neural ring. If None, it will be computed 
+            via run_dgamma_dt starting from either self.gamma (the last 
+            gamma value found in this function) or a unit vector based on
+            theta with the result stored in self.gamma.
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use the percep_model's 
+            focal_loc.'''
+        if theta is None:
+            theta = self.percep_model.focal_angle
+        if gamma is None:
+            if hasattr(self, 'gamma') and self.gamma is not None:
+                gamma = self.gamma
+            else:
+                gamma = np.exp(1j*theta)
+            self.gamma = self.run_dgamma_dt(focal_loc=focal_loc, init_gamma=gamma)
+
+        return self.K*np.abs(self.gamma)*np.sin(np.angle(self.gamma)-theta)
     
 
     def plot_dtheta_dt(self, focal_loc=None, wb_plot=False):
@@ -818,7 +962,7 @@ class IsingExtModel:
         '''
 
         thetas = np.linspace(-np.pi, np.pi, 1000)
-        dthetas = np.array([self._dtheta_dt(theta, focal_loc) for theta in thetas])
+        dthetas = np.array([self.dtheta_dt(theta=theta, focal_loc=focal_loc) for theta in thetas])
 
         if wb_plot:
             plt.figure(figsize=(6.5,3.25))
@@ -835,7 +979,7 @@ class IsingExtModel:
 
 
     def get_direction(self, dt):
-        '''Integrate the Ising model for one time step dt to get new direction.
+        '''Integrate the Ising torque model for one time step dt to get new direction.
         
         Parameters
         ----------
@@ -848,51 +992,40 @@ class IsingExtModel:
     
 
     def _process_point(self, args):
-            ii, jj, X, Y = args
-            focal_loc = np.array([X[jj,ii],Y[jj,ii]])
-            init_angles = np.linspace(-np.pi+0.001, np.pi-0.002, 1000, endpoint=False)
-            final_thetas = []
-            sgn = np.sign(self._dtheta_dt(init_angles[0], focal_loc))
-            last_angle = init_angles[0]
-            for init_angle in init_angles[1:]:
-                this_sgn = np.sign(self._dtheta_dt(init_angle,focal_loc))
-                if np.sign(this_sgn) != sgn:
-                    if this_sgn == 0:
-                        root = init_angle
-                        last_angle = init_angle + 0.00001
-                        sgn = self._dtheta_dt(last_angle, focal_loc)
-                    else:
-                        # Use bracket method to find the root.
-                        sol = root_scalar(self._dtheta_dt, 
-                                          bracket=[last_angle, init_angle],
-                                          args=(focal_loc,),
-                                          method='brentq', xtol=1e-6)
-                        root = sol.root
-                        last_angle = init_angle.copy()
-                        sgn = this_sgn
-                    # Is the root stable? Use an Euler approximation to 
-                    #   the derivative to check.
-                    stability = self._dtheta_dt(root + 0.00001, focal_loc) - \
-                                self._dtheta_dt(root - 0.00001, focal_loc)
-                    if stability < 0:
-                        # stable, save it
-                        if not np.round(root, decimals=3) in final_thetas:
-                            final_thetas.append(np.round(root, decimals=3))
-                else:
-                    last_angle = init_angle.copy()
-                    sgn = this_sgn
+        '''Helper function for processing a single mesh point in plot_direction_mesh.
+        
+        Parameters
+        ----------
+        args : tuple
+            (ii, jj, X, Y) where ii and jj are the mesh indices and X and Y 
+            are the mesh coordinate arrays.
 
-            return (ii, jj, final_thetas)
+        Returns
+        -------
+        ii : int
+            mesh x index
+        jj : int
+            mesh y index
+        final_thetas : list of float
+            list of stable equilibrium angles found at this mesh point
+        '''
+
+        ii, jj, X, Y = args
+        focal_loc = np.array([X[jj,ii], Y[jj,ii]])
+
+        final_gammas = self.gamma_equilib(focal_loc=focal_loc)
+        final_thetas = [convert_angles(np.angle(gamma)) for gamma in final_gammas]
+
+        return ii, jj, final_thetas
     
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
                             wb_plot=False, pool=None):
         '''Create a mesh of starting locations and, for each point in the mesh, 
-        find the stable equilibria of the direction model. Then plot 
-        the result as a vector field of unit vectors.
-        
-        There may be multiple solutions, so use a multi-start with a root finding 
-        algorithm.
+        find the (eventually) stable equilibria of the direction model dgamma/dt 
+        and plot the consensus directions.
+
+        For now, just plot all the equilibria found at each mesh point.
 
         Set wb_plot to True if plotting in a Jupyter notebook
 
@@ -904,10 +1037,6 @@ class IsingExtModel:
         ylim : (ymin,ymax) tuple of floats
             y limits for mesh, inclusive
         num_y : number of steps in y direction
-        return_thetas : bool
-            if True, return all multiple solutions of stable equilibria found 
-            as a list of lists. The first value in each list is the (x,y) 
-            coordinate in the mesh, and the second value is a list of stable equilibria.
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
         pool : multiprocessing.Pool, optional

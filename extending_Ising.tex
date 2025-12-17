@@ -49,11 +49,11 @@ Now suppose we let the total number of neurons/spins $N$ get large. However, in 
 \[
 n_i = \frac{1}{N}\sum_{j\in G_i}\sigma_j
 \]
-where $G_i$ is the group of neurons associated with $\theta_i$. We will now make a second change from Couzin's group and define a \textit{coherence vector} given by averaging complex unit vectors according to the relative number of active neurons,
+where $G_i$ is the group of neurons associated with $\theta_i$. We will now make a second change from Couzin's group and define a \textit{coherence value} $\gamma\in\mathbb{C}$ given by averaging complex unit vectors according to the relative number of active neurons associated with them,
 \begin{equation}
-\gamma = \sum_{j=1}^{k}n_j e^{i\theta_j},\label{eq:gamma}
+\gamma = \sum_{j=1}^{k}n_j e^{i\theta_j}.\label{eq:gamma}
 \end{equation}
-where $\gamma = Re^{i\Theta}$ with $R$ representing the coherence strength and $\Theta$ representing the consensus direction.
+Here, $\gamma = Re^{i\Theta}$ with $R$ representing the \textit{coherence strength} and $\Theta$ representing the \textit{consensus direction}.
 
 Instead of simulating the process of each individual neuron turning on and off, we would like to put together a mean-field model. Assume we have a current consensus direction, $\Theta$. This means that on average, active neurons are pointing toward $\Theta$. 
 
