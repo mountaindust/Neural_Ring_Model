@@ -19,11 +19,13 @@ H = -\frac{k}{N}\sum_{i\neq j}J_{ij}\sigma_i\sigma_j,
 \]
 where $J_{ij}$ is the interaction strength between spins $i$ and $j$. The sum over all $i\neq j$ assumes a fully-connected network of spins/neurons (all interact with all), and only pairs of ``on'' spins contribute to the energy. A positive $J_{ij}$ indicates an excitatory interaction between spin $i$ and spin $j$ which lowers energy (consensus lowers the energy of the system) while a negative $J_{ij}$ indicates an inhibitory interaction that raises the energy.
 
-The idea is that the neurons will seek to find a state which minimizes the energy of the system, and this state will represent a consensus direction given by averaging all ``votes''/on-states:
+The decision to divide by the total number of neurons $N$ in the Hamiltonian normalizes the energy with respect to the size of the network and keeps the energy from blowing up as $N$ gets large. The inclusion of $k$ is never explained in the published papers, but it has the effect of making the energy landscape steeper as the number of targets increase. This means that you are more likely to get stuck in local minima - i.e., you need more temperature in order to explore the entire space. This could be biological - see Claire Hemingway's work on choice overload. In Grobonos's PRXLife paper, he also multiplies by a constant representing velocity. This would imply that the faster an organism is moving, the steeper the energy landscape and again, the less ability to explore the space. Also probably quite biological! 
+
+The idea is that the neurons will seek to find a state which minimizes the energy of the system, and this state will represent a consensus velocity given by averaging all ``votes''/on-states:
 \[
-\theta_{\text{chosen}} = \frac{1}{N}\sum_{i=1}^{N}\theta_{\sigma_i}\sigma_i
+\vec{V} = \frac{v_0}{N}\sum_{i=1}^{N}\hat{u}_{\sigma_i}\sigma_i.
 \]
-where here, $\theta_{\sigma_i}$ is the $\theta_i$ associated with $\sigma_i$.
+Here, $\hat{u}_{\sigma_i}$ is the unit vector in the direction $\theta_i$ that is associated with $\sigma_i$, $v_0$ is a proportionality constant, and $\vec{V}$ is a consensus velocity.
 
 Computationally, this minimum can be found using the Metropolis-Hastings algorithm, where a change in neural state $\sigma_i$ is dependent on the change of energy $\Delta H$ that accompanies it according to the Boltzmann weight
 \[
@@ -43,42 +45,65 @@ This is quite similar to Metropolis-Hastings for low temperature ($T<2$), and pa
 
 \subsection*{Derivation of model}
 
-Now suppose we let the number of neurons/spins $N$ get large. However, in a departure from Couzin's group, we will not assume that the size of each of the $k$ groups is the same. Instead, let's suppose that groups' relative sizes are given by the signal strength $s_i$ paired with the spins' associated direction $\theta_i$. Then the fraction of the total number of active neurons associated with $\theta_i$ is given by
+Now suppose we let the total number of neurons/spins $N$ get large. However, in a departure from Couzin's group, we will not assume that the size of each of the $k$ groups is the same. Instead, let's suppose that groups' relative sizes are given by the signal strength $s_i$ paired with the spins' associated direction $\theta_i$. The fraction of the total number of active neurons associated with $\theta_i$ is still given by
 \[
 n_i = \frac{1}{N}\sum_{j\in G_i}\sigma_j
 \]
-where $G_i$ is the group of neurons associated with $\theta_i$, and the consensus direction will be given by the arithmetic average direction among active neurons
-\[
-\theta_{\text{chosen}} = \sum_{i=1}^{N}\theta_i\frac{s_in_i}{s_{\text{total}}}
-\]
-where $s_{\text{total}}$ is the sum of all signals $s_i$.
+where $G_i$ is the group of neurons associated with $\theta_i$. We will now make a second change from Couzin's group and define a \textit{coherence vector} given by averaging complex unit vectors according to the relative number of active neurons,
+\begin{equation}
+\gamma = \sum_{j=1}^{k}n_j e^{i\theta_j},\label{eq:gamma}
+\end{equation}
+where $\gamma = Re^{i\Theta}$ with $R$ representing the coherence strength and $\Theta$ representing the consensus direction.
 
-Instead of simulating each individual neuron, we would like to put together a mean-field model. Assume we have a current consensus direction, $\Theta$. This means that on average, active neurons are pointing toward $\Theta$. We would like to know the change in energy associated with turning on or off one additional neuron, but this is a function of how many total neurons there are, $N$. I suspect that division by $N$ in the Hamiltonian is really just for scaling purposes - e.g., so that as we let $N\rightarrow\infty$, the energy doesn't drop to negative infinity. So instead, assume $N$ is equal to the number of active neurons for our consensus direction, $\Theta$. Then if we turn on one additional neuron associated with direction $\theta_i$, $\Delta H = -2kJ_{\Theta,i}$ (the 2 is there because the new neuron interacts with $N$ neurons twice, once on the left and once on the right). Similarly, if we turn one neuron off, the change in energy is approximately $\Delta H = 2kJ_{\Theta,i}$. Here I have construed $J_{\Theta,i}$ to be the interaction kernel between directions $\Theta$ and $\theta_i$.
+Instead of simulating the process of each individual neuron turning on and off, we would like to put together a mean-field model. Assume we have a current consensus direction, $\Theta$. This means that on average, active neurons are pointing toward $\Theta$. 
+
+We would like to know the change in energy associated with turning on or off one additional neuron, but this is a function of how many total neurons there are, $N$. (\textbf{Note:} I suspect that division by $N$ in the Hamiltonian is really just for scaling purposes - e.g., so that as we let $N\rightarrow\infty$, the energy doesn't drop to negative infinity.) So instead, assume $N$ is equal to the number of active neurons for our consensus direction, $\Theta$. Then if we turn on one additional neuron associated with direction $\theta_j$, $\Delta H = -2kJ_{\Theta,j}$ (the 2 is there because the new neuron interacts with $N$ neurons twice, once on the left and once on the right). Similarly, if we turn one neuron off, the change in energy is approximately $\Delta H = 2kJ_{\Theta,j}$. Here I construed $J_{\Theta,j}$ to be the interaction kernel between directions $\Theta$ and $\theta_j$.
 
 So, Glauber dynamics give us approximate rates of switching equal to
 \[
-r^{(i)}_{1\rightarrow 0} = \frac{1}{1+\exp\left(\frac{2kJ_{\Theta,i}}{T}\right)}\ \ \ \ \ \ r^{(i)}_{0\rightarrow 1} = \frac{1}{1+\exp\left(-\frac{2kJ_{\Theta,i}}{T}\right)}.
+r^{(i)}_{1\rightarrow 0} = \frac{1}{1+\exp\left(\frac{2kJ_{\Theta,j}}{T}\right)}\ \ \ \ \ \ r^{(i)}_{0\rightarrow 1} = \frac{1}{1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)}.
 \]
-Now we find the master equation in the limit as $N\rightarrow\infty$ as in the PNAS paper, and rearrange.
+Now we find the master equation in the limit as $N\rightarrow\infty$ as in the PNAS paper, and rearrange. But now, since the groups of neurons are of unequal size, the result is
 \[
-\frac{dn_i}{dt} = \frac{1}{k\left(1+\exp\left(-\frac{2kJ_{\Theta,i}}{T}\right)\right)} - n_i
+\frac{dn_j}{dt} = \frac{\frac{s_j}{s_{\text{total}}}-n_j}{\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)} - \frac{n_j}{\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}
 \]
+\[
+\frac{dn_j}{dt} = \frac{s_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)} - n_j
+\]
+where $s_j/s_{\text{total}} = |G_j|/N$, $s_{\text{total}} = \sum s_j$.
 
-Recall that the consensus direction is given by
-\[
-\Theta = \sum_{i=1}^{N}\theta_i\frac{s_in_i}{s_{\text{total}}}.
-\]
-Assume that a separation of time-scales exists where neural updates occur far faster than the physical movement of the organism. On this time-scale, $\theta_i$ is roughly constant in time, so we can take the derivative of this last equation and then plug in the master equation to get:
+Assuming neural updates are fast compared to the physical dynamics of the system, we can consider the steady state solution 
 \begin{equation}
-	\frac{d\Theta}{dt} = \sum_{i=1}^{k}\theta_i\frac{s_i}{s_{\text{total}}}\frac{dn_i}{dt} = \frac{1}{k}\sum_{i=1}^{k}\frac{s_i\theta_i}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,i}}{T}\right)\right)} - \Theta
+	n_j = \frac{s_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}.
 \end{equation}
-This can be interpreted directly as a torque model by interpreting $\Theta$ as the current direction the locust is facing. \textbf{Note:} One could easily relax the assumption of separation of time-scales within the context of a motion model; you just need to apply a product rule and feed the torque model information about how the target positions are changing as a function of locust movement.
+Substituting into \eqref{eq:gamma}, we get
+\begin{equation}
+\gamma = \sum_{j=1}^{k}\frac{s_j e^{i\theta_j}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)},
+\label{eq:model}
+\end{equation}
+Equating real and imaginary parts, we can put together a two equation system for $R$ and $\Theta$.
 
-We will work with the interaction kernel from the PNAS paper, where $\theta_{ij}$ is the angle between $\theta_i$ and $\theta_j$.
+Regarding the interaction term in the denominator: can work with a type of interaction kernel that is similar to the PNAS paper (see further notes in section below), where $\theta_{ij}$ is the angle between $\theta_i$ and $\theta_j$.
 \[
 J_{ij} = \cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right)
 \]
-$\nu=0.5$ was used in the PNAS paper and is similar to Mexican hat (see Fig. S1, Table S1, and Fig. 1 for comparison with experiments).
+$\nu=0.5$ was used in the PNAS paper and is similar to Mexican hat (see Fig. S1, Table S1, and Fig. 1 for comparison with experiments). Note that if $\nu=1$, $J_{\Theta,\theta_j}$ is the same as $\gamma\cdot e^{i\theta_j}$ treating the complex numbers as real valued vectors in $\mathbb{R}^2$.
+
+Now assume that the agent is facing a direction $\theta$ and updates this direction according to the torque model
+\[
+\frac{d\theta}{dt} = KR\sin(\Theta - \theta).
+\]
+where $K$ is a physical constant related to turning speed. The idea here is that this a physical model of turning which describes the impetus for the animal to change its direction based on the direction it wants to go versus the direction it is currently facing and the coherence of that desired direction. Note that this is a Kuramoto-type coupling with all directions to targets since equating imaginary parts of \eqref{eq:model} gives us
+\[
+\frac{d\theta}{dt} = \sum_{j=1}^{k}\frac{Ks_j\sin(\theta_j - \theta)}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}.
+\]
+It's just that the consensus direction is the result of an Ising approach to energy minimization rather than direct averaging. Indeed: this framework contains Kuramoto coupling as a submodel when $T\rightarrow 0$, which is the case mentioned earlier of a gradient descent approach to the energy landscape - it will find local minima, but won't explore the state space at all. This means the Ising approach should give more optimal results in general.
+
+%Now assume that a separation of time-scales exists where neural updates occur far faster than any changes in signal strength (e.g. due to getting physically closer to the target). Furthermore, assume that the turning speed of the organism also takes place on a slower time scale so that $\theta_i$ is roughly constant compared to $dn_i/dt$. Then we can take the derivative of this last equation and then plug in the master equation to get:
+%\begin{equation}
+%	\frac{d\gamma}{dt} = \sum_{j=1}^{k}\frac{dn_j}{dt}e^{i\theta_j} = \sum_{j=1}^{k}\frac{s_je^{i\theta_j}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)} - \gamma
+%\end{equation}
+%Note that this can be converted back to the PNAS paper model by taking all $s_j=1/k$ and letting $\vec{V}=v_0(\text{Re}(\gamma),\text{Im}(\gamma))^T$.
 
 \subsection*{Note about signal strengths}
 This discrete version assumes that radial target locations are identified by a separate perception process. If signal strength does not vary with distance, then the underlying assumption is that all targets are delta functions. Avoiding this, the best choice for signal strength is probably some measure of the perceived angular width of the target. The problem of not being able to tell two overlapping locusts from one close locust is avoided by the prior target identification, and size scales with distance in the proper manner (closer yields larger numbers while staying bounded) and is also biological in the sense that visual size of the object IS the actual signal reaching the eye.
