@@ -786,7 +786,7 @@ class IsingExtModel:
         gamma : float, optional
             current (complex) coherence value of the neural band. 
             If None, use self.percep_model.focal_angle with a coherence 
-            strength of 1.
+            strength of 0.1.
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use the percep_model's 
             focal_loc.
@@ -799,8 +799,8 @@ class IsingExtModel:
 
         if gamma is None:
             Theta = self.percep_model.focal_angle
-            R = 1
-            gamma = np.exp(1j*Theta)
+            R = 0.1
+            gamma = R*np.exp(1j*Theta)
         else:
             Theta = np.angle(gamma)
             R = np.abs(gamma)
@@ -814,11 +814,12 @@ class IsingExtModel:
         angles = convert_angles(angles_rel+Theta)
         
         # Compute the sum over all target locusts.
-        # catch overflow warnings from exp for large negative arguments and
-        #   turn into errors for debugging
-        warnings.filterwarnings('error')
-        summands = signals*np.exp(1j*angles)/(1+np.exp(
-            -2*angles.size*R*self.trunccosine(angles_rel)/self.T))
+        # suppress overflow warnings: they indicate R is too large and are 
+        #   likely the result of whatever numerical algorithm is being used
+        #   trying out a bad R value.
+        with np.errstate(over='ignore'):
+            summands = signals*np.exp(1j*angles)/(1+np.exp(
+                -2*angles.size*R*self.trunccosine(angles_rel)/self.T))
         
         return np.sum(summands)/signals.sum() - gamma
     
@@ -847,7 +848,7 @@ class IsingExtModel:
 
     def gamma_equilib(self, focal_loc=None):
         '''Find equilibrium gamma value(s) for the current percep_model and
-        focal_loc from a mesh of starting values on the unit circle.
+        focal_loc from a mesh of starting values on the circle of radius 0.1.
 
         Parameters
         ----------
@@ -863,8 +864,8 @@ class IsingExtModel:
 
         init_angles = np.linspace(-np.pi, np.pi-0.01, 60)
         init_vals = np.zeros((init_angles.size, 2), dtype=np.double)
-        init_vals[:,0] = np.cos(init_angles)
-        init_vals[:,1] = np.sin(init_angles)
+        init_vals[:,0] = 0.1*np.cos(init_angles)
+        init_vals[:,1] = 0.1*np.sin(init_angles)
         final_gammas = []
         for init_val in init_vals:
             sol = root(self.dgamma_dt_vec, init_val, args=(focal_loc,),
@@ -900,8 +901,8 @@ class IsingExtModel:
             focal_loc.
         gamma : complex float, optional
             initial coherence value. If None, use the model's
-            current gamma value if set, otherwise use a unit vector based on 
-            percep_model's focal_angle.
+            current gamma value if set, otherwise use a vector of magnitude 
+            0.1 based on percep_model's focal_angle.
         t_Final : float, optional
             final time for integration.
 
@@ -915,7 +916,7 @@ class IsingExtModel:
             if hasattr(self, 'gamma') and self.gamma is not None:
                 init_gamma = self.gamma
             else:
-                init_gamma = np.exp(1j*self.percep_model.focal_angle)
+                init_gamma = 0.1*np.exp(1j*self.percep_model.focal_angle)
 
         sol = solve_ivp(self.dgamma_dt, [0, t_Final], [init_gamma], args=(focal_loc,), 
                         rtol=1e-6, atol=1e-9)
