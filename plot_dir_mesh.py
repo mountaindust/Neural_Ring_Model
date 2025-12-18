@@ -19,7 +19,8 @@ import decision_model as model
 def run_direction_mesh(pool=None):
     # First, define target locations and geometries as a Targets object.
     target_locs = np.array([[4.33,2.5],[4.33,-2.5]]) # (x,y) coordinates
-    targets = model.Targets(locs=target_locs, geom_name='circle', r=0.15)
+    targets = model.Targets(locs=target_locs, geom_name=None)
+    # targets = model.Targets(locs=target_locs, geom_name='circle', r=0.15)
 
 
     # Next, define an observer location and angle of observation.

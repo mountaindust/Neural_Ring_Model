@@ -3,11 +3,10 @@ Sets up a scenario in which a single locust makes decisions about the direction
 it wants to go based on static targets with certain geometry
 '''
 
-import warnings
 import numpy as np
 from scipy import stats
 from scipy.integrate import solve_ivp
-from scipy.optimize import root
+from scipy.optimize import root, newton
 import matplotlib.pyplot as plt
 from matplotlib import cm
 from matplotlib.image import NonUniformImage
@@ -862,14 +861,14 @@ class IsingExtModel:
             list of equilibrium gamma values
         '''
 
-        init_angles = np.linspace(-np.pi, np.pi-0.01, 60)
+        init_angles = np.linspace(-np.pi, np.pi-0.01)
         init_vals = np.zeros((init_angles.size, 2), dtype=np.double)
-        init_vals[:,0] = 0.1*np.cos(init_angles)
-        init_vals[:,1] = 0.1*np.sin(init_angles)
+        init_vals[:,0] = 0.5*np.cos(init_angles)
+        init_vals[:,1] = 0.5*np.sin(init_angles)
         final_gammas = []
         for init_val in init_vals:
             sol = root(self.dgamma_dt_vec, init_val, args=(focal_loc,),
-                       method='hybr', tol=1e-8)
+                       method='hybr', tol=1e-7)
             # Only store unique solutions
             if sol.success:
                 gamma_eq = sol.x[0] + 1j*sol.x[1]
@@ -881,9 +880,6 @@ class IsingExtModel:
                         break
                 if not close_check:
                     final_gammas.append(gamma_eq)
-            # else:
-            #     print("Warning: Root finding did not converge for initial value ",
-            #           init_val)
         return final_gammas
     
 
@@ -1128,17 +1124,17 @@ class IsingExtModel:
         # Plot arrows, coloring multi-solution points differently
         ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
                     U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
-                    angles='xy', color='blue', scale=20, width=0.005, 
+                    angles='xy', color='blue', scale=30, width=0.004, 
                     label='Single Solution')
         ax.quiver(X[multi_sol], Y[multi_sol], 
                     U_list[0][multi_sol], V_list[0][multi_sol], 
-                    angles='xy', color='red', scale=20, width=0.005,
+                    angles='xy', color='red', scale=30, width=0.004,
                     label='Multiple Solutions')
         for n in range(1, len(U_list)):
             nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
             ax.quiver(X[nonzero_mask], Y[nonzero_mask], 
                       U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
-                      angles='xy', color='red', scale=20, width=0.005)
+                      angles='xy', color='red', scale=30, width=0.004)
         fig.legend(loc='outside center right')
         ax.set_title("Direction Model")
         ax.set_aspect('equal')
