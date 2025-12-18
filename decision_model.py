@@ -3,10 +3,10 @@ Sets up a scenario in which a single locust makes decisions about the direction
 it wants to go based on static targets with certain geometry
 '''
 
+import warnings
 import numpy as np
 from scipy import stats
 from scipy.integrate import solve_ivp
-# from scipy.optimize import root_scalar
 from scipy.optimize import root
 import matplotlib.pyplot as plt
 from matplotlib import cm
@@ -799,9 +799,11 @@ class IsingExtModel:
 
         if gamma is None:
             Theta = self.percep_model.focal_angle
+            R = 1
             gamma = np.exp(1j*Theta)
         else:
             Theta = np.angle(gamma)
+            R = np.abs(gamma)
 
         angles_rel, signals = self.percep_model.get_target_signals(Theta, focal_loc)
         if angles_rel.size == 0:
@@ -812,8 +814,11 @@ class IsingExtModel:
         angles = convert_angles(angles_rel+Theta)
         
         # Compute the sum over all target locusts.
+        # catch overflow warnings from exp for large negative arguments and
+        #   turn into errors for debugging
+        warnings.filterwarnings('error')
         summands = signals*np.exp(1j*angles)/(1+np.exp(
-            -2*angles.size*self.trunccosine(angles_rel)/self.T))
+            -2*angles.size*R*self.trunccosine(angles_rel)/self.T))
         
         return np.sum(summands)/signals.sum() - gamma
     

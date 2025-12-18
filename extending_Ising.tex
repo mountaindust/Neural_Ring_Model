@@ -53,22 +53,22 @@ where $G_i$ is the group of neurons associated with $\theta_i$. We will now make
 \begin{equation}
 \gamma = \sum_{j=1}^{k}n_j e^{i\theta_j}.\label{eq:gamma}
 \end{equation}
-Here, $\gamma = Re^{i\Theta}$ with $R$ representing the \textit{coherence strength} and $\Theta$ representing the \textit{consensus direction}.
+Here, $\gamma = Re^{i\Theta}$ with $0\leq R\leq 1$ representing the \textit{coherence strength} and $\Theta$ representing the \textit{consensus direction}.
 
-Instead of simulating the process of each individual neuron turning on and off, we would like to put together a mean-field model. Assume we have a current consensus direction, $\Theta$. This means that on average, active neurons are pointing toward $\Theta$. 
+Instead of simulating the process of each individual neuron turning on and off, we would like to put together a mean-field model. Assume we have a current coherence value, $\gamma$, corresponding to the state of the neural ring. This means that the mean effect of the ring amounts to a fraction $R$ of the $N$ neurons collectively being on and choosing the direction $\Theta$. 
 
-We would like to know the change in energy associated with turning on or off one additional neuron, but this is a function of how many total neurons there are, $N$. (\textbf{Note:} I suspect that division by $N$ in the Hamiltonian is really just for scaling purposes - e.g., so that as we let $N\rightarrow\infty$, the energy doesn't drop to negative infinity.) So instead, assume $N$ is equal to the number of active neurons for our consensus direction, $\Theta$. Then if we turn on one additional neuron associated with direction $\theta_j$, $\Delta H = -2kJ_{\Theta,j}$ (the 2 is there because the new neuron interacts with $N$ neurons twice, once on the left and once on the right). Similarly, if we turn one neuron off, the change in energy is approximately $\Delta H = 2kJ_{\Theta,j}$. Here I construed $J_{\Theta,j}$ to be the interaction kernel between directions $\Theta$ and $\theta_j$.
+We would like to know the change in energy associated with turning on or off one additional neuron. $RN$ neurons are turned on, so if we turn on one additional neuron associated with direction $\theta_j$, $\Delta H = -2kRJ_{\Theta,j}$ (the 2 is there because the new neuron interacts with $RN$ neurons twice, once on the left and once on the right). Similarly, if we turn one neuron off, the change in energy is approximately $\Delta H = 2kRJ_{\Theta,j}$. Here I construed $J_{\Theta,j}$ to be the interaction kernel between directions $\Theta$ and $\theta_j$.
 
 So, Glauber dynamics give us approximate rates of switching equal to
 \[
-r^{(i)}_{1\rightarrow 0} = \frac{1}{1+\exp\left(\frac{2kJ_{\Theta,j}}{T}\right)}\ \ \ \ \ \ r^{(i)}_{0\rightarrow 1} = \frac{1}{1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)}.
+r^{(i)}_{1\rightarrow 0} = \frac{1}{1+\exp\left(\frac{2kRJ_{\Theta,j}}{T}\right)}\ \ \ \ \ \ r^{(i)}_{0\rightarrow 1} = \frac{1}{1+\exp\left(-\frac{2kRJ_{\Theta,j}}{T}\right)}.
 \]
 Now we find the master equation in the limit as $N\rightarrow\infty$ as in the PNAS paper, and rearrange. But now, since the groups of neurons are of unequal size, the result is
 \[
-\frac{dn_j}{dt} = \frac{\frac{s_j}{s_{\text{total}}}-n_j}{\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)} - \frac{n_j}{\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}
+\frac{dn_j}{dt} = \frac{\frac{s_j}{s_{\text{total}}}-n_j}{\left(1+\exp\left(-\frac{2kRJ_{\Theta,j}}{T}\right)\right)} - \frac{n_j}{\left(1+\exp\left(-\frac{2kRJ_{\Theta,j}}{T}\right)\right)}
 \]
 \[
-\frac{dn_j}{dt} = \frac{s_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)} - n_j
+\frac{dn_j}{dt} = \frac{s_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kRJ_{\Theta,j}}{T}\right)\right)} - n_j
 \]
 where $s_j/s_{\text{total}} = |G_j|/N$, $s_{\text{total}} = \sum s_j$.
 
@@ -76,72 +76,99 @@ Regarding the interaction term in the denominator: can work with a type of inter
 \[
 J_{ij} = \cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right)
 \]
-$\nu=0.5$ was used in the PNAS paper and is similar to Mexican hat (see Fig. S1, Table S1, and Fig. 1 for comparison with experiments). Note that if $\nu=1$, $J_{\Theta,\theta_j}$ is the same as $\gamma\cdot e^{i\theta_j}$ treating the complex numbers as real valued vectors in $\mathbb{R}^2$.
+$\nu=0.5$ was used in the PNAS paper and is similar to Mexican hat (see Fig. S1, Table S1, and Fig. 1 for comparison with experiments). Note that if $\nu=1$, $RJ_{\Theta,\theta_j}$ is the same as $\gamma\cdot e^{i\theta_j}$ treating the complex numbers as real valued vectors in $\mathbb{R}^2$.
 
 Assuming neural updates are fast compared to the physical dynamics of the system, we can consider steady state solutions which satisfy
 \begin{equation}
-	n_j = \frac{s_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}.
+	n_j^* = \frac{s_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kR^*J_{\Theta^*,j}}{T}\right)\right)}.
 	\label{eq:steadystate}
 \end{equation}
-Substituting into Eqn. \eqref{eq:gamma}, we get
+Substituting into Eqn. \eqref{eq:gamma}, we see that steady state values for $\gamma$ satisfy
 \begin{equation}
-\gamma = \sum_{j=1}^{k}\frac{s_j e^{i\theta_j}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}.
+\gamma^* = \sum_{j=1}^{k}\frac{s_j e^{i\theta_j}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kR^*J_{\Theta^*,j}}{T}\right)\right)}.
 \label{eq:model}
 \end{equation}
-Equating real and imaginary parts then gives us a two equation system with unknowns $R$ and $\Theta$ that allow us to solve for these variables in steady-state configurations of the neural ring.
+Equating real and imaginary parts then gives us a two equation system with unknowns $R^*$ and $\Theta^*$ that allow us to solve for these variables in steady-state configurations of the neural ring.
 
 Now assume that the agent is facing a direction $\theta$ and updates this direction according to the torque model
 \begin{equation}
-\frac{d\theta}{dt} = KR\sin(\Theta - \theta).\label{eq:torqemodel}
+\frac{d\theta}{dt} = KR^*\sin(\Theta^* - \theta).\label{eq:torqemodel}
 \end{equation}
 where $K$ is a physical constant related to turning speed. The idea here is that this a physical model of turning which describes the impetus for the animal to change its direction based on the direction it wants to go versus the direction it is currently facing and the coherence of that desired direction. 
 
 Since by Eqns. \eqref{eq:gamma} and \eqref{eq:steadystate},
 \[
-R(\Theta)e^{i(\Theta-\theta)} = \sum_{j=1}^{k}n_j(\Theta) e^{i\theta_j-\theta} = \sum_{j=1}^{k}\frac{s_j e^{i(\theta_j-\theta)}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)},
+R^*e^{i(\Theta^*-\theta)} = \sum_{j=1}^{k}n_j^* e^{i\theta_j-\theta} = \sum_{j=1}^{k}\frac{s_j e^{i(\theta_j-\theta)}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kR^*J_{\Theta^*,j}}{T}\right)\right)},
 \]
 we can apply Euler's formula and equate imaginary parts to get
 \[
-R(\Theta)\sin(\Theta-\theta) = \sum_{j=1}^{k}\frac{s_j \sin(\theta_j-\theta)}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}
+R^*\sin(\Theta^*-\theta) = \sum_{j=1}^{k}\frac{s_j \sin(\theta_j-\theta)}{s_{\text{total}}\left(1+\exp\left(-\frac{2kR^*J_{\Theta^*,j}}{T}\right)\right)}
 \]
 In other words,
 \[
-\frac{d\theta}{dt} = \sum_{j=1}^{k}\frac{Ks_j\sin(\theta_j - \theta)}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)}.
+\frac{d\theta}{dt} = \sum_{j=1}^{k}\frac{Ks_j\sin(\theta_j - \theta)}{s_{\text{total}}\left(1+\exp\left(-\frac{2kR^*J_{\Theta^*,j}}{T}\right)\right)}.
 \]
-This reveals that our torque model is a Kuramoto-type coupling with respect to target directions and with the coherence $R$ dependent on the dynamics of the neural ring (and therefore the current consensus direction $\Theta$). We can therefore view the Ising approach to consensus direction through neural energy minimization as a generalization of Kuramoto averaging over the targets. Regular Kuramoto averaging is the case when $T\rightarrow 0$, which corresponds to a gradient descent approach to the energy landscape - it will find local minima, but won't explore the state space. This suggests that the Ising approach may give more optimal results in general, because it allows for more exploration of the geometry before making a decision.
+This reveals that our torque model is a Kuramoto-type coupling with respect to target directions and with the coherence $R^*$ derived from the asymptotic dynamics of the neural ring. We can therefore view the Ising approach to consensus direction through neural energy minimization as a generalization of Kuramoto averaging over the targets. Regular Kuramoto averaging is the case when $T\rightarrow 0$, which corresponds to a gradient descent approach to the energy landscape - it will find local minima, but won't explore the state space. This suggests that the Ising approach may give more optimal results in general, because it allows for more exploration of the geometry before making a decision.
 
 This model relies on steady-state solutions to the neural dynamics described in Eqn. \eqref{eq:model}. We want to consider only stable equilibia while keeping in mind that there may be multiple such solutions.
 
 Again assuming that neural updates occur far faster than changes in the physical configuration of the system (including target angles and signal strengths), we can take the derivative of Eqn. \eqref{eq:gamma} to get
 \begin{equation}
-	\frac{d\gamma}{dt} = \sum_{j=1}^{k}\frac{dn_j}{dt}e^{i\theta_j} = \sum_{j=1}^{k}\frac{s_je^{i\theta_j}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ_{\Theta,j}}{T}\right)\right)} - \gamma\label{eq:dgamma}
+	\frac{d\gamma}{dt} = \sum_{j=1}^{k}\frac{dn_j}{dt}e^{i\theta_j} = \sum_{j=1}^{k}\frac{s_je^{i\theta_j}}{s_{\text{total}}\left(1+\exp\left(-\frac{2kRJ_{\Theta,j}}{T}\right)\right)} - \gamma\label{eq:dgamma}
 \end{equation}
 Note that this can be converted back to the PNAS paper equation by taking all $s_j=1/k$ and letting $\vec{V}=v_0(\text{Re}(\gamma),\text{Im}(\gamma))^T$. Numerically, to chose between potentially multiple stable equilibrium values of $\gamma$, we can solve this equation from an initial condition in order to determine which basin of attraction we are in.
 
-To further analyze this model, we can determine stability of steady state solutions by considering what happens to a perturbation perpendicular to $R$ nearby an equilibrium solution $\gamma^*$. This could be in the polar sense (a perturbation in $\Theta$), but $R$ also depends upon $\Theta$ so this gets complicated. Easier is to convert to Cartesian coordinates and consider a perturbation perpendicular to the vector given by the real and imaginary parts of $\gamma$.
+To further analyze this model, we can determine stability of steady state solutions by considering what happens to a radially perpendicular perturbation nearby an equilibrium solution $\gamma^*$. This perpendicularity could be in the polar sense (a perturbation in $\Theta$), but $R$ also depends upon $\Theta$ so this gets complicated. Easier is to convert to Cartesian coordinates and consider a perturbation perpendicular to the vector given by the real and imaginary parts of $\gamma$.
 
-Let $\vec{v} = (\text{Re}(\gamma),\text{Im}(\gamma))^T$, and let $\hat{u}_j$ be a unit vector pointing in the direction $\theta_j$. Then Eqn. \ref{eq:dgamma} becomes
+Let $\vec{v} = (\text{Re}(\gamma),\text{Im}(\gamma))^T$, and let each $\hat{u}_j$ be a constant unit vector pointing in the direction $\theta_j$. Then Eqn. \ref{eq:dgamma} becomes
+\begin{equation}
+\frac{d\vec{v}}{dt} = \sum_{j=1}^{k}\frac{s_j\hat{u}_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kRJ(\vec{v},\hat{u}_j)}{T}\right)\right)} - \vec{v}\label{eq:dv}
+\end{equation}
+where $J(\vec{v},\hat{u}_j)$ refers to the same interaction kernel as before, acting on the angle between $\vec{v}$ and $\hat{u}_j$. Now we will consider a perturbation perpendicular to the equilibrium solution $\vec{v}^*$, $\vec{v} = \vec{v}^* + \epsilon \hat{n}^*$ where $\hat{n}^*$ is orthogonal to $\vec{v}^*$. Eqn. \eqref{eq:dv} can be rewritten
 \[
-\frac{d\vec{v}}{dt} = \sum_{j=1}^{k}\frac{s_j\hat{u}_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ(\vec{v},\hat{u}_j)}{T}\right)\right)} - \vec{v}
+\frac{d\vec{v}}{dt} = \sum_{j=1}^{k}\frac{s_j\hat{u}_j}{s_{\text{total}}}f_j(\vec{v}) - \vec{v}
 \]
-where $J(\vec{v},\hat{u}_j)$ refers to the same interaction kernel as before, acting on the angle between $\vec{v}$ and $\hat{u}_j$.
-Consider a perturbation perpendicular to the equilibrium solution $\vec{v}^*$, $\vec{v} = \vec{v}^* + \epsilon \hat{n}^*$ where $\hat{n}^*$ is orthogonal to $\vec{v}^*$. Plugging this into the above equation, we get
+where $f_j$ is the composition of the standard, scalar-valued logistic function $l(x)$ and a scaling of the interaction kernel $J$ with $\theta_j$,
 \[
-\frac{d\epsilon}{dt}\hat{n}^* = \sum_{j=1}^{k}\frac{s_j\hat{u}_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ(\vec{v}^* + \epsilon \hat{n}^*,\hat{u}_j)}{T}\right)\right)} - (\vec{v}^* + \epsilon \hat{n}^*).
+f_j(\vec{v}) = \frac{1}{1 + \exp\left(-\frac{2kRJ(\vec{v},\hat{u}_j)}{T}\right)} = l\left(\frac{2kRJ(\vec{v},\hat{u}_j)}{T}\right)
 \]
-Taking the dot product of $\hat{n}^*$ on both sides, we arrive at
+This implies the vectorized equations in Eqn. \eqref{eq:dv} are similar,
 \[
-\frac{d\epsilon}{dt} = \sum_{j=1}^{k}\frac{s_j(\hat{n}^*\cdot\hat{u}_j)}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ(\vec{v}^* + \epsilon \hat{n}^*,\hat{u}_j)}{T}\right)\right)} - \epsilon.
+\frac{dv_m}{dt} = \sum_{j=1}^{k}\frac{s_j\hat{u}_{j,m}}{s_{\text{total}}}f_j(\vec{v}) - v_m.
 \]
-TODO: Expand
+Then expanding the right-hand side of Eqn. \eqref{eq:dv} around $\vec{v}^*$ with a perturbation normal to $\vec{v}^*$, we get
 \[
-\frac{s_j(\hat{n}^*\cdot\hat{u}_j)}{s_{\text{total}}\left(1+\exp\left(-\frac{2kJ(\vec{v}^* + \epsilon \hat{n}^*,\hat{u}_j)}{T}\right)\right)}
+\frac{d\epsilon}{dt}\hat{n}^* = \left(\frac{1}{s_{\text{total}}}\left(\begin{array}{c}
+	\sum s_j\hat{u}_{j,1}\nabla f_j(\vec{v}^*)	\\
+	\sum s_j\hat{u}_{j,2}\nabla f_j(\vec{v}^*)
+\end{array}\right) - \left(\begin{array}{cc}
+1 & 0 \\
+0 & 1
+\end{array}\right)\right)\epsilon\hat{n}^* + \mathcal{O}(\epsilon^2)
 \]
-to the first order in $\epsilon$. Probably comes out to
+where $\nabla f_j(\vec{v})$ is here construed to be a row vector. Passing in $\hat{n}^*$, this can be simplified to
 \[
-\frac{ks_j}{2Ts_{\text{total}}}\text{sech}^2\left(\frac{kJ(\vec{v}^*,\hat{u}_j)}{T}\right)(\hat{n}^*\cdot\hat{u}_j)^2
+\frac{d\epsilon}{dt}\hat{n}^* = \left(\frac{1}{s_{\text{total}}}\sum_{j=1}^{k}s_j\hat{u}_j(\nabla f_j(\vec{v}^*)\cdot\hat{n}^*)
+- \hat{n}^*\right)\epsilon + \mathcal{O}(\epsilon^2).
 \]
-or something similar... note that $J$ is essentially a dot product.
+Applying the chain rule, we see that
+\[
+\nabla f_j(\vec{v}) = l'\left(\frac{2kRJ(\vec{v},\hat{u}_j)}{T}\right)\frac{2k\nabla RJ(\vec{v},\hat{u}_j)}{T} = \frac{k}{2T}\text{sech}^2\left(\frac{kRJ(\vec{v},\hat{u}_j)}{T}\right)\nabla RJ(\vec{v},\hat{u}_j).
+\]
+So then, taking the dot product with $\hat{n}^*$ on both sides, we arrive at
+\[
+\frac{d\epsilon}{dt} = \left(\frac{k}{2Ts_{\text{total}}}\sum_{j=1}^{k}s_j\ \text{sech}^2\left(\frac{kRJ(\vec{v},\hat{u}_j)}{T}\right)(\hat{u}_j\cdot\hat{n}^*)(\nabla RJ(\vec{v}^*,\hat{u}_j)\cdot\hat{n}^*)
+- 1\right)\epsilon + \mathcal{O}(\epsilon^2).
+\]
+Setting
+\[
+A = \frac{k}{2Ts_{\text{total}}}\sum_{j=1}^{k}s_j\ \text{sech}^2\left(\frac{kRJ(\vec{v},\hat{u}_j)}{T}\right)(\hat{u}_j\cdot\hat{n}^*)(\nabla RJ(\vec{v}^*,\hat{u}_j)\cdot\hat{n}^*),
+\]
+we conclude that the equilibrium $\vec{v}^*$ is locally asymptotically stable if $A<1$ and unstable if $A>1$.
+
+If you replace $RJ(\vec{v},\hat{u}_j)$ with the dot product $(\vec{v}\cdot\hat{u}_j)$ (corresponding to the $\nu=1$ case), then the inner product of the gradient evaluated at $\vec{v}^*$ and $\hat{n}^*$ gives you $(\hat{u}_j\cdot\hat{n}^*)$, resulting in that term squared in the above formula and allowing you to recover the expression in the PNAS paper if you set all $s_j=1$ and $s_{\text{total}}=k$.
+
+TODO: If $\nu\neq 1$, I'm not entirely sure what you get.
 
 \subsection*{Note about signal strengths}
 This discrete version assumes that radial target locations are identified by a separate perception process. If signal strength does not vary with distance, then the underlying assumption is that all targets are delta functions. Avoiding this, the best choice for signal strength is probably some measure of the perceived angular width of the target. The problem of not being able to tell two overlapping locusts from one close locust is avoided by the prior target identification, and size scales with distance in the proper manner (closer yields larger numbers while staying bounded) and is also biological in the sense that visual size of the object IS the actual signal reaching the eye.
