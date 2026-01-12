@@ -120,7 +120,7 @@ Note that this can be converted back to the PNAS paper equation by taking all $s
 
 To further analyze this model, we can determine stability of steady state solutions by considering what happens to a radially perpendicular perturbation nearby an equilibrium solution $\gamma^*$. This perpendicularity could be in the polar sense (a perturbation in $\Theta$), but $R$ also depends upon $\Theta$ so this gets complicated. Easier is to convert to Cartesian coordinates and consider a perturbation perpendicular to the vector given by the real and imaginary parts of $\gamma$.
 
-Let $\vec{v} = (\text{Re}(\gamma),\text{Im}(\gamma))^T$, and let each $\hat{u}_j$ be a constant unit vector pointing in the direction $\theta_j$. Then Eqn. \ref{eq:dgamma} becomes
+Let $\vec{v} = (\text{Re}(\gamma),\text{Im}(\gamma))^T$, and let each $\hat{u}_j$ be a constant unit vector pointing in the direction $\theta_j$. Then $R=||\vec{v}||$, and Eqn. \ref{eq:dgamma} becomes
 \begin{equation}
 \frac{d\vec{v}}{dt} = \sum_{j=1}^{k}\frac{s_j\hat{u}_j}{s_{\text{total}}\left(1+\exp\left(-\frac{2kRJ(\vec{v},\hat{u}_j)}{T}\right)\right)} - \vec{v}\label{eq:dv}
 \end{equation}
@@ -157,18 +157,21 @@ Applying the chain rule, we see that
 \]
 So then, taking the dot product with $\hat{n}^*$ on both sides, we arrive at
 \[
-\frac{d\epsilon}{dt} = \left(\frac{k}{2Ts_{\text{total}}}\sum_{j=1}^{k}s_j\ \text{sech}^2\left(\frac{kRJ(\vec{v},\hat{u}_j)}{T}\right)(\hat{u}_j\cdot\hat{n}^*)(\nabla RJ(\vec{v}^*,\hat{u}_j)\cdot\hat{n}^*)
+\frac{d\epsilon}{dt} = \left(\frac{k}{2Ts_{\text{total}}}\sum_{j=1}^{k}s_j\ \text{sech}^2\left(\frac{kR^*J(\vec{v}^*,\hat{u}_j)}{T}\right)(\hat{u}_j\cdot\hat{n}^*)(\nabla R^*J(\vec{v}^*,\hat{u}_j)\cdot\hat{n}^*)
 - 1\right)\epsilon + \mathcal{O}(\epsilon^2).
 \]
 Setting
 \[
-A = \frac{k}{2Ts_{\text{total}}}\sum_{j=1}^{k}s_j\ \text{sech}^2\left(\frac{kRJ(\vec{v},\hat{u}_j)}{T}\right)(\hat{u}_j\cdot\hat{n}^*)(\nabla RJ(\vec{v}^*,\hat{u}_j)\cdot\hat{n}^*),
+A = \frac{k}{2Ts_{\text{total}}}\sum_{j=1}^{k}s_j\ \text{sech}^2\left(\frac{kR^*J(\vec{v}^*,\hat{u}_j)}{T}\right)(\hat{u}_j\cdot\hat{n}^*)(\nabla R^*J(\vec{v}^*,\hat{u}_j)\cdot\hat{n}^*),
 \]
 we conclude that the equilibrium $\vec{v}^*$ is locally asymptotically stable if $A<1$ and unstable if $A>1$.
 
-If you replace $RJ(\vec{v},\hat{u}_j)$ with the dot product $(\vec{v}\cdot\hat{u}_j)$ (corresponding to the $\nu=1$ case), then the inner product of the gradient evaluated at $\vec{v}^*$ and $\hat{n}^*$ gives you $(\hat{u}_j\cdot\hat{n}^*)$, resulting in that term squared in the above formula and allowing you to recover the expression in the PNAS paper if you set all $s_j=1$ and $s_{\text{total}}=k$.
+If you replace $RJ(\vec{v},\hat{u}_j)$ with the dot product $(\vec{v}\cdot\hat{u}_j)$ (corresponding to the $\nu=1$ case), then the inner product of the gradient and $\hat{n}^*$ gives you $(\hat{u}_j\cdot\hat{n}^*)$, resulting in that term squared in the above formula and allowing you to recover the expression in the PNAS paper if you set all $s_j=1$ and $s_{\text{total}}=k$.
 
-TODO: If $\nu\neq 1$, I'm not entirely sure what you get.
+If $\nu\neq 1$, the result is ugly:
+\[
+\nabla RJ(\vec{v}^*,\hat{u}_j)\cdot\hat{n}^* = \nu\cos\left(\frac{\pi}{2} + \pi\left(\frac{\Theta^*-\theta_j}{\pi}\right)^\nu\right)\left(\frac{\Theta^*-\theta_j}{\pi}\right)^{\nu-1}.
+\]
 
 \subsection*{Note about signal strengths}
 This discrete version assumes that radial target locations are identified by a separate perception process. If signal strength does not vary with distance, then the underlying assumption is that all targets are delta functions. Avoiding this, the best choice for signal strength is probably some measure of the perceived angular width of the target. The problem of not being able to tell two overlapping locusts from one close locust is avoided by the prior target identification, and size scales with distance in the proper manner (closer yields larger numbers while staying bounded) and is also biological in the sense that visual size of the object IS the actual signal reaching the eye.
