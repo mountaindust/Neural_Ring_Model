@@ -168,10 +168,11 @@ we conclude that the equilibrium $\vec{v}^*$ is locally asymptotically stable if
 
 If you replace $RJ(\vec{v},\hat{u}_j)$ with the dot product $(\vec{v}\cdot\hat{u}_j)$ (corresponding to the $\nu=1$ case), then the inner product of the gradient and $\hat{n}^*$ gives you $(\hat{u}_j\cdot\hat{n}^*)$, resulting in that term squared in the above formula and allowing you to recover the expression in the PNAS paper if you set all $s_j=1$ and $s_{\text{total}}=k$.
 
-If $\nu\neq 1$, the result is ugly:
+If $\nu\neq 1$, the result is a bit uglier:
 \[
-\nabla RJ(\vec{v}^*,\hat{u}_j)\cdot\hat{n}^* = \nu\cos\left(\frac{\pi}{2} + \pi\left(\frac{\Theta^*-\theta_j}{\pi}\right)^\nu\right)\left(\frac{\Theta^*-\theta_j}{\pi}\right)^{\nu-1}.
+\nabla RJ(\vec{v}^*,\hat{u}_j)\cdot\hat{n}^* = \nu\sin\left(\pi\left(\frac{\theta_j-\Theta^*}{\pi}\right)^\nu\right)\left(\frac{\theta_j-\Theta^*}{\pi}\right)^{\nu-1}.
 \]
+Using a shift identity between sine and cosine, you can see that in the case $\nu=1$, this reduces to the dot product with a unit vector orthogonal to $\Theta^*$.
 
 \subsection*{Note about signal strengths}
 This discrete version assumes that radial target locations are identified by a separate perception process. If signal strength does not vary with distance, then the underlying assumption is that all targets are delta functions. Avoiding this, the best choice for signal strength is probably some measure of the perceived angular width of the target. The problem of not being able to tell two overlapping locusts from one close locust is avoided by the prior target identification, and size scales with distance in the proper manner (closer yields larger numbers while staying bounded) and is also biological in the sense that visual size of the object IS the actual signal reaching the eye.

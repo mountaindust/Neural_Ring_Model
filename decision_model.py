@@ -708,7 +708,6 @@ class PerceptionModel:
     the function by \psi(x).
     '''
 
-
     @staticmethod
     def _bump(t):
         result = np.zeros_like(t)
@@ -724,8 +723,6 @@ class PerceptionModel:
         return PerceptionModel._smoothstep(
             (x - left_off)/(left_on - left_off) ) * PerceptionModel._smoothstep(
             (right_off - x)/(right_off - right_on) )
-
-
 
 
 
@@ -771,7 +768,6 @@ class IsingExtModel:
         self.T = T
         self.K = K
         self.nu = nu
-        self.weighting_name = "Cosine"
         self.gamma = None  # last coherence value found. used by dgamma_dt if none provided
 
         if percep_model is None:
@@ -916,51 +912,6 @@ class IsingExtModel:
         return np.array([dgamma.real, dgamma.imag])
     
 
-    def gamma_equilib(self, focal_theta=None, focal_loc=None):
-        '''Find zeros (equilibria) of dgamma/dt for a given focal location. 
-        
-        Uses a multistart root finding starting from a mesh of points on the 
-        circle of radius 0.2. Returns a list of unique equilibrium gamma values 
-        found.
-
-        Parameters
-        ----------
-        focal_theta : float or bool, optional
-            the current heading (angle) of the observer. If None, use 
-            self.percep_model.focal_angle. If True, assume theta is the angle of 
-            the current gamma value. Use for exploring the geometry of equilibria 
-            as a function of gamma angle rather than observer angle.
-        focal_loc : array-like of length 2, optional
-            (x,y) location of the observer. If None, use self.percep_model.focal_loc.
-
-        Returns
-        -------
-        gamma_eqs : list of complex
-            list of equilibrium gamma values
-        '''
-
-        init_angles = np.linspace(-np.pi, np.pi-0.01)
-        init_vals = np.zeros((init_angles.size, 2), dtype=np.double)
-        init_vals[:,0] = 0.2*np.cos(init_angles)
-        init_vals[:,1] = 0.2*np.sin(init_angles)
-        final_gammas = []
-        for init_val in init_vals:
-            sol = root(self.dgamma_dt_vec, init_val, args=(focal_theta, focal_loc),
-                       method='hybr', tol=1e-7)
-            # Only store unique solutions
-            if sol.success:
-                gamma_eq = sol.x[0] + 1j*sol.x[1]
-                # Check if close to any existing solution
-                close_check = False
-                for existing_gamma in final_gammas:
-                    if np.abs(gamma_eq - existing_gamma) < 0.1:
-                        close_check = True
-                        break
-                if not close_check:
-                    final_gammas.append(gamma_eq)
-        return final_gammas
-    
-
     def run_dgamma_dt(self, focal_theta=None, focal_loc=None, init_gamma=None, 
                       t_Final=30):
         '''Integrate the dgamma/dt equation in order to approach a stable 
@@ -1067,7 +1018,8 @@ class IsingExtModel:
         '''
 
         thetas = np.linspace(-np.pi, np.pi, 1000)
-        dthetas = np.array([self.dtheta_dt(theta=theta, gamma=gamma, focal_loc=focal_loc) for theta in thetas])
+        dthetas = np.array([self.dtheta_dt(theta=theta, gamma=gamma, focal_loc=focal_loc) 
+                            for theta in thetas])
 
         if wb_plot:
             plt.figure(figsize=(6.5,3.25))
@@ -1096,8 +1048,53 @@ class IsingExtModel:
                               [self.percep_model.focal_angle]).y[0,-1])
     
 
+    def gamma_equilib(self, focal_theta=None, focal_loc=None):
+        '''Find zeros (equilibria) of dgamma/dt for a given focal location. 
+        
+        Uses a multistart root finding starting from a mesh of points on the 
+        circle of radius 0.2. Returns a list of unique equilibrium gamma values 
+        found.
+
+        Parameters
+        ----------
+        focal_theta : float or bool, optional
+            the current heading (angle) of the observer. If None, use 
+            self.percep_model.focal_angle. If True, assume theta is the angle of 
+            the current gamma value. Use for exploring the geometry of equilibria 
+            as a function of gamma angle rather than observer angle.
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use self.percep_model.focal_loc.
+
+        Returns
+        -------
+        gamma_eqs : list of complex
+            list of equilibrium gamma values
+        '''
+
+        init_angles = np.linspace(-np.pi, np.pi-0.01)
+        init_vals = np.zeros((init_angles.size, 2), dtype=np.double)
+        init_vals[:,0] = 0.2*np.cos(init_angles)
+        init_vals[:,1] = 0.2*np.sin(init_angles)
+        final_gammas = []
+        for init_val in init_vals:
+            sol = root(self.dgamma_dt_vec, init_val, args=(focal_theta, focal_loc),
+                       method='hybr', tol=1e-7)
+            # Only store unique solutions
+            if sol.success:
+                gamma_eq = sol.x[0] + 1j*sol.x[1]
+                # Check if close to any existing solution
+                close_check = False
+                for existing_gamma in final_gammas:
+                    if np.abs(gamma_eq - existing_gamma) < 0.1:
+                        close_check = True
+                        break
+                if not close_check:
+                    final_gammas.append(gamma_eq)
+        return final_gammas
+
+
     def _process_point(self, args):
-        '''Helper function for processing a single mesh point in plot_direction_mesh.
+        '''Helper function for processing mesh points in plot_direction_mesh.
         
         Parameters
         ----------
@@ -1111,7 +1108,7 @@ class IsingExtModel:
             mesh x index
         jj : int
             mesh y index
-        final_thetas : list of float
+        final_gammas : list of complex
             list of stable equilibrium angles found at this mesh point
         '''
 
@@ -1119,9 +1116,42 @@ class IsingExtModel:
         focal_loc = np.array([X[jj,ii], Y[jj,ii]])
 
         final_gammas = self.gamma_equilib(focal_theta=True, focal_loc=focal_loc)
-        final_thetas = [convert_angles(np.angle(gamma)) for gamma in final_gammas]
 
-        return ii, jj, final_thetas
+        return ii, jj, final_gammas
+    
+
+    def _discrim_A(self, gamma_star, focal_loc):
+        '''Determines stability of equilibria based on perturbation analysis.
+        Assumes that the focal_theta is the angle of gamma_star and calculates 
+        the A value of the linear coefficient. If A < 1, the equilibrium is stable, 
+        if A > 1, the equilibrium is unstable.
+
+        This is based on a cosine kernel with nu exponent.
+
+        Parameters
+        ----------
+        gamma_star : complex
+            equilibrium gamma value at which to compute the Jacobian
+        focal_loc : array-like of length 2
+            (x,y) location of the observer
+
+        Returns
+        -------
+        True if stable, False if unstable
+        '''
+
+        Theta = np.angle(gamma_star)
+        R = np.abs(gamma_star)
+        angles_rel, signals = self.percep_model.get_target_signals(Theta, focal_loc)
+        k = signals.size
+        # angles_rel = theta_j - Theta
+        with np.errstate(over='ignore'):
+            summands = ((signals/np.cosh(k*R*self.cosine(angles_rel)/self.T)**2)
+                        *np.sin(angles_rel)*self.nu*
+                        np.sin(np.pi*(angles_rel/np.pi)**self.nu)*
+                        (angles_rel/np.pi)**(self.nu-1))
+            A = k*summands.sum()/(2*self.T*signals.sum())
+        return A < 1
     
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
@@ -1174,6 +1204,7 @@ class IsingExtModel:
         X, Y = np.meshgrid(xmesh, ymesh)
         U_list = []
         V_list = []
+        stability_list = []
         # boolean mesh for multiple solutions
         multi_sol = np.full(X.shape, False, dtype=bool)
 
@@ -1183,37 +1214,32 @@ class IsingExtModel:
         multi_thetas = []
         
         if pool is None:
+            results = []
             for ii in range(num_x):
                 for jj in range(num_y):
                     print("Processing point ({},{})".format(ii,jj))
-                    result = self._process_point((ii,jj,X,Y))
-                    final_thetas = result[2]
-                    for n, theta in enumerate(final_thetas):
-                        if len(multi_thetas) < n+1:
-                            multi_thetas.append(np.zeros(X.shape))
-                            U_list.append(np.zeros(X.shape))
-                            V_list.append(np.zeros(X.shape))
-                        multi_thetas[n][jj,ii] = theta
-                        U_list[n][jj,ii] = np.cos(theta)
-                        V_list[n][jj,ii] = np.sin(theta)
-                    if len(final_thetas) > 1:
-                        multi_sol[jj,ii] = True
+                    results.append(self._process_point((ii,jj,X,Y)))
         else:
             args_list = [(ii, jj, X, Y) for ii in range(num_x) for jj in range(num_y)]
             print("Processing points in parallel using pool...")
             results = pool.map(self._process_point, args_list)
-            for result in results:
-                ii, jj, final_thetas = result
-                for n, theta in enumerate(final_thetas):
-                    if len(multi_thetas) < n+1:
-                        multi_thetas.append(np.zeros(X.shape))
-                        U_list.append(np.zeros(X.shape))
-                        V_list.append(np.zeros(X.shape))
-                    multi_thetas[n][jj,ii] = theta
-                    U_list[n][jj,ii] = np.cos(theta)
-                    V_list[n][jj,ii] = np.sin(theta)
-                if len(final_thetas) > 1:
-                    multi_sol[jj,ii] = True
+
+        for result in results:
+            ii, jj, final_gammas = result
+            for n, gamma in enumerate(final_gammas):
+                theta = convert_angles(np.angle(gamma))
+                if len(multi_thetas) < n+1:
+                    multi_thetas.append(np.zeros(X.shape))
+                    U_list.append(np.zeros(X.shape))
+                    V_list.append(np.zeros(X.shape))
+                    stability_list.append(np.full(X.shape, False, dtype=bool))
+                multi_thetas[n][jj,ii] = theta
+                U_list[n][jj,ii] = np.cos(theta)
+                V_list[n][jj,ii] = np.sin(theta)
+                focal_loc = np.array([X[jj,ii], Y[jj,ii]])
+                stability_list[n][jj,ii] = self._discrim_A(gamma, focal_loc)
+            if len(final_gammas) > 1:
+                multi_sol[jj,ii] = True
 
         # plot the vector field
         if wb_plot:
@@ -1224,20 +1250,63 @@ class IsingExtModel:
         ax = plt.subplot()
         # Plot targets
         self.percep_model.targets.plot_targets_to_axis(ax)
-        # Plot arrows, coloring multi-solution points differently
-        ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
-                    U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
-                    angles='xy', color='blue', scale=30, width=0.004, 
-                    label='Single Solution')
-        ax.quiver(X[multi_sol], Y[multi_sol], 
-                    U_list[0][multi_sol], V_list[0][multi_sol], 
-                    angles='xy', color='red', scale=30, width=0.004,
-                    label='Multiple Solutions')
+        ##### Plot arrows, coloring multi-solution points differently #####
+        # Single solution points (blue if stable, cyan if unstable)
+        X_single_stable = X[(multi_sol==False) & stability_list[0]]
+        Y_single_stable = Y[(multi_sol==False) & stability_list[0]]
+        U_single_stable = U_list[0][(multi_sol==False) & stability_list[0]]
+        V_single_stable = V_list[0][(multi_sol==False) & stability_list[0]]
+        ax.quiver(X_single_stable, Y_single_stable, U_single_stable, V_single_stable,
+                  angles='xy', color='blue', scale=30, width=0.004,
+                  label='Single Solution (Stable)')
+        X_single_unstable = X[(multi_sol==False) & ~stability_list[0]]
+        Y_single_unstable = Y[(multi_sol==False) & ~stability_list[0]]
+        U_single_unstable = U_list[0][(multi_sol==False) & ~stability_list[0]]
+        V_single_unstable = V_list[0][(multi_sol==False) & ~stability_list[0]]
+        ax.quiver(X_single_unstable, Y_single_unstable, U_single_unstable, V_single_unstable,
+                  angles='xy', color='cyan', scale=30, width=0.004,
+                  label='Single Solution (Unstable)')
+        # ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
+        #             U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
+        #             angles='xy', color='blue', scale=30, width=0.004, 
+        #             label='Single Solution')
+        # Multi solution points (red if stable, black if unstable)
+        X_multi_stable = X[multi_sol & stability_list[0]]
+        Y_multi_stable = Y[multi_sol & stability_list[0]]
+        U_multi_stable = U_list[0][multi_sol & stability_list[0]]
+        V_multi_stable = V_list[0][multi_sol & stability_list[0]]
+        ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
+                  angles='xy', color='red', scale=30, width=0.004,
+                  label='Multiple Solutions (Stable)')
+        X_multi_unstable = X[multi_sol & ~stability_list[0]]
+        Y_multi_unstable = Y[multi_sol & ~stability_list[0]]
+        U_multi_unstable = U_list[0][multi_sol & ~stability_list[0]]
+        V_multi_unstable = V_list[0][multi_sol & ~stability_list[0]]
+        ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
+                  angles='xy', color='black', scale=30, width=0.004,
+                  label='Multiple Solutions (Unstable)')
+        # ax.quiver(X[multi_sol], Y[multi_sol], 
+        #             U_list[0][multi_sol], V_list[0][multi_sol], 
+        #             angles='xy', color='red', scale=30, width=0.004,
+        #             label='Multiple Solutions')
         for n in range(1, len(U_list)):
+            # Continue with multi-solution points, coloring them red if stable and black if unstable
             nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
-            ax.quiver(X[nonzero_mask], Y[nonzero_mask], 
-                      U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
+            X_multi_stable = X[nonzero_mask & stability_list[n]]
+            Y_multi_stable = Y[nonzero_mask & stability_list[n]]
+            U_multi_stable = U_list[n][nonzero_mask & stability_list[n]]
+            V_multi_stable = V_list[n][nonzero_mask & stability_list[n]]
+            ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
                       angles='xy', color='red', scale=30, width=0.004)
+            X_multi_unstable = X[nonzero_mask & ~stability_list[n]]
+            Y_multi_unstable = Y[nonzero_mask & ~stability_list[n]]
+            U_multi_unstable = U_list[n][nonzero_mask & ~stability_list[n]]
+            V_multi_unstable = V_list[n][nonzero_mask & ~stability_list[n]]
+            ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
+                      angles='xy', color='black', scale=30, width=0.004)
+            # ax.quiver(X[nonzero_mask], Y[nonzero_mask], 
+            #           U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
+            #           angles='xy', color='red', scale=30, width=0.004)
         fig.legend(loc='outside center right')
         ax.set_title("Direction Model")
         ax.set_aspect('equal')
