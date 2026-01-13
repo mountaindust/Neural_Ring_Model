@@ -12,7 +12,6 @@ faster.
 from multiprocessing import Pool
 import pickle
 import numpy as np
-import matplotlib.pyplot as plt
 import decision_model as model
 
 
