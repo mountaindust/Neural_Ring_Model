@@ -35,7 +35,7 @@ class Targets:
         ----------
         locs : Nx2 ndarray (default=np.array([[15,5],[15,15]]))
             x,y coordinates of targets
-        geom : {'circle'}, (optional)
+        geom : {'circle','segment'}, (optional)
             geometry of targets. Depending on the choice, additional parameters 
             must be set to quantify the geometry. Options are:
             - 'circle' : must specify a radius r to be used for all targets or 
@@ -215,7 +215,7 @@ class Targets:
         if self.geom_name is None:
             return np.linalg.norm(loc-self.locs, axis=1)
         elif self.geom_name == 'circle':
-            return np.linalg.norm(loc-self.locs, axis=1) + self.r
+            return np.linalg.norm(loc-self.locs, axis=1) - self.r
         elif self.geom_name == 'segment':
             seg_vec = 0.5*self.l*np.array([np.cos(self.theta),np.sin(self.theta)]).T
             return self.closest_dist_btwn_lines_and_pt(self.locs-seg_vec,
@@ -322,7 +322,8 @@ class Targets:
 
 class PerceptionModel:
 
-    def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, theta_mesh=2000):
+    def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, 
+                 blind_width=0.2, theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction 
         given by focal_angle, at targets given by the targets object. All three 
         of these can be changed at any time as attributes.
@@ -337,6 +338,9 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
+        blind_width : float, optional
+            the width of a blind spot in radians. If None, no blind spot is 
+            implemented. The blind spot is centered behind the observer.
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
@@ -344,6 +348,10 @@ class PerceptionModel:
 
         self.focal_loc = np.array(focal_loc, dtype=float)
         self.focal_angle = focal_angle
+        if blind_width is not None:
+            assert blind_width > 0 and blind_width < np.pi, \
+                "blind_width must be between 0 and pi"
+        self.blind_width = blind_width
         if targets is None:
             self.targets = Targets()
         else:
@@ -402,11 +410,14 @@ class PerceptionModel:
                            norm=np.pi/8, full_signal=False):
         '''Returns the egocentric angular location of the center of each VISIBLE 
         target (closer targets that are not delta functions block ones behind) as 
-        a length N array, and a visual signal for each that is either a scalar or 
-        a binary array with support on the visible angular extents of the target.
+        a length N array, and a visual signal for each that is either a scalar 
+        for each target or a binary array for each target with support on the 
+        visible angular extents of the target.
         
-        The scalar visual signal is computed as the integral of the visual signal 
-        normalized by norm.
+        The scalar visual signal is computed as the integral of the array visual 
+        signal divided by norm. A blind spot can be implemented by setting 
+        self.blind_width; signal integration will be performed only on the visible 
+        angle domain.
         
         Uses a mesh of theta values to determine blocking, resulting in an 
         approximation of extents. This adds noise, but maybe the right kind of 
@@ -414,6 +425,19 @@ class PerceptionModel:
         or left of a blocking locust, then the blocked locust is treated as not 
         visible). Larger meshes result in a finer mesh and a better approximation 
         of exact blocking.
+
+        Perepheral vision: Currently, the blindspot is implemented as a hard 
+        cutoff in terms of signal. If the center of the target is in the blindspot 
+        but the signal overlaps with the visible domain, the location of the 
+        target is returned as being at the nearest edge of the blindspot, and the 
+        portion of the signal that overlaps with the blindspot is set to zero. 
+        
+        
+        NOTE: In the exact edge case that a target is directly behind an observer 
+        with a blindspot, then the location of the target (on the left vs the 
+        right) will depend on if the angle was reported as +pi or -pi by arctan2 
+        within get_angles_to_targets, which is in turn dependent on if y=0.0 or 
+        y=-0.0 for the target location relative to the observer.
 
         Parameters
         ----------
@@ -447,6 +471,9 @@ class PerceptionModel:
         else:
             focal_loc = np.array(focal_loc, dtype=float)
 
+        if self.blind_width is not None:
+            left_off = -np.pi + self.blind_width/2
+            right_off = np.pi - self.blind_width/2
         dists = self.targets.get_dist_to_targets(focal_loc)
         c_angles = self.targets.get_angles_to_targets(focal_loc, focal_angle)
         angles = self.targets.get_percep_angles(focal_loc, focal_angle)
@@ -466,10 +493,7 @@ class PerceptionModel:
                     signals[n,-1] = 1
                 else:
                     signals[n,idx] = 1
-            if full_signal:
-                return c_angles, signals
-            else:
-                return c_angles, 2*np.pi/self.theta_mesh.size*signals.sum(axis=1)/norm
+
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             # sort by distance
             arg_srt = dists.argsort()
@@ -490,14 +514,40 @@ class PerceptionModel:
             for n in range(1,signals.shape[0]):
                 signals[n,blocked] = 0
                 blocked = np.logical_or(blocked, signals[n,:] != 0)
-            # remove all completely blocked targets and return
+            # undo sorting to main target consistency across methods
+            inv_arg_srt = np.empty_like(arg_srt)
+            inv_arg_srt[arg_srt] = np.arange(len(arg_srt))
+            signals = signals[inv_arg_srt,:]
+            c_angles = c_angles[inv_arg_srt]
+            # remove all completely blocked targets
             vis = signals.max(axis=1) > 0
-            if full_signal:
-                return c_angles[vis], signals[vis,:]
-            else:
-                return c_angles[vis], 2*np.pi/self.theta_mesh.size*signals[vis,:].sum(axis=1)/norm
+            signals = signals[vis,:]
+            c_angles = c_angles[vis]
         else:
             raise NotImplementedError("Unknown target geometry name.")
+        
+        # Apply blindspot, normalize signals, and return
+        if self.blind_width is None:
+            domain_length = 2*np.pi
+        else:
+            domain_length = right_off - left_off
+            blind_targets = np.logical_or(c_angles < left_off, c_angles > right_off)
+            left_idx = np.searchsorted(self.theta_mesh, left_off)
+            right_idx = np.searchsorted(self.theta_mesh, right_off)
+            signals[:,:left_idx] = 0
+            signals[:,right_idx:] = 0
+            # treat peripheral targets
+            periph_targets = np.logical_and(blind_targets, signals.sum(axis=1) > 0)
+            c_angles[periph_targets] = np.where(c_angles[periph_targets] < left_off, 
+                                                left_off, right_off)
+            blind_targets = np.logical_and(blind_targets, ~periph_targets)
+            c_angles = c_angles[~blind_targets]
+            signals = signals[~blind_targets,:]
+
+        if full_signal:
+            return c_angles, signals
+        else:
+            return c_angles, domain_length/self.theta_mesh.size*signals.sum(axis=1)/norm
 
 
     def plot_binary(self, wb_plot=False):
@@ -505,7 +555,7 @@ class PerceptionModel:
         also the signal distribution from the point of view of the observer 
         based on a binary signal from each target. This is non-blocking.
         
-        Set wb_plot to True if plotting in a Jupyber notebook
+        Set wb_plot to True if plotting in a Jupyter notebook
         '''
 
         angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
