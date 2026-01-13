@@ -7,6 +7,7 @@ import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import root
 import matplotlib.pyplot as plt
+from matplotlib.image import NonUniformImage
 
 def convert_angles(theta):
     '''Given a scalar or array of angles, convert to angles in 
@@ -1310,3 +1311,138 @@ class IsingExtModel:
         return multi_thetas, X, Y, U_list, V_list
 
 
+    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
+                     start_loc=None, start_angle=None, plot_tracks=False, 
+                     wb_plot=False):
+        '''Plot a walker that starts at a specified location looking in a 
+        specified angle (defaults to the focal_loc and focal_angle in attached 
+        PerceptionModel) and moves according to the Ising torque model on a dt 
+        step size with zero-mean angular Gaussian noise with standard deviation 
+        as specified. Repeat for a number of repetitions and plot a heat map of 
+        these walks in 2D space.
+
+        The walker stops whenever it is detected to be overlapping a target or 
+        after max_steps.
+
+        Set wb_plot to True if plotting in a Jupyter notebook
+
+        Parameters
+        ----------
+        dt : float
+            Time step for the walk
+        v : float
+            Speed of the walker, assumed constant
+        std : float
+            Standard deviation of angular Gaussian noise with mean zero.
+            If zero (default), run without any angular noise.
+        repetitions : int
+            Number of walks to perform and aggregate
+        max_steps : int
+            Maximum number of steps for each walker
+        start_loc : (x,y) coordinates, optional
+            Starting location of the walk, defaults to focal_loc in the attached 
+            PerceptionModel
+        start_angle : float
+            Starting direction that the walker is facing. Defaults to 
+            focal_angle in the attached PerceptionModel
+        plot_tracks : bool
+            Whether or not to overlay the walker trajectories
+        wb_plot : bool
+            Whether or not plotting in a Jupyter notebook (adjusts size of figure)
+        '''
+
+        if start_loc is None:
+            start_loc = self.percep_model.focal_loc.copy()
+        else:
+            start_loc = np.array(start_loc, dtype=float)
+        if start_angle is None:
+            start_angle = self.percep_model.focal_angle
+        orig_loc = self.percep_model.focal_loc.copy()
+        orig_angle = self.percep_model.focal_angle
+
+        all_walks = []
+
+        for n in range(repetitions):
+            self.percep_model.focal_loc = start_loc.copy()
+            self.percep_model.focal_angle = start_angle
+            walk = [start_loc.copy()]
+            for step in range(max_steps):
+                # check for target overlap
+                if np.any(self.percep_model.targets.check_target_overlap(
+                          self.percep_model.focal_loc)):
+                    break
+                elif self.percep_model.targets.geom_name is None and \
+                np.any(np.linalg.norm(
+                       self.percep_model.focal_loc-self.percep_model.targets.locs,
+                       axis=1)<v*dt):
+                    break
+                # determine allocentric direction and take a step
+                #   assume turning speed is infinite
+                if std > 0:
+                    noise = self.rng.normal(scale=std)
+                else:
+                    noise = 0
+                # NOTE:
+                # This walk is modeled on a two-step process:
+                # 1) Update direction based on a coarsely implemented Euler-step with noise.
+                # 2) move forward in that direction a distance of v*dt.
+                theta += (self.get_direction(dt) + noise)*dt
+                mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
+                self.percep_model.focal_loc += mv_vec
+                self.percep_model.focal_angle = convert_angles(theta)
+                # append location to walk list
+                walk.append(self.percep_model.focal_loc.copy())
+            # done. save to all_walks
+            all_walks.append(list(walk))
+
+        # Restore focal location and angle
+        self.percep_model.focal_loc = orig_loc
+        self.percep_model.focal_angle = orig_angle
+
+        # concatenate walks
+        walks = sum(all_walks, [])
+
+        # Convert list to 2xN array: row of x-vals then row of y-vals
+        walks = np.column_stack(walks)
+        # Detect good bin edges
+        dim_min = np.floor(walks.min(axis=1))
+        dim_max = np.ceil(walks.max(axis=1))
+        n_xedges = round((dim_max[0]-dim_min[0])/0.25)
+        n_yedges = round((dim_max[1]-dim_min[1])/0.25)
+        xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
+        yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
+
+        H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:], 
+                                           bins=(xedges,yedges))
+        H = H.T # for plotting
+
+        if wb_plot:
+            fig = plt.figure(figsize=(6.5,4))
+        else:
+            fig = plt.figure(figsize=(5.5,5))
+
+        # Display actual historgram
+        # ax = fig.add_subplot(title='Random walker path histogram',
+        #                      aspect='equal')
+        # X, Y = np.meshgrid(xedges, yedges)
+        # ax.pcolormesh(X, Y, H)
+        # self.percep_model.targets.plot_targets_to_axis(ax)
+
+        # Display with interpolation
+        ax = fig.add_subplot(title='Random walker path histogram, interpolated',
+                             aspect='equal')
+        im = NonUniformImage(ax, interpolation='bilinear')
+        xcenters = (xedges[:-1] + xedges[1:]) / 2
+        ycenters = (yedges[:-1] + yedges[1:]) / 2
+        im.set_data(xcenters, ycenters, H)
+        ax.add_image(im)
+        self.percep_model.targets.plot_targets_to_axis(ax)
+        ax.set_xlim(dim_min[0],dim_max[0])
+        ax.set_ylim(dim_min[1],dim_max[1])
+
+        # Plot individual walks
+        if plot_tracks:
+            for walk in all_walks:
+                walk = np.column_stack(walk)
+                ax.plot(walk[0,:], walk[1,:], 'k')
+        plt.show()
