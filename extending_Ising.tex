@@ -176,15 +176,17 @@ If $\nu\neq 1$, the result is ugly:
 \subsection*{Note about signal strengths}
 This discrete version assumes that radial target locations are identified by a separate perception process. If signal strength does not vary with distance, then the underlying assumption is that all targets are delta functions. Avoiding this, the best choice for signal strength is probably some measure of the perceived angular width of the target. The problem of not being able to tell two overlapping locusts from one close locust is avoided by the prior target identification, and size scales with distance in the proper manner (closer yields larger numbers while staying bounded) and is also biological in the sense that visual size of the object IS the actual signal reaching the eye.
 
-\subsection*{Interaction kernel and visual range}
+\subsection*{Note about blind spots and smooth cutoff functions}
 
-Before, we defined the interaction kernel as
-\[
-J_{ij} = \cos\left(\pi\left(\frac{|\theta_{ij}|}{\pi}\right)^\nu\right).
-\]
-However, this actually presents us with a mathematical problem when a target is located directly behind a focal locust. In this case, the resulting torque model will have a discontinuity because, essentially, the locust cannot decide whether to turn to the left or the right in order to turn toward the target.
+If the target is located directly behind the focal locust, the torque model has a discontinuity because, essentially, the locust cannot decide whether to turn to the left or the right in order to turn toward the target. Adding a perception blindspot helps, but there are decisions to be made when the targets have non-zero volume.
+\begin{itemize}
+	\item You can decide that if the target center (a zero-volume point) is in the blindspot, the target is completely invisible. But that results in weird cases where a close or massive target is invisible even when a significant portion of its volume is in the visual range. And then it suddenly appears in full when the center moves a little bit. This seems badly discontinuous.
+	\item You can instead mask all visual signals within a blindspot, perhaps moving the assumed center of the target to the edge of the visual range  (this is what I have done). This does not solve the problem of a target directly behind entirely, because if the target is big/close enough to appear on both sides of the blindspot, you either have a discontinuity still (if you are not moving the assumed center of the target to the edge of the visual range) or you have a decision to make as to which side of the blindspot you are moving the target to. I view this last option as the least offensive because it should be both rare (a target has to be perfectly behind the focal locust to cause a decision issue) and computationally stable in terms of avoiding any mathematical discontinuities.
+\end{itemize}
 
-This can be avoided by introducing a blind spot directly behind the locust, which is more biological anyway. However, this needs to be done in a smooth manner. We utilize a smooth cutoff function to accomplish this. Let $\eta(t)$ be the standard bump function defined by:
+The interaction kernel for the neural ring should not have a blindspot - just because two angles are on opposite sides of the neural ring does not mean they are in a blindspot.
+
+Just for the sake of writing this down, if you want a smooth cutoff function for the blindspot, it can be done like this. Let $\eta(t)$ be the standard bump function defined by:
 \[
 \eta(t) = 
 \begin{cases}
@@ -201,10 +203,12 @@ Then the smooth cutoff function $\psi(x)$ that equals 1 on $[a_1, b_1]$ and 0 ou
 \psi(x) = s\left( \frac{x - a_2}{a_1 - a_2} \right) \cdot
 s\left( \frac{b_2 - x}{b_2 - b_1} \right)
 \]
-Then the new interaction kernel is $\tilde{J}_{ij}(\theta_{ij}) = \psi(\theta_{ij})J_{ij}(\theta_{ij})$.
+Multiply this by any function you want to give it support only on a defined interval.
 
 
 \section*{Continuous version}
 An issue here is that since there are angles that don't have targets, you need this $\eta$ term in Gorbonos [41] to inhibit angles which don't have signal. Given that we are supposed to take $\eta N >> J$ and $N\rightarrow\infty$, maybe it isn't important, but it's hard to say.
+
+I also think it's a mistake to focus overly on continuous incoming visual signal at the cost of identifying discrete objects in the visual field. Identification of visible objects and their definitive location in space is an important mental task that we can assume is accomplished by the brain of the creature we are considering. Otherwise, you are going to start asking yourself questions like ``can a locust tell the difference between two locusts that are overlapping each other in the visual field and one gigantic or really close locust?''
 
 \end{document}

@@ -432,7 +432,6 @@ class PerceptionModel:
         target is returned as being at the nearest edge of the blindspot, and the 
         portion of the signal that overlaps with the blindspot is set to zero. 
         
-        
         NOTE: In the exact edge case that a target is directly behind an observer 
         with a blindspot, then the location of the target (on the left vs the 
         right) will depend on if the angle was reported as +pi or -pi by arctan2 
@@ -675,6 +674,59 @@ class PerceptionModel:
         ax2.set_title('Perception Signal')
         plt.show()
 
+    r'''
+    The following functions are for implementing a smooth cutoff function in 
+    case this is desired later for the blindspot. You can parameterize the 
+    cutoff function with left_off, left_on, right_on, and right_off object 
+    attributes. On the interval left_on to right_on, the function is 1. Outside 
+    of left_off to right_off, the function is 0. Between left_off and left_on, 
+    the function ramps up smoothly from 0 in a way that is Cinf.
+
+    Let \eta(t) be the standard bump function defined by:
+    .. math::
+
+        \eta(t) = 
+        \begin{cases}
+            \exp\left( -\frac{1}{t} \right) & \text{if } t > 0, \\
+            0 & \text{if } t \leq 0.
+        \end{cases}
+
+    A smooth transition from 0 to 1 can be defined by:
+    .. math::
+
+        s(t) = \frac{\eta(t)}{\eta(t) + \eta(1 - t)}
+
+    Then define the smooth cutoff function \psi(x) by:
+    .. math::
+
+        \psi(x) = s\left( \frac{x - a_2}{a_1 - a_2} \right) \cdot
+                    s\left( \frac{b_1 - x}{b_2 - b_1} \right)
+
+    where :math:`a_2 < a_1 < 0` are the outer and inner cutoff points on the 
+    left, and :math:`0 < b_1 < b_2` are the inner and outer cutoff points on 
+    the right. The truncation of another function is then given by multiplying 
+    the function by \psi(x).
+    '''
+
+
+    @staticmethod
+    def _bump(t):
+        result = np.zeros_like(t)
+        result[t>0] = np.exp(-1/t[t>0])
+        return result
+
+    @staticmethod
+    def _smoothstep(x):
+        return PerceptionModel._bump(x)/(PerceptionModel._bump(x)+PerceptionModel._bump(1-x))
+    
+    @staticmethod
+    def _cutoff(x, left_off, left_on, right_on, right_off):
+        return PerceptionModel._smoothstep(
+            (x - left_off)/(left_on - left_off) ) * PerceptionModel._smoothstep(
+            (right_off - x)/(right_off - right_on) )
+
+
+
 
 
 class IsingExtModel:
@@ -696,9 +748,7 @@ class IsingExtModel:
     center. Hard to know if this is better or worse.
     '''
 
-    def __init__(self, percep_model=None, T=0.2, K=1,
-                 left_off=-np.pi+0.1, left_on=-np.pi+0.5, 
-                 right_on=np.pi-0.5, right_off=np.pi-0.1, nu=1):
+    def __init__(self, percep_model=None, T=0.2, K=1, nu=1):
         '''From a PerceptionModel with its Targets object, establishes a model 
         for chosing direction based on discrete Ising. Relies on get_target_signals 
         from the PerceptionModel to obtain perceived target angles and signal strength.
@@ -714,22 +764,14 @@ class IsingExtModel:
             Temperature for Ising model
         K : float
             Coupling strength for Kuramoto turning speed.
-        Optional Keyword Arguments for trunccosine kernel
-            - left_off=-np.pi+0.1 : left blindspot
-            - left_on=-np.pi+0.5 : left endpoint for fully on
-            - right_on=np.pi-0.5 : right endpoint for fully on
-            - right_off=np.pi-0.1 : right blindspot
-            - nu=1 : warping
+        nu : float
+            Exponent for cosine weighting kernel. Higher values lead to sharper peaks.
         '''
 
         self.T = T
         self.K = K
-        self.left_off = left_off
-        self.left_on = left_on
-        self.right_on = right_on
-        self.right_off = right_off
         self.nu = nu
-        self.weighting_name = "Truncated Cosine"
+        self.weighting_name = "Cosine"
         self.gamma = None  # last coherence value found. used by dgamma_dt if none provided
 
         if percep_model is None:
@@ -744,79 +786,27 @@ class IsingExtModel:
         self.rng = np.random.default_rng()
 
 
-    def trunccosine(self, x):
-        r'''Function that returns cos(pi*(x/pi)^nu) multipled by a smooth 
-        cutoff function parameterized by object attributes. On the interval 
-        left_on to right_on, the function is cos(pi*(x/pi)^nu). Outside of 
-        left_off to right_off, the function is 0. Between left_off and left_on, 
-        the function ramps up smoothly from 0 in a way that is Cinf.
-        
-        Let \eta(t) be the standard bump function defined by:
-        .. math::
+    def cosine(self, x):
+        '''Function that returns cos(pi*(x/pi)^nu).'''
 
-            \eta(t) = 
-            \begin{cases}
-                \exp\left( -\frac{1}{t} \right) & \text{if } t > 0, \\
-                0 & \text{if } t \leq 0.
-            \end{cases}
-
-        A smooth transition from 0 to 1 can be defined by:
-        .. math::
-
-            s(t) = \frac{\eta(t)}{\eta(t) + \eta(1 - t)}
-
-        Then define the smooth cutoff function \psi(x) by:
-        .. math::
-
-            \psi(x) = s\left( \frac{x - a_2}{a_1 - a_2} \right) \cdot
-                      s\left( \frac{b_1 - x}{b_2 - b_1} \right)
-
-        where :math:`a_2 < a_1 < 0` are the outer and inner cutoff points on the 
-        left, and :math:`0 < b_1 < b_2` are the inner and outer cutoff points on 
-        the right. Then the truncated cosine function is then given by multiplying.
-        
-        The idea here is to rescale theta to be between 0 and 1, then raise to the
-        power nu to control the steepness of the function, then scale back to
-        between -pi and pi and take the cosine. Truncation allows for a blindspot.'''
-
-        return self._cutoff(x, self.left_off, self.left_on, 
-                            self.right_on, self.right_off)*np.cos(np.pi*(x/np.pi)**self.nu)
+        return np.cos(np.pi*(x/np.pi)**self.nu)
 
 
-    @staticmethod
-    def _bump(t):
-        result = np.zeros_like(t)
-        result[t>0] = np.exp(-1/t[t>0])
-        return result
-    
-
-    @staticmethod
-    def _smoothstep(x):
-        return IsingExtModel._bump(x)/(IsingExtModel._bump(x)+IsingExtModel._bump(1-x))
-    
-
-    @staticmethod
-    def _cutoff(x, left_off, left_on, right_on, right_off):
-        return IsingExtModel._smoothstep(
-            (x - left_off)/(left_on - left_off) ) * IsingExtModel._smoothstep(
-            (right_off - x)/(right_off - right_on) )
-
-
-    def plot_trunccosine(self, wb_plot=False):
-        '''Plot the truncated cosine weighting function over [-pi,pi].
+    def plot_cosine(self, wb_plot=False):
+        '''Plot the cosine weighting function over [-pi,pi].
         
         Set wb_plot to True if plotting in a Jupyter notebook
         '''
 
         xmesh = np.linspace(-np.pi, np.pi, 1000)
-        ymesh = self.trunccosine(xmesh)
+        ymesh = self.cosine(xmesh)
 
         if wb_plot:
             plt.figure(figsize=(6.5,3.25))
         else:
             plt.figure(figsize=(8,4))
         plt.plot(xmesh, ymesh)
-        plt.title('Truncated Cosine Weighting Function')
+        plt.title('Cosine Weighting Function, $\\nu={}$'.format(self.nu))
         plt.xlabel('Angle (radians)')
         plt.ylabel('Weighting')
         plt.ylim(-1.1,1.1)
@@ -843,7 +833,11 @@ class IsingExtModel:
             strength of 0.1.
         focal_theta : float, optional
             the current heading (angle) of the observer. If None, use 
-            self.percep_model.focal_angle.
+            self.percep_model.focal_angle. NOTE: This only matters because a 
+            potential blindspot can affect the perceived angles of targets. 
+            Otherwise, this calculation is independent of actual observer angle 
+            and only depends on the angles of targets relative to the current
+            consensus direction (gamma angle).
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use the 
             self.percep_model.focal_loc.
@@ -861,14 +855,18 @@ class IsingExtModel:
         else:
             Theta = np.angle(gamma)
             R = np.abs(gamma)
+        if focal_theta is None:
+            focal_theta = self.percep_model.focal_angle
 
         angles_rel, signals = self.percep_model.get_target_signals(focal_theta, focal_loc)
         if angles_rel.size == 0:
             return -gamma
-        # The angles recieved above are relative to Theta, i.e., the 
-        #   angle between the polar location of each target and Theta.
-        #   Convert to allocentric polar angles.
-        angles = convert_angles(angles_rel+Theta)
+        # The angles recieved above are relative to focal_theta, i.e., the 
+        #   angle between the polar location of each target and focal_theta.
+        # Convert to allocentric polar angles.
+        angles = convert_angles(angles_rel+focal_theta)
+        # Convert to angles relative to current consensus direction (gamma angle).
+        angles_rel = convert_angles(angles-Theta)
         
         # Compute the sum over all target locusts.
         # suppress overflow warnings: they indicate R is too large and are 
@@ -876,7 +874,7 @@ class IsingExtModel:
         #   trying out a bad R value.
         with np.errstate(over='ignore'):
             summands = signals*np.exp(1j*angles)/(1+np.exp(
-                -2*angles.size*R*self.trunccosine(angles_rel)/self.T))
+                -2*angles.size*R*self.cosine(angles_rel)/self.T))
         
         return np.sum(summands)/signals.sum() - gamma
     
