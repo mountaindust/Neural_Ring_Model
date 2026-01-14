@@ -6,6 +6,7 @@ it wants to go based on static targets with certain geometry
 import numpy as np
 from scipy.integrate import solve_ivp
 from scipy.optimize import root
+from scipy.interpolate import RectBivariateSpline
 import matplotlib.pyplot as plt
 from matplotlib.image import NonUniformImage
 
@@ -947,8 +948,10 @@ class IsingExtModel:
                 if focal_theta is None:
                     focal_theta = self.percep_model.focal_angle
                 init_gamma = 0.1*np.exp(1j*focal_theta)
+        if np.isscalar(init_gamma):
+            init_gamma = np.array([init_gamma])
 
-        sol = solve_ivp(self.dgamma_dt, [0, t_Final], [init_gamma], 
+        sol = solve_ivp(self.dgamma_dt, [0, t_Final], init_gamma, 
                         args=(focal_theta, focal_loc), rtol=1e-6, atol=1e-9)
         if np.abs(sol.y[0,-1]-sol.y[0,-2]) > 1e-4:
             print("Warning: Integration may not have reached equilibrium.")
@@ -1004,11 +1007,17 @@ class IsingExtModel:
 
         Parameters
         ----------
-        gamma : complex float, optional
-            Coherence value from neural ring. If None, it will be computed 
-            via run_dgamma_dt starting from either self.gamma (the last 
-            gamma value found in this function) or a unit vector based on
-            theta with the result stored in self.gamma.
+        gamma : complex float or bool, optional
+            Equilibrium coherence value from neural ring. If None, it will be 
+            computed by solving dgamma_dt to t_Final (using run_dgamma_dt) and 
+            taking the final solution as an equilibrium value. The IC for 
+            run_dgamma_dt will be either self.gamma (the last gamma value found 
+            in this function) if it exists, or a 0.1 magnitude vector based on 
+            theta if not. self.gamma will be updated to the final gamma value 
+            found. If False, do not use self.gamma as the IC and do not update 
+            self.gamma with the final value found. This is useful for basing 
+            the result on a specific theta value rather than the current state 
+            of the neural ring.
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use the percep_model's 
             focal_loc.
@@ -1019,14 +1028,14 @@ class IsingExtModel:
                             for theta in thetas])
 
         if wb_plot:
-            plt.figure(figsize=(6.5,3.25))
+            plt.figure(figsize=(6.5,4.5))
         else:
             plt.figure(figsize=(8,4))
         plt.plot(thetas, dthetas)
         plt.axhline(0, color='k', linestyle='--')
-        plt.title('dTheta/dt vs Theta')
-        plt.xlabel('Theta (radians)')
-        plt.ylabel('dTheta/dt')
+        plt.title('$d\\theta/dt$ vs $\\theta$')
+        plt.xlabel('$\\theta$ (locust heading, radians)')
+        plt.ylabel('$d\\theta/dt$')
         # plt.ylim(-1.1,1.1)
         plt.grid()
         plt.show()
@@ -1384,9 +1393,9 @@ class IsingExtModel:
                     noise = 0
                 # NOTE:
                 # This walk is modeled on a two-step process:
-                # 1) Update direction based on a coarsely implemented Euler-step with noise.
+                # 1) Solve ODE over dt time to get new direction, then add noise.
                 # 2) move forward in that direction a distance of v*dt.
-                theta += (self.get_direction(dt) + noise)*dt
+                theta =  self.get_direction(dt) + noise*dt
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)
@@ -1407,38 +1416,66 @@ class IsingExtModel:
         # Detect good bin edges
         dim_min = np.floor(walks.min(axis=1))
         dim_max = np.ceil(walks.max(axis=1))
-        n_xedges = round((dim_max[0]-dim_min[0])/0.25)
-        n_yedges = round((dim_max[1]-dim_min[1])/0.25)
+        n_xedges = max(2, round((dim_max[0]-dim_min[0])/0.25))
+        n_yedges = max(2, round((dim_max[1]-dim_min[1])/0.25))
         xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
         yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
 
         H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:], 
                                            bins=(xedges,yedges))
-        H = H.T # for plotting
+        # Keep original H for interpolation (shape: (len(xcenters), len(ycenters)))
+        H_for_spline = H.copy()
+        # For plotting with imshow, use transposed version
+        H_plot = H_for_spline.T
 
         if wb_plot:
             fig = plt.figure(figsize=(6.5,4))
         else:
             fig = plt.figure(figsize=(5.5,5))
 
+        # Get bin centers
+        xcenters = (xedges[:-1] + xedges[1:]) / 2
+        ycenters = (yedges[:-1] + yedges[1:]) / 2
+        # Interpolate to finer grid for smoother plotting
+        # Guard against degenerate bin centers
+        if xcenters.size < 2 or ycenters.size < 2:
+            # fall back to simple imshow without interpolation
+            ax = fig.add_subplot(title='Random walker path histogram, interpolated',
+                                 aspect='equal')
+            im = ax.imshow(H_plot, extent=(xedges[0], xedges[-1], yedges[0], yedges[-1]),
+                           origin='lower', interpolation='nearest', aspect='equal')
+            fig.colorbar(im, ax=ax)
+        else:
+            x_fine = np.linspace(xcenters[0], xcenters[-1], 1000)
+            y_fine = np.linspace(ycenters[0], ycenters[-1], 1000)
+            spline_interp = RectBivariateSpline(xcenters, ycenters, H_for_spline)
+            H_fine = spline_interp(x_fine, y_fine).T  # transpose to shape (len(y_fine), len(x_fine))
+            # Plot interpolated histogram
+            ax = fig.add_subplot(title='Random walker path histogram, interpolated',
+                                 aspect='equal')
+            im = ax.imshow(H_fine, extent=(x_fine[0], x_fine[-1], y_fine[0], y_fine[-1]),
+                           origin='lower', interpolation='bilinear', aspect='equal')
+            fig.colorbar(im, ax=ax)
+
         # Display actual historgram
         # ax = fig.add_subplot(title='Random walker path histogram',
         #                      aspect='equal')
         # X, Y = np.meshgrid(xedges, yedges)
         # ax.pcolormesh(X, Y, H)
-        # self.percep_model.targets.plot_targets_to_axis(ax)
 
-        # Display with interpolation
-        ax = fig.add_subplot(title='Random walker path histogram, interpolated',
-                             aspect='equal')
-        im = NonUniformImage(ax, interpolation='bilinear')
-        xcenters = (xedges[:-1] + xedges[1:]) / 2
-        ycenters = (yedges[:-1] + yedges[1:]) / 2
-        im.set_data(xcenters, ycenters, H)
-        ax.add_image(im)
+        # Old display with interpolation
+        # ax = fig.add_subplot(title='Random walker path histogram, interpolated',
+        #                      aspect='equal')
+        # im = NonUniformImage(ax, interpolation='bilinear')
+        # xcenters = (xedges[:-1] + xedges[1:]) / 2
+        # ycenters = (yedges[:-1] + yedges[1:]) / 2
+        # im.set_data(xcenters, ycenters, H)
+        # ax.add_image(im)
+        # self.percep_model.targets.plot_targets_to_axis(ax)
+        # ax.set_xlim(dim_min[0],dim_max[0])
+        # ax.set_ylim(dim_min[1],dim_max[1])
+
         self.percep_model.targets.plot_targets_to_axis(ax)
-        ax.set_xlim(dim_min[0],dim_max[0])
-        ax.set_ylim(dim_min[1],dim_max[1])
 
         # Plot individual walks
         if plot_tracks:
