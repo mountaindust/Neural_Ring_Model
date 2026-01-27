@@ -1,0 +1,34 @@
+\documentclass[12pt]{article}
+\usepackage[bookmarks=false]{hyperref}
+\usepackage{enumerate}
+\usepackage{amssymb,amsmath,amsthm}
+\usepackage{graphicx}
+\usepackage{geometry}
+
+%\pagestyle{empty}
+
+\begin{document}
+
+\section*{Hamiltonian Alternatives}
+
+The working Hamiltonian is given by
+\[
+H = -\frac{k}{N}\sum_{i\neq j}J_{ij}\sigma_i\sigma_j,
+\]
+where $J_{ij}$ is the interaction strength between spins $i$ and $j$ with each spin associated with one of $k$ targets (so there are $k$ groups of spins) and existing in one of two states: $\sigma_i=0$ or $\sigma_i=1$ - e.g., a neuron that is not firing or firing. The sum over all $i\neq j$ assumes a fully-connected network of spins/neurons (all interact with all), and only pairs of ``on'' spins contribute to the energy. A positive $J_{ij}$ indicates an excitatory interaction between spin $i$ and spin $j$ which lowers energy (consensus lowers the energy of the system) while a negative $J_{ij}$ indicates an inhibitory interaction that raises the energy.
+
+Note: in Grobonos's PRXLife paper, he also multiplies by a constant representing velocity. This would imply that the faster an organism is moving, the steeper the energy landscape and again, the less ability to explore the space. Potentially quite biological! 
+
+If we consider instead spins that can be -1, 0, or 1, but everything else is the same, the problem is that two -1 spins interact to lower the energy, and the -1 spins are interacting with the targets. Not good.
+
+Instead, what if we have something like this:
+\[
+H = -\frac{k_t}{N_t}\sum_{i\neq j}J^t_{ij}\sigma_{t,i}\sigma_{t,j} + \frac{k_b}{N_b}\sum_{i\neq j}J^b_{ij}\sigma_{b,i}\sigma_{b,j}
+\]
+where spins $t$ are associated with one of $k_t$ targets while spins $b$ are associated with one of $k_b$ blocking obstacles. All spins are either 1 or 0, again corresponding to firing or not firing respectively.
+
+So, what is function of the interaction kernel? I think it should be a Gaussian, where the width of the Gaussian is based on the width of the organism navigating the landscape.
+
+Distance becomes really important here. Obstacles that are far away aren't obstacles, and they become more of a priority the closer they get. This may be a good lens through which to examine targets as well, but targets remain targets at any difference. There's just a question of perception - if they are far enough away, they may not be identified in a collective behavior scenario.
+
+\end{document}
