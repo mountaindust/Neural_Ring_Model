@@ -672,7 +672,7 @@ class PerceptionModel:
         ax2.set_title('Perception Signal')
         plt.show()
 
-    r'''
+    '''
     The following functions are for implementing a smooth cutoff function in 
     case this is desired later for the blindspot. You can parameterize the 
     cutoff function with left_off, left_on, right_on, and right_off object 
@@ -777,6 +777,7 @@ class IsingExtModel:
 
         # Random number generator for certain processes within the class;
         #   Can seed here for reproducability.
+        #seed = 3
         self.rng = np.random.default_rng()
 
 
@@ -951,9 +952,23 @@ class IsingExtModel:
         if np.isscalar(init_gamma):
             init_gamma = np.array([init_gamma])
 
-        sol = solve_ivp(self.dgamma_dt, [0, t_Final], init_gamma, 
-                        args=(focal_theta, focal_loc), rtol=1e-6, atol=1e-9)
-        if np.abs(sol.y[0,-1]-sol.y[0,-2]) > 1e-4:
+        # to stop solving for gamma when sufficiently close to equilibrium we:
+        # 1) initially solve for 5 unit of time
+        #    (Chose 5 by trial and error, seems to balance overshooting vs. looping, at which python is slow)
+        # 2) check whether the derivative is bigger than tolerance tol
+        # 3) repeat for 1 unit of time, checking the size of the derivative each time
+        sol = solve_ivp(self.dgamma_dt, [0, 5], init_gamma, 
+                        args=(focal_theta, focal_loc))
+        tol = 1e-4
+        T = 1
+        while np.abs(sol.y[0,-1]-sol.y[0,-2])/(sol.t[-1]-sol.t[-2]) > tol:
+            sol = solve_ivp(self.dgamma_dt, [0, 1], sol.y[:,-1], 
+                        args=(focal_theta, focal_loc))
+            T += 1
+            if T > t_Final:
+                break
+        #print(T) # in testing this was 10 for the first, then 5\pm 1 (repeated)
+        if np.abs(sol.y[0,-1]-sol.y[0,-2])/(sol.t[-1]-sol.t[-2]) > tol:
             print("Warning: Integration may not have reached equilibrium.")
         return sol.y[0,-1]
     
@@ -1395,7 +1410,10 @@ class IsingExtModel:
                 # This walk is modeled on a two-step process:
                 # 1) Solve ODE over dt time to get new direction, then add noise.
                 # 2) move forward in that direction a distance of v*dt.
-                theta =  self.get_direction(dt) + noise*dt
+                # TODO/to try:
+                # simplify this to be an Euler (Honeycutt) step instead of solving the theta equation
+                #theta = self.get_direction(dt) + noise*dt
+                theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)

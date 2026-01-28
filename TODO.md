@@ -6,7 +6,7 @@
 blind spot and disappearing/reappearing. This normally is associated with 
 unstable equilibria, but needs to be mathematically considered more carefully. 
 Maybe a mollifier?
-- Related: the ODEs have some stiff behavior. One has only to look at the root 
+- [AJB] Related: the ODEs have some stiff behavior. One has only to look at the root 
 finding situation for $d\gamma/dt$ to see an example of this. It's horribly 
 unstable. The mathematics of this need to be explored and handled.
 
@@ -14,7 +14,7 @@ Note: to some degree, stiff behavior associated with targets located behind an
 observer is likely quite biological. I wouldn't call the equations being stiff 
 there a bug - it just needs to not cause numerical problems.
 
-- Again related: the model is slow. We have to find the nearby stable equilibrium 
+- [JWB] Again related: the model is slow. We have to find the nearby stable equilibrium 
 for $\gamma$ before we have a well defined ODE for $\theta$ that we can solve. 
 Mathematically, this arrives from the separation of timescales assumption 
 between neural activity and physical activity. Perhaps $\gamma$ doesn't have to 
