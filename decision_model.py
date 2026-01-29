@@ -321,8 +321,7 @@ class Targets:
 class PerceptionModel:
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, 
-                 blind_width=0.2, vis_weight=None,
-                 theta_mesh=2000):
+                 vis_weight=True, theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction 
         given by focal_angle, at targets given by the targets object. All three 
         of these can be changed at any time as attributes.
@@ -337,15 +336,12 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        blind_width : float, optional
-            the width of a blind spot in radians. If None, no blind spot is 
-            implemented. The blind spot is centered behind the observer.
-        vis_weight : {'frontal'} (optional)
+        vis_weight : bool (default = True)
             weight given to visual targets depending on their perceived angle,
             i.e. relative to the focal locust.
-            this is a proxy for the density of neurons in the ring as a function of angle
-            - 'frontal' : weights things in front more highly than in back, continuous in angle
-                        as a start, we'll try sin(2*theta) [CORNER at the back]
+            - this is a proxy for the density of neurons in the ring as a function of angle
+            - weights things in front more highly than in back, 
+            - uses tanh_plus()
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
@@ -353,10 +349,6 @@ class PerceptionModel:
 
         self.focal_loc = np.array(focal_loc, dtype=float)
         self.focal_angle = focal_angle
-        if blind_width is not None:
-            assert blind_width > 0 and blind_width < np.pi, \
-                "blind_width must be between 0 and pi"
-        self.blind_width = blind_width
         self.vis_weight = vis_weight
         self.a = 2
         self.s = 2*np.pi/3
@@ -422,10 +414,8 @@ class PerceptionModel:
         for each target or a binary array for each target with support on the 
         visible angular extents of the target.
         
-        The scalar visual signal is computed as the integral of the array visual 
-        signal divided by norm. A blind spot can be implemented by setting 
-        self.blind_width; signal integration will be performed only on the visible 
-        angle domain.
+        The scalar visual signal is computed by integrating the array visual 
+        signal against a kernel (tanh_plus()), divided by norm.
         
         Uses a mesh of theta values to determine blocking, resulting in an 
         approximation of extents. This adds noise, but maybe the right kind of 
@@ -433,18 +423,6 @@ class PerceptionModel:
         or left of a blocking locust, then the blocked locust is treated as not 
         visible). Larger meshes result in a finer mesh and a better approximation 
         of exact blocking.
-
-        Perepheral vision: Currently, the blindspot is implemented as a hard 
-        cutoff in terms of signal. If the center of the target is in the blindspot 
-        but the signal overlaps with the visible domain, the location of the 
-        target is returned as being at the nearest edge of the blindspot, and the 
-        portion of the signal that overlaps with the blindspot is set to zero. 
-        
-        NOTE: In the exact edge case that a target is directly behind an observer 
-        with a blindspot, then the location of the target (on the left vs the 
-        right) will depend on if the angle was reported as +pi or -pi by arctan2 
-        within get_angles_to_targets, which is in turn dependent on if y=0.0 or 
-        y=-0.0 for the target location relative to the observer.
 
         Parameters
         ----------
@@ -478,9 +456,6 @@ class PerceptionModel:
         else:
             focal_loc = np.array(focal_loc, dtype=float)
 
-        if self.blind_width is not None:
-            left_off = -np.pi + self.blind_width/2
-            right_off = np.pi - self.blind_width/2
         dists = self.targets.get_dist_to_targets(focal_loc)
         c_angles = self.targets.get_angles_to_targets(focal_loc, focal_angle)
         angles = self.targets.get_percep_angles(focal_loc, focal_angle)
@@ -536,32 +511,15 @@ class PerceptionModel:
         else:
             raise NotImplementedError("Unknown target geometry name.")
         
-        # Apply visual weighting, blindspot, normalize signals, and return
-        if self.blind_width is None:
-            domain_length = 2*np.pi
-        else:
-            domain_length = right_off - left_off
-            blind_targets = np.logical_or(c_angles < left_off, c_angles > right_off)
-            left_idx = np.searchsorted(self.theta_mesh, left_off)
-            right_idx = np.searchsorted(self.theta_mesh, right_off)
-            signals[:,:left_idx] = 0
-            signals[:,right_idx:] = 0
-            # treat peripheral targets
-            periph_targets = np.logical_and(blind_targets, signals.sum(axis=1) > 0)
-            c_angles[periph_targets] = np.where(c_angles[periph_targets] < left_off, 
-                                                left_off, right_off)
-            blind_targets = np.logical_and(blind_targets, ~periph_targets)
-            c_angles = c_angles[~blind_targets]
-            signals = signals[~blind_targets,:]
+        # Apply visual weighting, normalize signals, and return
+        domain_length = 2*np.pi
 
-        if self.vis_weight is None:
-            # no weighting
-            weighted_signals = signals
-        elif self.vis_weight == 'frontal':
+        if self.vis_weight:
             # apply visual weights
             weighted_signals = signals*self.tanh_plus(self.theta_mesh)
         else:
-            print("Warning: `vis_weight` must be 'frontal' or None.")
+            # no weighting
+            weighted_signals = signals
         
         # calculate signals
         signals_final = domain_length/self.theta_mesh.size*weighted_signals.sum(axis=1)/norm
@@ -700,56 +658,6 @@ class PerceptionModel:
 
         plt.show()
 
-    '''
-    The following functions are for implementing a smooth cutoff function in 
-    case this is desired later for the blindspot. You can parameterize the 
-    cutoff function with left_off, left_on, right_on, and right_off object 
-    attributes. On the interval left_on to right_on, the function is 1. Outside 
-    of left_off to right_off, the function is 0. Between left_off and left_on, 
-    the function ramps up smoothly from 0 in a way that is Cinf.
-
-    Let \eta(t) be the standard bump function defined by:
-    .. math::
-
-        \eta(t) = 
-        \begin{cases}
-            \exp\left( -\frac{1}{t} \right) & \text{if } t > 0, \\
-            0 & \text{if } t \leq 0.
-        \end{cases}
-
-    A smooth transition from 0 to 1 can be defined by:
-    .. math::
-
-        s(t) = \frac{\eta(t)}{\eta(t) + \eta(1 - t)}
-
-    Then define the smooth cutoff function \psi(x) by:
-    .. math::
-
-        \psi(x) = s\left( \frac{x - a_2}{a_1 - a_2} \right) \cdot
-                    s\left( \frac{b_1 - x}{b_2 - b_1} \right)
-
-    where :math:`a_2 < a_1 < 0` are the outer and inner cutoff points on the 
-    left, and :math:`0 < b_1 < b_2` are the inner and outer cutoff points on 
-    the right. The truncation of another function is then given by multiplying 
-    the function by \psi(x).
-    '''
-
-    @staticmethod
-    def _bump(t):
-        result = np.zeros_like(t)
-        result[t>0] = np.exp(-1/t[t>0])
-        return result
-
-    @staticmethod
-    def _smoothstep(x):
-        return PerceptionModel._bump(x)/(PerceptionModel._bump(x)+PerceptionModel._bump(1-x))
-    
-    @staticmethod
-    def _cutoff(x, left_off, left_on, right_on, right_off):
-        return PerceptionModel._smoothstep(
-            (x - left_off)/(left_on - left_off) ) * PerceptionModel._smoothstep(
-            (right_off - x)/(right_off - right_on) )
-
 
 
 class IsingExtModel:
@@ -856,11 +764,7 @@ class IsingExtModel:
             strength of 0.1.
         focal_theta : float, optional
             the current heading (angle) of the observer. If None, use 
-            self.percep_model.focal_angle. NOTE: This only matters because a 
-            potential blindspot can affect the perceived angles of targets. 
-            Otherwise, this calculation is independent of actual observer angle 
-            and only depends on the angles of targets relative to the current
-            consensus direction (gamma angle).
+            self.percep_model.focal_angle.
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use the 
             self.percep_model.focal_loc.
