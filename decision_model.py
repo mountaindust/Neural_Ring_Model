@@ -321,7 +321,8 @@ class Targets:
 class PerceptionModel:
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, 
-                 blind_width=0.2, theta_mesh=2000):
+                 blind_width=0.2, vis_weight=None,
+                 theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction 
         given by focal_angle, at targets given by the targets object. All three 
         of these can be changed at any time as attributes.
@@ -339,6 +340,12 @@ class PerceptionModel:
         blind_width : float, optional
             the width of a blind spot in radians. If None, no blind spot is 
             implemented. The blind spot is centered behind the observer.
+        vis_weight : {'frontal'} (optional)
+            weight given to visual targets depending on their perceived angle,
+            i.e. relative to the focal locust.
+            this is a proxy for the density of neurons in the ring as a function of angle
+            - 'frontal' : weights things in front more highly than in back, continuous in angle
+                        as a start, we'll try sin(2*theta) [CORNER at the back]
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
@@ -350,6 +357,9 @@ class PerceptionModel:
             assert blind_width > 0 and blind_width < np.pi, \
                 "blind_width must be between 0 and pi"
         self.blind_width = blind_width
+        self.vis_weight = vis_weight
+        self.a = 2
+        self.s = 2*np.pi/3
         if targets is None:
             self.targets = Targets()
         else:
@@ -477,6 +487,7 @@ class PerceptionModel:
         signals = np.zeros((angles.shape[0], self.theta_mesh.size))
 
         if self.targets.geom_name is None:
+            # TODO: come back to this
             for n, theta in enumerate(angles):
                 idx = np.searchsorted(self.theta_mesh,theta)
                 if idx == len(self.theta_mesh):
@@ -493,6 +504,8 @@ class PerceptionModel:
 
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             # sort by distance
+            # TODO: Andy points out that you can have two line segments where 
+            # the one with the farther center occludes the one with the closer center.
             arg_srt = dists.argsort()
             angles = angles[arg_srt]
             c_angles = c_angles[arg_srt]
@@ -523,7 +536,7 @@ class PerceptionModel:
         else:
             raise NotImplementedError("Unknown target geometry name.")
         
-        # Apply blindspot, normalize signals, and return
+        # Apply visual weighting, blindspot, normalize signals, and return
         if self.blind_width is None:
             domain_length = 2*np.pi
         else:
@@ -541,10 +554,22 @@ class PerceptionModel:
             c_angles = c_angles[~blind_targets]
             signals = signals[~blind_targets,:]
 
-        if full_signal:
-            return c_angles, signals
+        if self.vis_weight is None:
+            # no weighting
+            weighted_signals = signals
+        elif self.vis_weight == 'frontal':
+            # apply visual weights
+            weighted_signals = signals*self.tanh_plus(self.theta_mesh)
         else:
-            return c_angles, domain_length/self.theta_mesh.size*signals.sum(axis=1)/norm
+            print("Warning: `vis_weight` must be 'frontal' or None.")
+        
+        # calculate signals
+        signals_final = domain_length/self.theta_mesh.size*weighted_signals.sum(axis=1)/norm
+
+        if full_signal:
+            return c_angles, weighted_signals
+        else:
+            return c_angles, signals_final
 
 
     def plot_binary(self, wb_plot=False):
@@ -624,6 +649,8 @@ class PerceptionModel:
         ax2.set_title('Perception Signal')
         plt.show()
 
+    def tanh_plus(self,theta):
+        return (np.tanh(self.a*(1-(theta/self.s)**2) ) + 1.0001)/(1.0001+np.tanh(self.a))
 
     def plot_blocked_signals(self, wb_plot=False):
         '''Plots visible targets and their angular direction from the observer, 
@@ -670,6 +697,7 @@ class PerceptionModel:
         ax2.set_rmin(-0.5)
         ax2.set_rlabel_position(0)
         ax2.set_title('Perception Signal')
+
         plt.show()
 
     '''
