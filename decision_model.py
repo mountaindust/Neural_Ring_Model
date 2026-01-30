@@ -5,7 +5,7 @@ it wants to go based on static targets with certain geometry
 
 import numpy as np
 from scipy.integrate import solve_ivp
-from scipy.optimize import root
+from scipy.optimize import root, brentq
 from scipy.interpolate import RectBivariateSpline
 import matplotlib.pyplot as plt
 from matplotlib.image import NonUniformImage
@@ -83,8 +83,9 @@ class Targets:
     
     def get_percep_angles(self,loc,angle=0):
         '''Given the (x,y) coordinate of an observer, loc, return an array of
-        angles corresponding to how the targets are percieved from the position 
-        of the observer when the observer is facing a direction given by angle.
+        angles corresponding to how the targets are percieved (angular extents)
+        from the position of the observer when the observer is facing a 
+        direction given by angle.
 
         Returns -pi,pi for any target that loc overlaps, except in the case of 
         delta function targets, which returns angle instead.
@@ -1112,6 +1113,87 @@ class IsingExtModel:
                 if not close_check:
                     final_gammas.append(gamma_eq)
         return final_gammas
+    
+
+    def gamma_equilib2(self, focal_theta=None, focal_loc=None):
+        '''Find zeros (equilibria) of dgamma/dt for a given focal location with 
+        new algorithm.'''
+
+        if focal_theta is None:
+            focal_theta = self.percep_model.focal_angle
+
+        angles_rel, signals = self.percep_model.get_target_signals(focal_theta, focal_loc)
+        if angles_rel.size == 0:
+            return None
+        # The angles recieved above are relative to focal_theta, i.e., the 
+        #   angle between the polar location of each target and focal_theta.
+        # Convert to allocentric polar angles.
+        angles = convert_angles(angles_rel+focal_theta)
+
+        # Create p function
+        def p_func(R, Theta, angles):
+            angles_rel = convert_angles(angles-Theta)
+            with np.errstate(over='ignore'):
+                return R - np.sum(signals/signals.sum()*np.cos(angles_rel)/
+                    (1+np.exp(-2*angles.size*R*self.cosine(angles_rel)/self.T)))
+            
+        def Theta_out(R, Theta, angles):
+            angles_rel = convert_angles(angles-Theta)
+            with np.errstate(over='ignore'):
+                return convert_angles(np.angle(np.sum(signals/signals.sum()*np.exp(1j*angles)/
+                    (1+np.exp(-2*angles.size*R*self.cosine(angles_rel)/self.T)))))
+        
+        # Build Theta grid
+        Theta_mesh = np.linspace(-np.pi, np.pi-0.01, 200)
+        Theta_vals = []
+        Theta_sols = []
+        R_sols = []
+        # We want to break the mesh into segments where p_func changes sign
+        new_list_start = True # flag to indicate when to start a new list of solutions
+        for Theta in Theta_mesh:
+            if p_func(0, Theta, angles)*p_func(1, Theta, angles) > 0:
+                new_list_start = True
+                continue
+            if new_list_start:
+                Theta_vals.append([])
+                Theta_sols.append([])
+                R_sols.append([])
+                new_list_start = False
+            R_sol = brentq(p_func, 0, 1, args=(Theta, angles), xtol=1e-7)
+            Theta_sol = Theta_out(R_sol, Theta, angles)
+            Theta_vals[-1].append(Theta)
+            Theta_sols[-1].append(Theta_sol)
+            R_sols[-1].append(R_sol)
+        Theta_sols = [np.array(item) for item in Theta_sols]
+        R_sols = [np.array(item) for item in R_sols]
+        Theta_vals = [np.array(item) for item in Theta_vals]
+
+        # Find places where the difference between Theta_sols and Theta_vals 
+        #   changes sign, indicating a crossing (equilibrium).
+        Theta_equilibs = []
+        R_equilibs = []
+        angle_diffs = []
+        for i in range(len(Theta_sols)):
+            angle_diff = convert_angles(Theta_sols[i] - Theta_vals[i])
+            idx = np.where(np.diff(np.sign(angle_diff)))[0]
+            if len(idx) > 0:
+                # Interpolate the crossings to get better estimates of equilibrium locations.
+                Theta_equilibs.extend(Theta_vals[i][idx] - (Theta_sols[i][idx]-Theta_vals[i][idx]) * (
+                    Theta_vals[i][idx+1]-Theta_vals[i][idx]) / (Theta_sols[i][idx+1]-Theta_sols[i][idx] - 
+                    (Theta_sols[i][idx]-Theta_vals[i][idx])))
+                R_equilibs.extend(R_sols[i][idx] - (Theta_sols[i][idx]-Theta_vals[i][idx]) * (
+                    R_sols[i][idx+1]-R_sols[i][idx]) / (Theta_sols[i][idx+1]-Theta_sols[i][idx] - 
+                    (Theta_sols[i][idx]-Theta_vals[i][idx])))
+            angle_diffs.extend(angle_diff)
+        angle_diffs = np.array(angle_diffs)
+        R_equilibs = np.array(R_equilibs)
+        Theta_equilibs = convert_angles(np.array(Theta_equilibs))
+        # flatten R_sols and Theta_vals
+        R_sols = np.concatenate(R_sols)
+        Theta_vals = np.concatenate(Theta_vals)
+
+        # Now return as complex numbers
+        return R_equilibs * np.exp(1j*Theta_equilibs), Theta_vals, angle_diffs, R_sols
 
 
     def _process_point(self, args):
@@ -1137,6 +1219,33 @@ class IsingExtModel:
         focal_loc = np.array([X[jj,ii], Y[jj,ii]])
 
         final_gammas = self.gamma_equilib(focal_theta=True, focal_loc=focal_loc)
+
+        return ii, jj, final_gammas
+    
+    
+    def _process_point2(self, args):
+        '''Helper function for processing mesh points in plot_direction_mesh.
+        
+        Parameters
+        ----------
+        args : tuple
+            (ii, jj, X, Y) where ii and jj are the mesh indices and X and Y 
+            are the mesh coordinate arrays.
+
+        Returns
+        -------
+        ii : int
+            mesh x index
+        jj : int
+            mesh y index
+        final_gammas : list of complex
+            list of stable equilibrium angles found at this mesh point
+        '''
+
+        ii, jj, X, Y = args
+        focal_loc = np.array([X[jj,ii], Y[jj,ii]])
+
+        final_gammas, _, _, _ = self.gamma_equilib2(focal_theta=True, focal_loc=focal_loc)
 
         return ii, jj, final_gammas
     
@@ -1244,23 +1353,7 @@ class IsingExtModel:
             args_list = [(ii, jj, X, Y) for ii in range(num_x) for jj in range(num_y)]
             print("Processing points in parallel using pool...")
             results = pool.map(self._process_point, args_list)
-
-        for result in results:
-            ii, jj, final_gammas = result
-            for n, gamma in enumerate(final_gammas):
-                theta = convert_angles(np.angle(gamma))
-                if len(multi_thetas) < n+1:
-                    multi_thetas.append(np.zeros(X.shape))
-                    U_list.append(np.zeros(X.shape))
-                    V_list.append(np.zeros(X.shape))
-                    stability_list.append(np.full(X.shape, False, dtype=bool))
-                multi_thetas[n][jj,ii] = theta
-                U_list[n][jj,ii] = np.cos(theta)
-                V_list[n][jj,ii] = np.sin(theta)
-                focal_loc = np.array([X[jj,ii], Y[jj,ii]])
-                stability_list[n][jj,ii] = self._discrim_A(gamma, focal_loc)
-            if len(final_gammas) > 1:
-                multi_sol[jj,ii] = True
+            results2 = pool.map(self._process_point2, args_list)
 
         # plot the vector field
         if wb_plot:
@@ -1268,69 +1361,87 @@ class IsingExtModel:
         else:
             fig = plt.figure(figsize=(5.5,5))
 
-        ax = plt.subplot()
-        # Plot targets
-        self.percep_model.targets.plot_targets_to_axis(ax)
-        ##### Plot arrows, coloring multi-solution points differently #####
-        # Single solution points (blue if stable, cyan if unstable)
-        X_single_stable = X[(multi_sol==False) & stability_list[0]]
-        Y_single_stable = Y[(multi_sol==False) & stability_list[0]]
-        U_single_stable = U_list[0][(multi_sol==False) & stability_list[0]]
-        V_single_stable = V_list[0][(multi_sol==False) & stability_list[0]]
-        ax.quiver(X_single_stable, Y_single_stable, U_single_stable, V_single_stable,
-                  angles='xy', color='blue', scale=30, width=0.004,
-                  label='Single Solution (Stable)')
-        X_single_unstable = X[(multi_sol==False) & ~stability_list[0]]
-        Y_single_unstable = Y[(multi_sol==False) & ~stability_list[0]]
-        U_single_unstable = U_list[0][(multi_sol==False) & ~stability_list[0]]
-        V_single_unstable = V_list[0][(multi_sol==False) & ~stability_list[0]]
-        ax.quiver(X_single_unstable, Y_single_unstable, U_single_unstable, V_single_unstable,
-                  angles='xy', color='cyan', scale=30, width=0.004,
-                  label='Single Solution (Unstable)')
-        # ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
-        #             U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
-        #             angles='xy', color='blue', scale=30, width=0.004, 
-        #             label='Single Solution')
-        # Multi solution points (red if stable, black if unstable)
-        X_multi_stable = X[multi_sol & stability_list[0]]
-        Y_multi_stable = Y[multi_sol & stability_list[0]]
-        U_multi_stable = U_list[0][multi_sol & stability_list[0]]
-        V_multi_stable = V_list[0][multi_sol & stability_list[0]]
-        ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
-                  angles='xy', color='red', scale=30, width=0.004,
-                  label='Multiple Solutions (Stable)')
-        X_multi_unstable = X[multi_sol & ~stability_list[0]]
-        Y_multi_unstable = Y[multi_sol & ~stability_list[0]]
-        U_multi_unstable = U_list[0][multi_sol & ~stability_list[0]]
-        V_multi_unstable = V_list[0][multi_sol & ~stability_list[0]]
-        ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
-                  angles='xy', color='black', scale=30, width=0.004,
-                  label='Multiple Solutions (Unstable)')
-        # ax.quiver(X[multi_sol], Y[multi_sol], 
-        #             U_list[0][multi_sol], V_list[0][multi_sol], 
-        #             angles='xy', color='red', scale=30, width=0.004,
-        #             label='Multiple Solutions')
-        for n in range(1, len(U_list)):
-            # Continue with multi-solution points, coloring them red if stable and black if unstable
-            nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
-            X_multi_stable = X[nonzero_mask & stability_list[n]]
-            Y_multi_stable = Y[nonzero_mask & stability_list[n]]
-            U_multi_stable = U_list[n][nonzero_mask & stability_list[n]]
-            V_multi_stable = V_list[n][nonzero_mask & stability_list[n]]
+        for fignum, result_ver in enumerate([results, results2]):
+            for result in result_ver:
+                ii, jj, final_gammas = result
+                for n, gamma in enumerate(final_gammas):
+                    theta = convert_angles(np.angle(gamma))
+                    if len(multi_thetas) < n+1:
+                        multi_thetas.append(np.zeros(X.shape))
+                        U_list.append(np.zeros(X.shape))
+                        V_list.append(np.zeros(X.shape))
+                        stability_list.append(np.full(X.shape, False, dtype=bool))
+                    multi_thetas[n][jj,ii] = theta
+                    U_list[n][jj,ii] = np.cos(theta)
+                    V_list[n][jj,ii] = np.sin(theta)
+                    focal_loc = np.array([X[jj,ii], Y[jj,ii]])
+                    stability_list[n][jj,ii] = self._discrim_A(gamma, focal_loc)
+                if len(final_gammas) > 1:
+                    multi_sol[jj,ii] = True
+
+            ax = plt.subplot(1,2,fignum+1)
+            # Plot targets
+            self.percep_model.targets.plot_targets_to_axis(ax)
+            ##### Plot arrows, coloring multi-solution points differently #####
+            # Single solution points (blue if stable, cyan if unstable)
+            X_single_stable = X[(multi_sol==False) & stability_list[0]]
+            Y_single_stable = Y[(multi_sol==False) & stability_list[0]]
+            U_single_stable = U_list[0][(multi_sol==False) & stability_list[0]]
+            V_single_stable = V_list[0][(multi_sol==False) & stability_list[0]]
+            ax.quiver(X_single_stable, Y_single_stable, U_single_stable, V_single_stable,
+                    angles='xy', color='blue', scale=30, width=0.004,
+                    label='Single Solution (Stable)')
+            X_single_unstable = X[(multi_sol==False) & ~stability_list[0]]
+            Y_single_unstable = Y[(multi_sol==False) & ~stability_list[0]]
+            U_single_unstable = U_list[0][(multi_sol==False) & ~stability_list[0]]
+            V_single_unstable = V_list[0][(multi_sol==False) & ~stability_list[0]]
+            ax.quiver(X_single_unstable, Y_single_unstable, U_single_unstable, V_single_unstable,
+                    angles='xy', color='cyan', scale=30, width=0.004,
+                    label='Single Solution (Unstable)')
+            # ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
+            #             U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
+            #             angles='xy', color='blue', scale=30, width=0.004, 
+            #             label='Single Solution')
+            # Multi solution points (red if stable, black if unstable)
+            X_multi_stable = X[multi_sol & stability_list[0]]
+            Y_multi_stable = Y[multi_sol & stability_list[0]]
+            U_multi_stable = U_list[0][multi_sol & stability_list[0]]
+            V_multi_stable = V_list[0][multi_sol & stability_list[0]]
             ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
-                      angles='xy', color='red', scale=30, width=0.004)
-            X_multi_unstable = X[nonzero_mask & ~stability_list[n]]
-            Y_multi_unstable = Y[nonzero_mask & ~stability_list[n]]
-            U_multi_unstable = U_list[n][nonzero_mask & ~stability_list[n]]
-            V_multi_unstable = V_list[n][nonzero_mask & ~stability_list[n]]
+                    angles='xy', color='black', scale=30, width=0.004,
+                    label='Multiple Solutions (Stable)')
+            X_multi_unstable = X[multi_sol & ~stability_list[0]]
+            Y_multi_unstable = Y[multi_sol & ~stability_list[0]]
+            U_multi_unstable = U_list[0][multi_sol & ~stability_list[0]]
+            V_multi_unstable = V_list[0][multi_sol & ~stability_list[0]]
             ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
-                      angles='xy', color='black', scale=30, width=0.004)
-            # ax.quiver(X[nonzero_mask], Y[nonzero_mask], 
-            #           U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
-            #           angles='xy', color='red', scale=30, width=0.004)
-        fig.legend(loc='outside center right')
-        ax.set_title("Direction Model")
-        ax.set_aspect('equal')
+                    angles='xy', color='red', scale=30, width=0.004,
+                    label='Multiple Solutions (Unstable)')
+            # ax.quiver(X[multi_sol], Y[multi_sol], 
+            #             U_list[0][multi_sol], V_list[0][multi_sol], 
+            #             angles='xy', color='red', scale=30, width=0.004,
+            #             label='Multiple Solutions')
+            for n in range(1, len(U_list)):
+                # Continue with multi-solution points, coloring them red if stable and black if unstable
+                nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
+                X_multi_stable = X[nonzero_mask & stability_list[n]]
+                Y_multi_stable = Y[nonzero_mask & stability_list[n]]
+                U_multi_stable = U_list[n][nonzero_mask & stability_list[n]]
+                V_multi_stable = V_list[n][nonzero_mask & stability_list[n]]
+                ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
+                        angles='xy', color='black', scale=30, width=0.004)
+                X_multi_unstable = X[nonzero_mask & ~stability_list[n]]
+                Y_multi_unstable = Y[nonzero_mask & ~stability_list[n]]
+                U_multi_unstable = U_list[n][nonzero_mask & ~stability_list[n]]
+                V_multi_unstable = V_list[n][nonzero_mask & ~stability_list[n]]
+                ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
+                        angles='xy', color='red', scale=30, width=0.004)
+                # ax.quiver(X[nonzero_mask], Y[nonzero_mask], 
+                #           U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
+                #           angles='xy', color='red', scale=30, width=0.004)
+                ax.set_aspect('equal')
+        # fig.legend(loc='outside center right')
+        plt.title("Direction Model")
         plt.show()
         return multi_thetas, X, Y, U_list, V_list
 
