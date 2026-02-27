@@ -327,7 +327,7 @@ class PerceptionModel:
     density of neurons in the ring as a function of angle.'''
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, 
-                 vis_weight=True, theta_mesh=2000):
+                 neural_weight='cutoff', theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction 
         given by focal_angle, at targets given by the targets object. All three 
         of these can be changed at any time as attributes.
@@ -342,12 +342,8 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        vis_weight : bool (default = True)
-            weight given to visual targets depending on their perceived angle,
-            i.e. relative to the focal locust.
-            - this is a proxy for the density of neurons in the ring as a function of angle
-            - weights things in front more highly than in back, 
-            - uses tanh_plus()
+        neural_weight : string (default = 'cutoff')
+            Neural weighting function. Can be 'cutoff', 'tanh_plus', or None.
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
@@ -355,9 +351,17 @@ class PerceptionModel:
 
         self.focal_loc = np.array(focal_loc, dtype=float)
         self.focal_angle = focal_angle
-        self.vis_weight = vis_weight
-        self.a = 2
-        self.s = 2*np.pi/3
+        self.neural_weight = neural_weight
+        if neural_weight == 'tanh_plus':
+            self.c = 2
+            self.d = 2*np.pi/3
+        elif neural_weight == 'cutoff':
+            # = 1 when |theta|<self.c, = 0 when |theta|>self.d, smooth in between
+            self.c = np.pi/2 
+            self.d = 4*np.pi/5
+        else:
+            self.c = None
+            self.d = None
         if targets is None:
             self.targets = Targets()
         else:
@@ -367,6 +371,52 @@ class PerceptionModel:
             self.theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
         else:
             self.theta_mesh = theta_mesh
+
+
+    @staticmethod
+    def _bump(t):
+        result = np.zeros_like(t)
+        result[t>0] = np.exp(-1/t[t>0])
+        return result
+    
+    @staticmethod
+    def _smoothstep(x):
+        return PerceptionModel._bump(x)/(PerceptionModel._bump(x)+PerceptionModel._bump(1-x))
+    
+    @staticmethod
+    def _cutoff(x, left_off, left_on, right_on, right_off):
+        return PerceptionModel._smoothstep(
+            (x - left_off)/(left_on - left_off) ) * PerceptionModel._smoothstep(
+            (right_off - x)/(right_off - right_on) )
+    
+    @staticmethod
+    def _tanh_plus(theta, c, d):
+        return (np.tanh(c*(1-(theta/d)**2) ) + 1.0001)/(1.0001+np.tanh(c))
+
+    def neural_weight(self, theta):
+        '''Returns the neural weight for a given angle theta based on the 
+        weighting function. This is a proxy for the density of neurons in the 
+        ring as a function of angle, and weights things in front more highly than 
+        in back. Uses a standard cuttoff function or tanh_plus or returns ones.
+
+        Parameters
+        ----------
+        theta : float or 1D ndarray
+            angle(s) to evaluate the neural weight at
+
+        Returns
+        -------
+        neural weight(s) corresponding to input theta value(s)
+        '''
+
+        if self.neural_weight is None:
+            return np.ones_like(theta)
+        elif self.neural_weight == 'cutoff':
+            return self._cutoff(theta, -self.d, -self.c, self.c, self.d)
+        elif self.neural_weight == 'tanh_plus':
+            return self._tanh_plus(theta, self.c, self.d)
+        else:
+            raise NotImplementedError("Unknown neural weight function name.")
 
 
     def get_binary_signal(self):
@@ -421,7 +471,7 @@ class PerceptionModel:
         visible angular extents of the target.
         
         The scalar visual signal is computed by integrating the array visual 
-        signal against a kernel (tanh_plus()), divided by norm.
+        signal against a kernel (neural_weight), divided by norm.
         
         Uses a mesh of theta values to determine blocking, resulting in an 
         approximation of extents. This adds noise, but maybe the right kind of 
@@ -519,13 +569,7 @@ class PerceptionModel:
         
         # Apply visual weighting, normalize signals, and return
         domain_length = 2*np.pi
-
-        if self.vis_weight:
-            # apply visual weights
-            weighted_signals = signals*self.tanh_plus(self.theta_mesh)
-        else:
-            # no weighting
-            weighted_signals = signals
+        weighted_signals = signals*self.neural_weight(self.theta_mesh)
         
         # calculate signals
         signals_final = domain_length/self.theta_mesh.size*weighted_signals.sum(axis=1)/norm
@@ -614,8 +658,6 @@ class PerceptionModel:
         plt.show()
 
 
-    def tanh_plus(self,theta):
-        return (np.tanh(self.a*(1-(theta/self.s)**2) ) + 1.0001)/(1.0001+np.tanh(self.a))
 
 
     def plot_blocked_signals(self, wb_plot=False):
