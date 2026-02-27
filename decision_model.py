@@ -320,6 +320,11 @@ class Targets:
 
 
 class PerceptionModel:
+    '''This class takes in a Targets object and a focal location and angle for an
+    observer, and then translates that into a neural angular position and a neural 
+    spin group size for each target based on the perceived angular extents of the 
+    target, its signal strength, and a weighting function that describes the 
+    density of neurons in the ring as a function of angle.'''
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, 
                  vis_weight=True, theta_mesh=2000):
@@ -608,8 +613,10 @@ class PerceptionModel:
         ax2.set_title('Perception Signal')
         plt.show()
 
+
     def tanh_plus(self,theta):
         return (np.tanh(self.a*(1-(theta/self.s)**2) ) + 1.0001)/(1.0001+np.tanh(self.a))
+
 
     def plot_blocked_signals(self, wb_plot=False):
         '''Plots visible targets and their angular direction from the observer, 
