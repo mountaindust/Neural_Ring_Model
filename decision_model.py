@@ -419,48 +419,6 @@ class PerceptionModel:
             raise NotImplementedError("Unknown neural weight function name.")
 
 
-    def get_binary_signal(self):
-        '''Translates the focal position/angle and information about targets 
-        into an EGOCENTRIC perception signal (1D mesh) with length res_num that 
-        is binary.
-
-        Returns
-        -------
-        ndarray of length res_num representing the perception signal. Values in 
-        the signal are normalized between 0 and 1.
-        '''
-
-        angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
-        signal = np.zeros(self.theta_mesh.shape)
-
-        if self.targets.geom_name is None:
-            for theta in angles:
-                idx = np.searchsorted(self.theta_mesh,theta)
-                if idx == len(self.theta_mesh):
-                    idx = 0
-                # step function perception
-                if idx != 0 and \
-                theta-self.theta_mesh[idx-1] < self.theta_mesh[idx]-theta:
-                    signal[idx-1] = 1
-                elif idx == 0 and \
-                theta-self.theta_mesh[-1] < -self.theta_mesh[0]-theta:
-                    signal[-1] = 1
-                else:
-                    signal[idx] = 1
-        elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
-            for thetas in angles:
-                # step function perception
-                if thetas[1] > thetas[0]:
-                    theta_bool = np.logical_and(thetas[0]<=self.theta_mesh,
-                                                self.theta_mesh<=thetas[1])
-                else:
-                    theta_bool = np.logical_or(thetas[0]<=self.theta_mesh,
-                                                self.theta_mesh<=thetas[1])
-        else:
-            raise NotImplementedError("Unknown target geometry name.")
-        
-        return signal
-
 
     def get_target_signals(self, focal_angle=None, focal_loc=None, 
                            norm=np.pi/8, full_signal=False):
@@ -578,85 +536,6 @@ class PerceptionModel:
             return c_angles, weighted_signals
         else:
             return c_angles, signals_final
-
-
-    def plot_binary(self, wb_plot=False):
-        '''Plots the targets and their angular extents from the observer, and 
-        also the signal distribution from the point of view of the observer 
-        based on a binary signal from each target. This is non-blocking.
-        
-        Set wb_plot to True if plotting in a Jupyter notebook
-        '''
-
-        angles = self.targets.get_percep_angles(self.focal_loc, self.focal_angle)
-
-        if wb_plot:
-            plt.figure(figsize=(6.5,3.25))
-        else:
-            plt.figure(figsize=(12,6))
-
-        ###### Target Geometry Plot ######
-        ax1 = plt.subplot(121)
-
-        # First, plot the targets themselves
-        self.targets.plot_targets_to_axis(ax1)
-
-        # Now plot perception lines
-        if self.targets.geom_name is None:
-            # plot geometric angles. Requires adding back angle of focal locust
-            #   to get allocentric angles
-            for n, theta in enumerate(angles+self.focal_angle):
-                r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
-                x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(theta))
-                y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(theta))
-                ax1.plot(x,y,'k')
-        elif self.targets.geom_name == 'circle':
-            # plot perception angles. Requires adding back angle of focal locust
-            #   to get allocentric angles
-            for n, thetas in enumerate(angles+self.focal_angle):
-                r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
-                for ii in range(2):
-                    x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(thetas[ii]))
-                    y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(thetas[ii]))
-                    ax1.plot(x,y,'k')
-        elif self.targets.geom_name == 'segment':
-            # plot perception angles. Requires adding back angle of focal locust
-            #   to get allocentric angles
-            for n, thetas in enumerate(angles+self.focal_angle):
-                r = np.linalg.norm(self.targets.locs[n,:] - self.focal_loc)
-                try:
-                    l = self.targets.l[n]
-                    r += l[n]
-                except TypeError:
-                    l = self.targets.l
-                    r += l
-                for ii in range(2):
-                    x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(thetas[ii]))
-                    y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(thetas[ii]))
-                    ax1.plot(x,y,'k')
-        else:
-            raise NotImplementedError("This geometry still TBD in PerceptionModel.")
-
-        ax1.arrow(self.focal_loc[0],self.focal_loc[1],
-                  0.5*np.cos(self.focal_angle),0.5*np.sin(self.focal_angle), 
-                width=0.1, head_length=0.25)
-        ax1.set_aspect('equal')
-        ax1.set_title('Target Geometry')
-
-        ###### Perception Signal Plot ######
-        ax2 = plt.subplot(122, projection='polar')
-
-        p_func = self.get_binary_signal(2000)
-
-        ax2.plot(self.theta_mesh,p_func)
-        ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
-        ax2.set_rmin(-0.5)
-        ax2.set_rmax(1)
-        ax2.set_rticks([0, 0.5, 1])
-        ax2.set_rlabel_position(0)
-        ax2.set_title('Perception Signal')
-        plt.show()
-
 
 
 
