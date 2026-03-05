@@ -4,7 +4,7 @@ it wants to go based on static targets with certain geometry
 '''
 
 import numpy as np
-from scipy.integrate import solve_ivp
+from scipy.integrate import solve_ivp, quad
 from scipy.optimize import root, brentq
 from scipy.interpolate import RectBivariateSpline
 import matplotlib.pyplot as plt
@@ -353,15 +353,15 @@ class PerceptionModel:
         self.focal_angle = focal_angle
         self.neural_weight = neural_weight
         if neural_weight == 'tanh_plus':
-            self.c = 2
-            self.d = 2*np.pi/3
+            self.a = 2
+            self.b = 2*np.pi/3
         elif neural_weight == 'cutoff':
-            # = 1 when |theta|<self.c, = 0 when |theta|>self.d, smooth in between
-            self.c = np.pi/2 
-            self.d = 4*np.pi/5
+            # = 1 when |theta|<self.a, = 0 when |theta|>self.b, smooth in between
+            self.a = np.pi/3 
+            self.b = 4*np.pi/5
         else:
-            self.c = None
-            self.d = None
+            self.a = None
+            self.b = None
         if targets is None:
             self.targets = Targets()
         else:
@@ -371,27 +371,169 @@ class PerceptionModel:
             self.theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
         else:
             self.theta_mesh = theta_mesh
+    
+    @staticmethod
+    def _smooth_cutoff(x, a, b):
+        """
+        Evaluates the smooth cutoff function at a single point x in (a, b).
+        Returns 0.0 at the endpoints themselves (limiting value).
+        -b < -a < 0 < a < b
+        """
+        if x <= -b or x >= b:
+            return 0.0
+        elif -a <= x <= a:
+            return 1.0
+        else:
+            norm = (b - a) # this is positive since b > a > 0
+            arg1 = -norm/(b - np.abs(x))   # norm/(b-x): negative / positive = negative
+            arg2 = -norm/(np.abs(x) - a)   # norm/(x-a): negative / positive = negative
+            # Both exponentials go to 0 as x->a or x->b (essential singularity),
+            # and the ratio stays bounded in (0, 1) throughout (a, b).
+            exp1 = np.exp(arg1)
+            exp2 = np.exp(arg2)
+            return exp1 / (exp1 + exp2)
+        
+    @staticmethod
+    def _smooth_cutoff_integral(theta, a, b, tol=1.49e-10):
+        """
+        Compute F(x; a, b) = integral from 0 to x of the smooth cutoff function.
+
+        Parameters
+        ----------
+        theta : Upper limit of integration
+        a, b : Parameters of the smooth cutoff function; must satisfy 0 <= a < b.
+        tol  : Absolute and relative tolerance passed to scipy quad.
+
+        Returns
+        -------
+        float : The value of the integral.
+
+        Raises
+        ------
+        ValueError if x is not strictly between a and b.
+        """
+        if theta < 0:
+            NEG = True
+            theta = -theta
+        elif theta == 0:
+            return 0.0
+        else:
+            NEG = False
+        if not (0 <= a < b):
+            raise ValueError(f"Parameters must satisfy 0 <= a < b (a={a}, b={b}).")
+        
+        # Normalization factor for the integral of the cutoff function. 
+        #   The area under the curve from 0 to b is a + (b-a)/2 = 0.5*(a+b).
+        norm = 2*np.pi/(a+b)
+        
+        # Check for values below a
+        if theta <= a:
+            # integral is just the area of the rectangle
+            if NEG:
+                return -theta*norm
+            else:
+                return theta*norm
+        elif theta >= b:
+            if NEG:
+                return -np.pi
+            else:
+                return np.pi
+        
+        # All other cases: a < theta < b.
+        # Calculate integral from a to theta and add area from 0 to a.
+
+        # Nudge integration bounds inward slightly to avoid handing the
+        # essential singularities directly to quad; the integrand is
+        # effectively 0 in those tiny gaps anyway.
+        eps = (b - a) * 1e-14
+        lower = a + eps
+        upper = min(theta, b - eps)
+
+        if upper <= lower:
+            if NEG:
+                return -a*norm
+            else:
+                return a*norm
+
+        result, _err = quad(
+            PerceptionModel._smooth_cutoff,
+            lower,
+            upper,
+            args=(a, b),
+            epsabs=tol,
+            epsrel=tol,
+            limit=200,
+        )
+        if NEG:
+            return -(a + result)*norm
+        else:
+            return (a + result)*norm
+    
+    @staticmethod
+    def _smooth_cutoff_int_inverse(y, a, b, tol=1.0e-8):
+        """
+        Compute F^{-1}(y; a, b): the value of x such that F(x; a, b) = y.
+
+        Parameters
+        ----------
+        y    : Target value; must lie strictly within the range of F,
+               i.e. -pi <= y <= pi.
+        a, b : Parameters of the smooth cutoff function; must satisfy 0 <= a < b.
+        tol  : Absolute and relative tolerance passed to scipy root.
+
+        Returns
+        -------
+        float : The value of x such that F(x; a, b) = y.
+
+        Raises
+        ------
+        ValueError if y is not strictly between -pi and pi, or if parameters do 
+                    not satisfy 0 <= a < b.
+        """
+        if not (0 <= a < b):
+            raise ValueError(f"Parameters must satisfy 0 <= a < b (a={a}, b={b}).")
+
+        if y < -np.pi or y > np.pi:
+            raise ValueError(f"y must satisfy -pi <= y <= pi (y={y}).")
+        
+        if y == -np.pi:
+            return -b
+        elif y == np.pi:
+            return b
+
+        # Normalization factor for the integral of the cutoff function. 
+        #   The area under the curve from 0 to b is a + (b-a)/2 = 0.5*(a+b).
+        norm = 2*np.pi/(a+b)
+
+        # Check for values between -a*norm and a*norm, where the inverse is just 
+        #   a linear scaling of y.
+        if -a*norm <= y <= a*norm:
+            return y/norm
+        
+        # All other cases: a*norm < |y| < pi.
+        # Calculate inverse by finding root of F(theta) - y.
+
+        def func(theta):
+            return PerceptionModel._smooth_cutoff_integral(theta, a, b, tol) - np.abs(y)
+        
+        # Bracket: F is strictly increasing from 0 to pi on (a, b).
+        eps = (b - a) * 1e-12
+        x_lo = a + eps
+        x_hi = b - eps
+
+        result = brentq(func, x_lo, x_hi, xtol=tol, rtol=tol, maxiter=200)
+        return np.sign(y) * result
+    
+    @staticmethod
+    def _tanh_plus(theta, a, b):
+        return (np.tanh(a*(1-(theta/b)**2) ) + 1.0001)/(1.0001+np.tanh(a))
+
+    @staticmethod
+    def _smooth_power(theta, c, d):
+        return np.pi*np.sign(theta)*(np.abs(theta)/np.pi)**c\
+               *(1-np.exp(-np.abs(theta)/d))/(1-np.exp(-np.pi/d))
 
 
-    @staticmethod
-    def _bump(t):
-        result = np.zeros_like(t)
-        result[t>0] = np.exp(-1/t[t>0])
-        return result
-    
-    @staticmethod
-    def _smoothstep(x):
-        return PerceptionModel._bump(x)/(PerceptionModel._bump(x)+PerceptionModel._bump(1-x))
-    
-    @staticmethod
-    def _cutoff(x, left_off, left_on, right_on, right_off):
-        return PerceptionModel._smoothstep(
-            (x - left_off)/(left_on - left_off) ) * PerceptionModel._smoothstep(
-            (right_off - x)/(right_off - right_on) )
-    
-    @staticmethod
-    def _tanh_plus(theta, c, d):
-        return (np.tanh(c*(1-(theta/d)**2) ) + 1.0001)/(1.0001+np.tanh(c))
 
     def neural_weight(self, theta):
         '''Returns the neural weight for a given angle theta based on the 
@@ -412,9 +554,9 @@ class PerceptionModel:
         if self.neural_weight is None:
             return np.ones_like(theta)
         elif self.neural_weight == 'cutoff':
-            return self._cutoff(theta, -self.d, -self.c, self.c, self.d)
+            return self._smooth_cutoff(theta, self.a, self.b)
         elif self.neural_weight == 'tanh_plus':
-            return self._tanh_plus(theta, self.c, self.d)
+            return self._tanh_plus(theta, self.a, self.b)
         else:
             raise NotImplementedError("Unknown neural weight function name.")
 
