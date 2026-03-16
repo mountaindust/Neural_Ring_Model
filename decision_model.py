@@ -342,8 +342,12 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        neural_weight : string (default = 'cutoff')
-            Neural weighting function. Can be 'cutoff', 'tanh_plus', or None.
+        neural_weight : {'cutoff', 'tanh_plus', None} (default = 'cutoff')
+            Neural weighting function.
+                - 'cutoff' : a smooth cutoff function that is 1 in front and 
+                             0 in back, with a smooth transition in between. 
+                             See _smooth_cutoff for details.
+                - None : no weighting, i.e. flat. All angles are weighted equally.
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
@@ -352,13 +356,14 @@ class PerceptionModel:
         self.focal_loc = np.array(focal_loc, dtype=float)
         self.focal_angle = focal_angle
         self.neural_weight = neural_weight
-        if neural_weight == 'tanh_plus':
-            self.a = 2
-            self.b = 2*np.pi/3
-        elif neural_weight == 'cutoff':
+
+        if neural_weight == 'cutoff':
             # = 1 when |theta|<self.a, = 0 when |theta|>self.b, smooth in between
             self.a = np.pi/3 
             self.b = 4*np.pi/5
+        # elif neural_weight == 'tanh_plus':
+        #     self.a = 2
+        #     self.b = 2*np.pi/3
         else:
             self.a = None
             self.b = None
@@ -524,12 +529,21 @@ class PerceptionModel:
         result = brentq(func, x_lo, x_hi, xtol=tol, rtol=tol, maxiter=200)
         return np.sign(y) * result
     
-    @staticmethod
+    @staticmethod # An alternative idea to the cutoff function?
     def _tanh_plus(theta, a, b):
         return (np.tanh(a*(1-(theta/b)**2) ) + 1.0001)/(1.0001+np.tanh(a))
 
-    @staticmethod
+    @staticmethod # Mentioned in our paper, mimics Sridhar but in the perception stage.
     def _smooth_power(theta, c, d):
+        """
+        A smooth power function for weighting neural activity.
+
+        This is an alternative to integrating the smooth cutoff function, and it 
+        mimics the transformation used in Sridhar et al. (2018) but in the 
+        perception stage instead of only the decision stage. Two parameters are 
+        added: c controls the exponent of the power function, and d controls the
+        smoothness of the cutoff.
+        """
         return np.pi*np.sign(theta)*(np.abs(theta)/np.pi)**c\
                *(1-np.exp(-np.abs(theta)/d))/(1-np.exp(-np.pi/d))
 
@@ -555,8 +569,8 @@ class PerceptionModel:
             return np.ones_like(theta)
         elif self.neural_weight == 'cutoff':
             return self._smooth_cutoff(theta, self.a, self.b)
-        elif self.neural_weight == 'tanh_plus':
-            return self._tanh_plus(theta, self.a, self.b)
+        # elif self.neural_weight == 'tanh_plus':
+        #     return self._tanh_plus(theta, self.a, self.b)
         else:
             raise NotImplementedError("Unknown neural weight function name.")
 
