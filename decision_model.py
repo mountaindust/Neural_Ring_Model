@@ -380,42 +380,43 @@ class PerceptionModel:
     @staticmethod
     def _smooth_cutoff(x, a, b):
         """
-        Evaluates the smooth cutoff function at a single point x in (a, b).
-        Returns 0.0 at the endpoints themselves (limiting value).
-        -b < -a < 0 < a < b
+        Evaluates the smooth cutoff function at x (scalar or array).
+        Returns 0.0 outside [-b, b], 1.0 on [-a, a], and a smooth bump
+        in between.  -b < -a < 0 < a < b
         """
-        if x <= -b or x >= b:
-            return 0.0
-        elif -a <= x <= a:
-            return 1.0
-        else:
-            norm = (b - a) # this is positive since b > a > 0
-            arg1 = -norm/(b - np.abs(x))   # norm/(b-x): negative / positive = negative
-            arg2 = -norm/(np.abs(x) - a)   # norm/(x-a): negative / positive = negative
-            # Both exponentials go to 0 as x->a or x->b (essential singularity),
-            # and the ratio stays bounded in (0, 1) throughout (a, b).
-            exp1 = np.exp(arg1)
-            exp2 = np.exp(arg2)
-            return exp1 / (exp1 + exp2)
+        x = np.asarray(x, dtype=float)
+        scalar_input = x.ndim == 0
+        x = np.atleast_1d(x)
+
+        absx = np.abs(x)
+        norm = b - a   # positive since b > a > 0
+
+        # Compute the smooth transition value for the intermediate region
+        # a < |x| < b.  Outside that region the denominators (b - absx) and
+        # (absx - a) would be zero or negative, so we substitute the finite
+        # fill value 1.0 to keep the division well-defined everywhere.
+        # The filled elements are always masked by the outer np.where below,
+        # so their values never appear in the output.
+
+        # -norm/(b-x): negative / positive = negative
+        arg1 = -norm / np.where(absx < b, b - absx, 1.0)  # fill used when |x| >= b
+        # -norm/(x-a): negative / positive = negative
+        arg2 = -norm / np.where(absx > a, absx - a, 1.0)  # fill used when |x| <= a
+        exp1 = np.exp(arg1)
+        exp2 = np.exp(arg2)
+        smooth = exp1 / (exp1 + exp2)
+
+        result = np.where(absx >= b, 0.0,
+                 np.where(absx <= a, 1.0,
+                          smooth))
+
+        return result.item() if scalar_input else result
         
     @staticmethod
-    def _smooth_cutoff_integral(theta, a, b, tol=1.49e-10):
+    def _smooth_cutoff_integral_scalar(theta, a, b, tol=1.49e-10):
         """
-        Compute F(x; a, b) = integral from 0 to x of the smooth cutoff function.
-
-        Parameters
-        ----------
-        theta : Upper limit of integration
-        a, b : Parameters of the smooth cutoff function; must satisfy 0 <= a < b.
-        tol  : Absolute and relative tolerance passed to scipy quad.
-
-        Returns
-        -------
-        float : The value of the integral.
-
-        Raises
-        ------
-        ValueError if x is not strictly between a and b.
+        Scalar kernel for _smooth_cutoff_integral. Computes F(theta; a, b)
+        for a single float theta.
         """
         if theta < 0:
             NEG = True
@@ -426,11 +427,11 @@ class PerceptionModel:
             NEG = False
         if not (0 <= a < b):
             raise ValueError(f"Parameters must satisfy 0 <= a < b (a={a}, b={b}).")
-        
-        # Normalization factor for the integral of the cutoff function. 
+
+        # Normalization factor for the integral of the cutoff function.
         #   The area under the curve from 0 to b is a + (b-a)/2 = 0.5*(a+b).
         norm = 2*np.pi/(a+b)
-        
+
         # Check for values below a
         if theta <= a:
             # integral is just the area of the rectangle
@@ -443,7 +444,7 @@ class PerceptionModel:
                 return -np.pi
             else:
                 return np.pi
-        
+
         # All other cases: a < theta < b.
         # Calculate integral from a to theta and add area from 0 to a.
 
@@ -473,54 +474,65 @@ class PerceptionModel:
             return -(a + result)*norm
         else:
             return (a + result)*norm
-    
+
     @staticmethod
-    def _smooth_cutoff_int_inverse(y, a, b, tol=1.0e-8):
+    def _smooth_cutoff_integral(theta, a, b, tol=1.49e-10):
         """
-        Compute F^{-1}(y; a, b): the value of x such that F(x; a, b) = y.
+        Compute F(x; a, b) = integral from 0 to x of the smooth cutoff function.
+        Accepts scalar or array theta; always returns the same shape.
 
         Parameters
         ----------
-        y    : Target value; must lie strictly within the range of F,
-               i.e. -pi <= y <= pi.
+        theta : float or array_like
+            Upper limit(s) of integration.
         a, b : Parameters of the smooth cutoff function; must satisfy 0 <= a < b.
-        tol  : Absolute and relative tolerance passed to scipy root.
+        tol  : Absolute and relative tolerance passed to scipy quad.
 
         Returns
         -------
-        float : The value of x such that F(x; a, b) = y.
+        float or ndarray : The value(s) of the integral.
+        """
+        theta = np.asarray(theta, dtype=float)
+        scalar_input = theta.ndim == 0
+        vfunc = np.vectorize(
+            PerceptionModel._smooth_cutoff_integral_scalar,
+            excluded=['a', 'b', 'tol'],
+        )
+        result = vfunc(theta, a=a, b=b, tol=tol)
+        return result.item() if scalar_input else result
 
-        Raises
-        ------
-        ValueError if y is not strictly between -pi and pi, or if parameters do 
-                    not satisfy 0 <= a < b.
+    @staticmethod
+    def _smooth_cutoff_int_inverse_scalar(y, a, b, tol=1.0e-8):
+        """
+        Scalar kernel for _smooth_cutoff_int_inverse. Computes F^{-1}(y; a, b)
+        for a single float y.
         """
         if not (0 <= a < b):
             raise ValueError(f"Parameters must satisfy 0 <= a < b (a={a}, b={b}).")
 
         if y < -np.pi or y > np.pi:
             raise ValueError(f"y must satisfy -pi <= y <= pi (y={y}).")
-        
+
         if y == -np.pi:
             return -b
         elif y == np.pi:
             return b
 
-        # Normalization factor for the integral of the cutoff function. 
+        # Normalization factor for the integral of the cutoff function.
         #   The area under the curve from 0 to b is a + (b-a)/2 = 0.5*(a+b).
         norm = 2*np.pi/(a+b)
 
-        # Check for values between -a*norm and a*norm, where the inverse is just 
+        # Check for values between -a*norm and a*norm, where the inverse is just
         #   a linear scaling of y.
         if -a*norm <= y <= a*norm:
             return y/norm
-        
+
         # All other cases: a*norm < |y| < pi.
         # Calculate inverse by finding root of F(theta) - y.
 
         def func(theta):
-            return PerceptionModel._smooth_cutoff_integral(theta, a, b, tol) - np.abs(y)
-        
+            return PerceptionModel._smooth_cutoff_integral_scalar(theta, a, b, tol) - np.abs(y)
+
         # Bracket: F is strictly increasing from 0 to pi on (a, b).
         eps = (b - a) * 1e-12
         x_lo = a + eps
@@ -528,6 +540,32 @@ class PerceptionModel:
 
         result = brentq(func, x_lo, x_hi, xtol=tol, rtol=tol, maxiter=200)
         return np.sign(y) * result
+
+    @staticmethod
+    def _smooth_cutoff_int_inverse(y, a, b, tol=1.0e-8):
+        """
+        Compute F^{-1}(y; a, b): the value of x such that F(x; a, b) = y.
+        Accepts scalar or array y; always returns the same shape.
+
+        Parameters
+        ----------
+        y    : float or array_like
+            Target value(s); each must satisfy -pi <= y <= pi.
+        a, b : Parameters of the smooth cutoff function; must satisfy 0 <= a < b.
+        tol  : Absolute and relative tolerance passed to scipy brentq.
+
+        Returns
+        -------
+        float or ndarray : The value(s) of x such that F(x; a, b) = y.
+        """
+        y = np.asarray(y, dtype=float)
+        scalar_input = y.ndim == 0
+        vfunc = np.vectorize(
+            PerceptionModel._smooth_cutoff_int_inverse_scalar,
+            excluded=['a', 'b', 'tol'],
+        )
+        result = vfunc(y, a=a, b=b, tol=tol)
+        return result.item() if scalar_input else result
     
     @staticmethod # An alternative idea to the cutoff function?
     def _tanh_plus(theta, a, b):
