@@ -327,7 +327,7 @@ class PerceptionModel:
     density of neurons in the ring as a function of angle.'''
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, 
-                 neural_weight='cutoff', theta_mesh=2000):
+                 neural_weight='cutoff', neural_position='integral', theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction 
         given by focal_angle, at targets given by the targets object. All three 
         of these can be changed at any time as attributes.
@@ -343,11 +343,27 @@ class PerceptionModel:
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
         neural_weight : {'cutoff', 'tanh_plus', None} (default = 'cutoff')
-            Neural weighting function.
+            Weighting function for the neural band.
                 - 'cutoff' : a smooth cutoff function that is 1 in front and 
                              0 in back, with a smooth transition in between. 
+                             It is parameterized by a and b, which control the 
+                             angles at which the cutoff starts and ends, respectively.
                              See _smooth_cutoff for details.
                 - None : no weighting, i.e. flat. All angles are weighted equally.
+        neural_position : {'integral', 'power', None} (default = 'integral')
+            This defines a mapping between perceived center of each target and 
+            the neural position of the corresponding spin group. 
+            Options are:
+                - 'integral' : the neural position is given by integrating the
+                               neural weight function like a CDF to the perceived 
+                               center of the target.
+                - 'power' : the neural position is given by applying a smoothed 
+                            power function to the perceived center of the target. 
+                            In this case, parameters c and d are used to control 
+                            the exponent of the power function and the smoothness 
+                            of the cutoff, respectively.
+                - None : no transformation, i.e. identity. The neural position is 
+                         the same as the perceived center of the target.
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
@@ -356,7 +372,9 @@ class PerceptionModel:
         self.focal_loc = np.array(focal_loc, dtype=float)
         self.focal_angle = focal_angle
         self.neural_weight = neural_weight
+        self.neural_position = neural_position
 
+        # Set default parameters for the weighting function.
         if neural_weight == 'cutoff':
             # = 1 when |theta|<self.a, = 0 when |theta|>self.b, smooth in between
             self.a = np.pi/3 
@@ -367,6 +385,15 @@ class PerceptionModel:
         else:
             self.a = None
             self.b = None
+
+        # Set default parameters for the neural position transformation function.
+        if neural_position is None or neural_position == 'integral':
+            self.c = None
+            self.d = None
+        else:
+            self.c = 0.5
+            self.d = 1.0
+
         if targets is None:
             self.targets = Targets()
         else:
@@ -567,7 +594,7 @@ class PerceptionModel:
         result = vfunc(y, a=a, b=b, tol=tol)
         return result.item() if scalar_input else result
     
-    @staticmethod # An alternative idea to the cutoff function?
+    @staticmethod # An alternative idea to the cutoff function? Currently unused.
     def _tanh_plus(theta, a, b):
         return (np.tanh(a*(1-(theta/b)**2) ) + 1.0001)/(1.0001+np.tanh(a))
 
@@ -576,14 +603,71 @@ class PerceptionModel:
         """
         A smooth power function for weighting neural activity.
 
-        This is an alternative to integrating the smooth cutoff function, and it 
-        mimics the transformation used in Sridhar et al. (2018) but in the 
-        perception stage instead of only the decision stage. Two parameters are 
+        This is an alternative to integrating the smooth cutoff function, and it
+        mimics the transformation used in Sridhar et al. (2018) but in the
+        perception stage instead of only the decision stage. Two parameters are
         added: c controls the exponent of the power function, and d controls the
         smoothness of the cutoff.
         """
         return np.pi*np.sign(theta)*(np.abs(theta)/np.pi)**c\
                *(1-np.exp(-np.abs(theta)/d))/(1-np.exp(-np.pi/d))
+
+    @staticmethod
+    def _smooth_power_inverse_scalar(y, c, d, tol=1.0e-8):
+        """
+        Scalar kernel for _smooth_power_inverse.
+        Finds theta in [-pi, pi] such that _smooth_power(theta, c, d) = y.
+        """
+        if not (-np.pi <= y <= np.pi):
+            raise ValueError(f"y must satisfy -pi <= y <= pi (y={y}).")
+        if y == -np.pi:
+            return -np.pi
+        if y == np.pi:
+            return np.pi
+        if y == 0.0:
+            return 0.0
+
+        # _smooth_power is odd, so invert on (0, pi) and reflect.
+        def func(theta):
+            return PerceptionModel._smooth_power(theta, c, d) - abs(y)
+
+        # Bracket: f(0)=0 and f(pi)=pi, strictly increasing on (0, pi).
+        result = brentq(func, 0.0, np.pi, xtol=tol, rtol=tol, maxiter=200)
+        return np.sign(y) * result
+
+    @staticmethod
+    def _smooth_power_inverse(y, c, d, tol=1.0e-8):
+        """
+        Compute the inverse of _smooth_power: find theta such that
+        _smooth_power(theta, c, d) = y, for y in [-pi, pi].
+
+        _smooth_power is strictly increasing and maps [-pi, pi] -> [-pi, pi]
+        with fixed points at -pi, 0, and pi, so the inverse is well-defined.
+        Accepts scalar or array y; always returns the same shape.
+
+        Parameters
+        ----------
+        y   : float or array_like
+            Target value(s); each must satisfy -pi <= y <= pi.
+        c   : float
+            Exponent parameter of _smooth_power (c > 0).
+        d   : float
+            Smoothness/cutoff parameter of _smooth_power (d > 0).
+        tol : float
+            Absolute and relative tolerance passed to scipy brentq.
+
+        Returns
+        -------
+        float or ndarray : theta value(s) satisfying _smooth_power(theta, c, d) = y.
+        """
+        y = np.asarray(y, dtype=float)
+        scalar_input = y.ndim == 0
+        vfunc = np.vectorize(
+            PerceptionModel._smooth_power_inverse_scalar,
+            excluded=['c', 'd', 'tol'],
+        )
+        result = vfunc(y, c=c, d=d, tol=tol)
+        return result.item() if scalar_input else result
 
 
 
@@ -611,6 +695,65 @@ class PerceptionModel:
         #     return self._tanh_plus(theta, self.a, self.b)
         else:
             raise NotImplementedError("Unknown neural weight function name.")
+        
+
+
+    def get_neural_position(self, theta):
+        '''Returns the neural position for a given angle theta based on the 
+        neural position transformation function. This is a mapping between the 
+        perceived center of each target and the neural position of the 
+        corresponding spin group. Uses an integral of the neural weight or a 
+        smooth power function or returns identity.
+
+        Parameters
+        ----------
+        theta : float or 1D ndarray
+            angle(s) to evaluate the neural position transformation at
+
+        Returns
+        -------
+        neural position(s) corresponding to input theta value(s)
+        '''
+
+        if self.neural_position is None:
+            return theta
+        elif self.neural_position == 'integral' and self.neural_weight is None:
+            return theta
+        elif self.neural_position == 'integral' and self.neural_weight == 'cutoff':
+            return self._smooth_cutoff_integral(theta, self.a, self.b)
+        elif self.neural_position == 'power':
+            return self._smooth_power(theta, self.c, self.d)
+        else:
+            raise NotImplementedError("Unknown neural position function name.")
+        
+
+
+    def get_neural_position_inverse(self, theta):
+        '''Returns the angle corresponding to a given neural position theta based on the 
+        inverse of the neural position transformation function. This is a mapping 
+        from neural position back to perceived center of each target. Uses an 
+        integral of the neural weight or a smooth power function or returns identity.
+
+        Parameters
+        ----------
+        theta : float or 1D ndarray
+            neural position(s) to evaluate the inverse transformation at
+
+        Returns
+        -------
+        angle(s) corresponding to input neural position value(s)
+        '''
+
+        if self.neural_position is None:
+            return theta
+        elif self.neural_position == 'integral' and self.neural_weight is None:
+            return theta
+        elif self.neural_position == 'integral' and self.neural_weight == 'cutoff':
+            return self._smooth_cutoff_int_inverse(theta, self.a, self.b)
+        elif self.neural_position == 'power':
+            return self._smooth_power_inverse(theta, self.c, self.d)
+        else:
+            raise NotImplementedError("Unknown neural position function name.")
 
 
 
