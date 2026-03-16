@@ -767,7 +767,10 @@ class IsingExtModel:
         K : float
             Coupling strength for Kuramoto turning speed.
         nu : float
-            Exponent for cosine weighting kernel. Higher values lead to sharper peaks.
+            Exponent for cosine weighting kernel in Sridhar et al. (2018). 
+            Higher values lead to sharper peaks. This should be 1 unless you are 
+            running a simulation to recover their results, in which case set it 
+            to 0.5 and use a flat neural weight in the PerceptionModel.
         '''
 
         self.T = T
@@ -790,8 +793,11 @@ class IsingExtModel:
 
     def cosine(self, x):
         '''Function that returns cos(pi*(x/pi)^nu).'''
-
-        return np.cos(np.pi*(x/np.pi)**self.nu)
+        
+        if self.nu == 1:
+            return np.cos(x)
+        else:
+            return np.cos(np.pi*(np.abs(x)/np.pi)**self.nu)
 
 
     def plot_cosine(self, wb_plot=False):
