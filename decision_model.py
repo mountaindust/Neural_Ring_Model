@@ -19,7 +19,7 @@ def convert_angles(theta):
 
 class Targets:
 
-    def __init__(self, locs=None, geom_name=None, r=None, l=None, theta=0):
+    def __init__(self, locs=None, geom_name=None, r=None, l=None, theta=0, value=1):
         '''Set up targets for attraction model.
         The only thing taken care of here is storage of target locations and 
         calculation of unbiased, unwarped perception of the targets (angluar 
@@ -50,6 +50,8 @@ class Targets:
             line segment lengths in the geometry; see geom for requirements
         theta : float or length N ndarray, default=0
             orientation of targets; see geom for requirements
+        value : float or length N ndarray, default=1
+            attractiveness of each target as a scalar
         '''
 
         if locs is None:
@@ -79,6 +81,10 @@ class Targets:
             self.theta = convert_angles(np.array(theta))
         else:
             self.theta = convert_angles(theta)
+        if np.ndim(value) == 0:
+            self.value = np.full(self.locs.shape[0], value)
+        else:
+            self.value = np.array(value)
 
     
     def get_percep_angles(self,loc,angle=0):
@@ -672,7 +678,7 @@ class PerceptionModel:
 
 
     def neural_weight(self, theta):
-        '''Returns the neural weight for a given angle theta based on the 
+        '''Returns the neural weight for given angles theta based on the 
         weighting function. This is a proxy for the density of neurons in the 
         ring as a function of angle, and weights things in front more highly than 
         in back. Uses a standard cuttoff function or tanh_plus or returns ones.
@@ -757,16 +763,14 @@ class PerceptionModel:
 
 
 
-    def get_target_signals(self, focal_angle=None, focal_loc=None, 
-                           norm=np.pi/8, full_signal=False):
+    def get_target_signals(self, focal_angle=None, focal_loc=None, full_signal=False):
         '''Returns the egocentric angular location of the center of each VISIBLE 
         target (closer targets that are not delta functions block ones behind) as 
-        a length N array, and a visual signal for each that is either a scalar 
-        for each target or a binary array for each target with support on the 
-        visible angular extents of the target.
-        
-        The scalar visual signal is computed by integrating the array visual 
-        signal against a kernel (neural_weight), divided by norm.
+        a length N array, and a normalized neural group size (rho) for each. 
+        Alternatively, if full_signal is True, returns the full weighting of 
+        the neural band (before integration, including attractiveness) for each 
+        target as a function of angle on the theta mesh, which is an array of 
+        shape Nxlen(theta_mesh), where N is the number of visible targets. 
         
         Uses a mesh of theta values to determine blocking, resulting in an 
         approximation of extents. This adds noise, but maybe the right kind of 
@@ -783,10 +787,6 @@ class PerceptionModel:
         focal_loc : array-like, optional
             the (x,y) focal location for egocentric perception. If None, uses the 
             object's focal_loc attribute.
-        norm : float, default=np.pi/8
-            the normalization factor for the scalar visual signal. Default is 
-            chosen as some sort of approximation for how much visual space 
-            might be occupied by a target at reasonable decision-making distances.
         full_signal : bool
             if True, return the full signal for each target as a theta mesh, 
             otherwise return only the value of the signal for each target
@@ -794,10 +794,12 @@ class PerceptionModel:
         Returns
         -------
         angles : length N ndarray
-            angles to the centers of visible targets
-        signals : length N or Nxlen(theta_mesh) ndarray
-            perception signals for each visible target, with amplitude equal 
-            to 1/distance to target
+            angles to the visual centers of visible targets
+        rho : length N or Nxlen(theta_mesh) ndarray
+            normalized neural group size for each visible target. If full_signal
+            is True, return the neural weighting (including attractiveness) as a 
+            function of angle for each target as an array of shape 
+            Nxlen(theta_mesh) instead.
         '''
 
         if focal_angle is None:
@@ -810,7 +812,9 @@ class PerceptionModel:
         dists = self.targets.get_dist_to_targets(focal_loc)
         c_angles = self.targets.get_angles_to_targets(focal_loc, focal_angle)
         angles = self.targets.get_percep_angles(focal_loc, focal_angle)
-        signals = np.zeros((angles.shape[0], self.theta_mesh.size))
+        # This array will be 1 where the target is visible and 0 where it is 
+        #   blocked, for each target and each angle in the mesh.
+        theta_supp = np.zeros((angles.shape[0], self.theta_mesh.size))
 
         if self.targets.geom_name is None:
             # TODO: come back to this
@@ -821,12 +825,13 @@ class PerceptionModel:
                 # step function perception
                 if idx != 0 and \
                 theta-self.theta_mesh[idx-1] < self.theta_mesh[idx]-theta:
-                    signals[n,idx-1] = 1
+                    theta_supp[n,idx-1] = 1
                 elif idx == 0 and \
                 theta-self.theta_mesh[-1] < -self.theta_mesh[0]-theta:
-                    signals[n,-1] = 1
+                    theta_supp[n,-1] = 1
                 else:
-                    signals[n,idx] = 1
+                    theta_supp[n,idx] = 1
+                s_values = self.targets.values
 
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
             # sort by distance
@@ -835,7 +840,7 @@ class PerceptionModel:
             arg_srt = dists.argsort()
             angles = angles[arg_srt]
             c_angles = c_angles[arg_srt]
-            # determine blocking by creating binary signals for each angle extent
+            # determine blocking by creating binary theta_supp for each angle extent
             for n, thetas in enumerate(angles):
                 if thetas[1] > thetas[0]:
                     theta_bool = np.logical_and(thetas[0]<=self.theta_mesh,
@@ -843,36 +848,38 @@ class PerceptionModel:
                 else:
                     theta_bool = np.logical_or(thetas[0]<=self.theta_mesh,
                                                self.theta_mesh<=thetas[1])
-                signals[n,theta_bool] = 1
+                theta_supp[n,theta_bool] = 1
             # determine blocking based on sorted order
-            # closest targets are earlier in the signals array
-            blocked = signals[0,:] != 0
-            for n in range(1,signals.shape[0]):
-                signals[n,blocked] = 0
-                blocked = np.logical_or(blocked, signals[n,:] != 0)
+            # closest targets are earlier in the theta_supp array
+            blocked = theta_supp[0,:] != 0
+            for n in range(1,theta_supp.shape[0]):
+                theta_supp[n,blocked] = 0
+                blocked = np.logical_or(blocked, theta_supp[n,:] != 0)
             # undo sorting to main target consistency across methods
             inv_arg_srt = np.empty_like(arg_srt)
             inv_arg_srt[arg_srt] = np.arange(len(arg_srt))
-            signals = signals[inv_arg_srt,:]
+            theta_supp = theta_supp[inv_arg_srt,:]
             c_angles = c_angles[inv_arg_srt]
             # remove all completely blocked targets
-            vis = signals.max(axis=1) > 0
-            signals = signals[vis,:]
+            vis = theta_supp.max(axis=1) > 0
+            theta_supp = theta_supp[vis,:]
             c_angles = c_angles[vis]
+            s_values = self.targets.values[vis]
+
         else:
             raise NotImplementedError("Unknown target geometry name.")
         
-        # Apply visual weighting, normalize signals, and return
-        domain_length = 2*np.pi
-        weighted_signals = signals*self.neural_weight(self.theta_mesh)
+        # Apply neural weighting to theta extents
+        weighted_signals = theta_supp*self.neural_weight(self.theta_mesh)
         
-        # calculate signals
-        signals_final = domain_length/self.theta_mesh.size*weighted_signals.sum(axis=1)/norm
+        # calculate neural group sizes and divide by the sum of them all 
+        #   to get rho.
+        G = weighted_signals.sum(axis=1)*s_values
 
         if full_signal:
-            return c_angles, weighted_signals
+            return c_angles, weighted_signals*s_values
         else:
-            return c_angles, signals_final
+            return c_angles, G/G.sum()
 
 
 
