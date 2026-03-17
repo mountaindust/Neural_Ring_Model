@@ -19,7 +19,8 @@ def convert_angles(theta):
 
 class Targets:
 
-    def __init__(self, locs=None, geom_name=None, r=None, l=None, theta=0, value=1):
+    def __init__(self, locs=None, geom_name=None, r=None, l=None, theta=0, 
+                 values=1):
         '''Set up targets for attraction model.
         The only thing taken care of here is storage of target locations and 
         calculation of unbiased, unwarped perception of the targets (angluar 
@@ -81,10 +82,10 @@ class Targets:
             self.theta = convert_angles(np.array(theta))
         else:
             self.theta = convert_angles(theta)
-        if np.ndim(value) == 0:
-            self.value = np.full(self.locs.shape[0], value)
+        if np.ndim(values) == 0:
+            self.values = np.full(self.locs.shape[0], values)
         else:
-            self.value = np.array(value)
+            self.values = np.array(values)
 
     
     def get_percep_angles(self,loc,angle=0):
@@ -677,7 +678,7 @@ class PerceptionModel:
 
 
 
-    def neural_weight(self, theta):
+    def get_neural_weight(self, theta):
         '''Returns the neural weight for given angles theta based on the 
         weighting function. This is a proxy for the density of neurons in the 
         ring as a function of angle, and weights things in front more highly than 
@@ -870,14 +871,14 @@ class PerceptionModel:
             raise NotImplementedError("Unknown target geometry name.")
         
         # Apply neural weighting to theta extents
-        weighted_signals = theta_supp*self.neural_weight(self.theta_mesh)
+        weighted_signals = theta_supp*self.get_neural_weight(self.theta_mesh)
         
         # calculate neural group sizes and divide by the sum of them all 
         #   to get rho.
         G = weighted_signals.sum(axis=1)*s_values
 
         if full_signal:
-            return c_angles, weighted_signals*s_values
+            return c_angles, weighted_signals*s_values[:, np.newaxis]
         else:
             return c_angles, G/G.sum()
 
@@ -1567,7 +1568,7 @@ class IsingExtModel:
 
         # plot the vector field
         if wb_plot:
-            fig = plt.figure(figsize=(6.5,4))
+            fig = plt.figure(figsize=(12,6))
         else:
             fig = plt.figure(figsize=(5.5,5))
 
@@ -1650,8 +1651,11 @@ class IsingExtModel:
                 #           U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
                 #           angles='xy', color='red', scale=30, width=0.004)
                 ax.set_aspect('equal')
+            if fignum == 0:
+                ax.set_title('Equilibria from root finding')
+            else:
+                ax.set_title('Equilibria from new algorithm')
         # fig.legend(loc='outside center right')
-        plt.title("Direction Model")
         plt.show()
         return multi_thetas, X, Y, U_list, V_list
 
