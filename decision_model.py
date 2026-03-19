@@ -940,6 +940,42 @@ class PerceptionModel:
 
 
 
+    def get_neural_signals(self, focal_angle=None, focal_loc=None):
+        '''Returns the neural angles and neural group sizes for each target based 
+        on the perceived angles and the neural position transformation function. 
+        This is a mapping from perceived center of each target to the neural 
+        position of the corresponding spin group.
+
+        Parameters
+        ----------
+        focal_angle : float, optional
+            the focal angle for egocentric perception. If None, uses the object's 
+            focal_angle attribute.
+        focal_loc : array-like, optional
+            the (x,y) focal location for egocentric perception. If None, uses the 
+            object's focal_loc attribute.
+
+        Returns
+        -------
+        neural_angles : length N ndarray
+            neural angles corresponding to visible targets
+        rho : length N ndarray
+            normalized neural group size for each visible target
+        '''
+
+        if focal_angle is None:
+            focal_angle = self.focal_angle
+        if focal_loc is None:
+            focal_loc = self.focal_loc
+
+        angles, rho = self.get_target_signals(focal_angle=focal_angle, 
+                                              focal_loc=focal_loc)
+        neural_angles = self.get_neural_position(angles)
+
+        return neural_angles, rho
+
+
+
 class IsingExtModel:
     '''
     This only extends Ising slightly. The primary novelty is the underlying 
@@ -961,8 +997,9 @@ class IsingExtModel:
 
     def __init__(self, percep_model=None, T=0.2, K=1, nu=1):
         '''From a PerceptionModel with its Targets object, establishes a model 
-        for chosing direction based on discrete Ising. Relies on get_target_signals 
-        from the PerceptionModel to obtain perceived target angles and signal strength.
+        for chosing direction based on discrete Ising. Relies on get_neural_signals 
+        from the PerceptionModel to obtain neural angles and relative neural 
+        group size.
         
         Parameters
         ----------
@@ -1071,7 +1108,7 @@ class IsingExtModel:
         if focal_theta is None:
             focal_theta = self.percep_model.focal_angle
 
-        angles_rel, signals = self.percep_model.get_target_signals(focal_theta, focal_loc)
+        angles_rel, signals = self.percep_model.get_neural_signals(focal_theta, focal_loc)
         if angles_rel.size == 0:
             return -gamma
         # The angles recieved above are relative to focal_theta, i.e., the 
@@ -1339,7 +1376,7 @@ class IsingExtModel:
         if focal_theta is None:
             focal_theta = self.percep_model.focal_angle
 
-        angles_rel, signals = self.percep_model.get_target_signals(focal_theta, focal_loc)
+        angles_rel, signals = self.percep_model.get_neural_signals(focal_theta, focal_loc)
         if angles_rel.size == 0:
             return None
         # The angles recieved above are relative to focal_theta, i.e., the 
@@ -1489,7 +1526,7 @@ class IsingExtModel:
 
         Theta = np.angle(gamma_star)
         R = np.abs(gamma_star)
-        angles_rel, signals = self.percep_model.get_target_signals(Theta, focal_loc)
+        angles_rel, signals = self.percep_model.get_neural_signals(Theta, focal_loc)
         k = signals.size
         # angles_rel = theta_j - Theta
         with np.errstate(over='ignore'):
