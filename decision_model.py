@@ -885,18 +885,20 @@ class PerceptionModel:
 
 
     def plot_blocked_signals(self, wb_plot=False):
-        '''Plots visible targets and their angular direction from the observer, 
-        and also the signal distribution from the point of view of the observer.
+        '''Plots visible targets, their angular direction from the observer, 
+        their associated neural angles, and also the signal distribution from 
+        the point of view of the observer.
 
-        Use as a test for get_target_signals.
+        Use as a test for get_target_signals and get_neural_position.
         
         Set wb_plot to True if plotting in a Jupyber notebook
         '''
 
-        angles, signals = self.get_target_signals(full_signal=True)
+        vis_angles, signals = self.get_target_signals(full_signal=True)
+        neur_angles = self.get_neural_position(vis_angles)
 
         if wb_plot:
-            plt.figure(figsize=(6.5,3.25))
+            plt.figure(figsize=(8,5))
         else:
             plt.figure(figsize=(12,6))
 
@@ -908,16 +910,20 @@ class PerceptionModel:
 
         # Now plot perception lines. Requires adding back angle of focal locust
         #   to get allocentric angles.
-        for n, theta in enumerate(angles+self.focal_angle):
+        neur_angles_allo = neur_angles + self.focal_angle
+        for n, theta in enumerate(vis_angles+self.focal_angle):
             r = self.targets.get_dist_to_targets(self.focal_loc)[n]
             x = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(theta))
             y = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(theta))
             ax1.plot(x,y,'k')
+            x_neur = (self.focal_loc[0],self.focal_loc[0] + r*np.cos(neur_angles_allo[n]))
+            y_neur = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(neur_angles_allo[n]))
+            ax1.plot(x_neur, y_neur, 'r--', alpha=0.5)
         ax1.arrow(self.focal_loc[0],self.focal_loc[1],
                   0.5*np.cos(self.focal_angle),0.5*np.sin(self.focal_angle), 
                 width=0.1, head_length=0.25)
         ax1.set_aspect('equal')
-        ax1.set_title('Target Geometry')
+        ax1.set_title('Target Geometry and\n Neural Directions')
 
         ###### Perception Signal Plot ######
         ax2 = plt.subplot(122, projection='polar')
