@@ -1,17 +1,17 @@
-%%% Andrew Bernoff 12/6/2024
-%%%
-%%% This code does parameter continuation for Ising minimizers.
-%%%
-%%% The Ising model minimizer computation occurs in QuadMinIsing
+%%% This code is a general minimizer the Ising model incorporating an
+%%% external signal. The basic idea is to choose the coupling function (J_ij) to
+%%% always be negative but to allow the signal (S_i)  to push the function
+%%% to saturation and then look at the tradeoff via a parameter mu.
+%%
+%%% The first part is set up and the computation occurs in QuadMinIsing
 %%% The assumption is that we are minimizing
 %%%
-%%%     H=sum(J_ij sigma_i sigma_j ,i=1..n,j=1..n)
+%%%     H=mu*D_i*sigma_i + (1-mu)* sum(J_ij sigma_i sigma_j ,i=1..n,j=1..n)
 %%%
 %%%  Over Nr realizations. Note that QuadMinIsing at present returns many
 %%%  potential local minimizers with possible duplication.
 %%%
-    clear all
-
+    
     Nr=20; % Number of realizations
 
 %%  Random plot voodoo
@@ -20,40 +20,36 @@
     set(groot,'defaulttextinterpreter','latex');
     set(groot,'defaultLegendInterpreter','latex');
 
-%%  Main loop
-    Np=20;      %  Parameter samples
-    Ngrid=10;   %  Gridpoints in standard pore
+%%% Create thetas for Ising - assume theta is in (-pi,pi]
+%%% 
+
+    thetapts=100;
+    thetatemp=linspace(-pi,pi,thetapts+1);
+    thetas=thetatemp(2:end);
+
+%%% Now create targets
+%%%
+
+    target(1) =  pi/3; 
+    target(2) = -target(1);
+    %
+    width(1) = pi/20;
+    width(2) = width(1);
     
-    theta_start = pi;
-    theta_finish = pi/10;
-    theta_width = theta_finish/2;
-    thetas = linspace(theta_start,theta_finish,Np);
-
-    three = true;
-
-for ip = 1:Np
-
-    target(1) =  thetas(ip); 
-    target(2) = -thetas(ip);
-    if three
-        target(3)= 0 ;
-        width(3) = theta_width;
-        ngrid(3) = Ngrid;
-    end
-
     ntargets=numel(target);
-    %
-    width(1) = theta_width;
-    width(2) = theta_width;
-    %
-    ngrid(1) = Ngrid;
-    ngrid(2) = Ngrid;
 
 
-% Eventually should check for overlap here
+    % target(1) =  pi/3; 
+    % target(2) = -pi/3;
+    % ntargets=numel(target);
+    % %
+    % width(1) = pi/10;
+    % width(2) = width(1)/2;
 
-% Use midpoint rule for targets
-    sigma=[];
+
+
+% Set up target array 
+    Bi=zeros(size(thetas));
 
     for targ=1:ntargets;
         gridsize=width(targ)/ngrid(targ);
@@ -63,68 +59,56 @@ for ip = 1:Np
 
     numsigma=numel(sigma);
 
-% Preallocate output matrix
-    if ip==1
-        sigmatheta=zeros(numsigma,Np);
-        sigmamin=zeros(numsigma,Np);
-    end
-
-    sigmatheta(:,ip)=sigma;
-
 % Now construct the coupling matrix
 
-    [nx,ny]=meshgrid(sigma,sigma);
+    [nx,ny]=meshgrid(thetas,thetas);
 
 % Define the coupling function - remember we are minimizing so J(0,0)
 % should be a minimum
 
-%    Jfun =@(theta1,theta2) - cos(theta1-theta2);
-    Jfun =@(theta1,theta2) exp(- 10*cos(theta1-theta2))-2;
+    Jfun =@(theta1,theta2) 1- cos(theta1-theta2);
+
 % Now compute the coupling matrix
 
     Jij = Jfun(nx,ny);
 
-% Call the ISing minimization routine
-    sigmaout=QuadMinIsing(Jij,Nr);
+% Call the Ising minimization routine
+    sigmaout=QuadMinIsing(Bi,Jij,Nr);
 
 % Compute the energy
     for r=1:Nr   %%% Need to eliminate (or parfor) this loop eventually
          E(r)= ((sigmaout(:,r))'*Jij* sigmaout(:,r))/(numsigma)^2;
     end
-%
-  [Emin,rmin]=min(E(r));
-%  
-  sigmamin(:,ip)=sigmaout(:,rmin);
-end
+
+    [ max(E),min(E)]
 
 % Graph the answers
+    xpts=[1:Nr];
+
 
 figure(1)
 clf
             title('Ising Model (continuous)')
             ylabel('Polar Angle', 'Interpreter','latex')
-            xlabel('Spin Parameter')
+            xlabel('Spin trials')
             
 hold on 
     green = [0, .7 0];
-% for tplot = 1:ntargets  % Plot targets
-%     x2 = [eps,Nr+1, Nr+1,eps];
-%     inBetween = [target(tplot)-width(tplot)/2, target(tplot)-width(tplot)/2,...
-%                  target(tplot)+width(tplot)/2,target(tplot)+width(tplot)/2];
-%     fill(x2, inBetween, green, 'EdgeColor', 'none');
-%     alpha(.4)
-% end
+for tplot = 1:ntargets
+    x2 = [eps,Nr+1, Nr+1,eps];
+    inBetween = [target(tplot)-width(tplot)/2, target(tplot)-width(tplot)/2,...
+                 target(tplot)+width(tplot)/2,target(tplot)+width(tplot)/2];
+    fill(x2, inBetween, green, 'EdgeColor', 'none');
+    alpha(.4)
+end
 
-% for splot =1:numsigma  %Plot spin points
-%     plot([0,Nr+1],[sigma(splot),sigma(splot)],'-','Color',[0.2 0.5 0.9 0.2])
-% end
+for splot =1:numsigma
+    plot([0,Nr+1],[sigma(splot),sigma(splot)],'-','Color',[0.2 0.5 0.9 0.2])
+end
 
-for iplot = 1:Np
-    % Plot spin locations
-    plot(thetas(iplot)*ones(size(sigmatheta(:,iplot))),sigmatheta(:,iplot),'.r' )
-    % Plot minimizers
-    sigmaON= sigmatheta(sigmamin(:,iplot)>0,iplot);
-    plot(thetas(iplot)*ones(size(sigmaON)),sigmaON,'+g' )
+for nrplot = 1:Nr
+    sigmaON= sigma(sigmaout(:,nrplot)>0);
+    plot(nrplot*ones(size(sigmaON)),sigmaON,'+k' )
 end
     
 Ax = gca;
@@ -136,27 +120,27 @@ ytv = linspace(min(yt), max(yt), numel(ytl));
 set(Ax, 'YTick',ytv, 'YTickLabel',ytl)
 
 ylim(yt);
-xlim([min(theta_start,theta_finish) max(theta_start,theta_finish)])
+xlim([0 Nr+1])
 
 % plot(cdf,y,'r')
 % plot(cdftheory,y,'k-')
 % plot(cdf,1-y,'b')
 hold off
 
-% figure(2) 
-% clf
-% hold on
-% 
-% title('Ising Model (continuous)')
-%             ylabel('Polar Angle', 'Interpreter','latex')
-%             xlabel('Spin trials')
-% plot(xpts,E, '*')
-% xlim([0 Nr+1])
-% ylim([-1 0]);
-% hold off
+figure(2) 
+clf
+hold on
+
+title('Ising Model (continuous)')
+            ylabel('Polar Angle', 'Interpreter','latex')
+            xlabel('Spin trials')
+plot(xpts,E, '*')
+xlim([0 Nr+1])
+ylim([-1 0]);
+hold off
 
 
-function  sigma=QuadMinIsing(J,Nr)
+function  sigma=QuadMinIsing(B,J,Nr)
 %%% Note this code is agnostic about the spin locations
 %%% It returns a list of potential minimizers
 
