@@ -1532,8 +1532,8 @@ class IsingExtModel:
         with np.errstate(over='ignore'):
             summands = ((signals/np.cosh(k*R*self.cosine(angles_rel)/self.T)**2)
                         *np.sin(angles_rel)*self.nu*
-                        np.sin(np.pi*(angles_rel/np.pi)**self.nu)*
-                        (angles_rel/np.pi)**(self.nu-1))
+                        np.sin(np.pi*np.sign(angles_rel)*np.abs(angles_rel/np.pi)**self.nu)*
+                        np.abs(angles_rel/np.pi)**(self.nu-1))
             A = k*summands.sum()/(2*self.T*signals.sum())
         return A < 1
     
