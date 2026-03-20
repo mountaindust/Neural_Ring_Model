@@ -764,7 +764,7 @@ class PerceptionModel:
 
 
 
-    def get_target_signals(self, focal_angle=None, focal_loc=None, full_signal=False):
+    def _get_target_signals(self, focal_angle=None, focal_loc=None, full_signal=False):
         '''Returns the egocentric angular location of the center of each VISIBLE 
         target (closer targets that are not delta functions block ones behind) as 
         a length N array, and a normalized neural group size (rho) for each. 
@@ -889,12 +889,12 @@ class PerceptionModel:
         their associated neural angles, and also the signal distribution from 
         the point of view of the observer.
 
-        Use as a test for get_target_signals and get_neural_position.
+        Use as a test for _get_target_signals and get_neural_position.
         
         Set wb_plot to True if plotting in a Jupyber notebook
         '''
 
-        vis_angles, signals = self.get_target_signals(full_signal=True)
+        vis_angles, signals = self._get_target_signals(full_signal=True)
         neur_angles = self.get_neural_position(vis_angles)
 
         if wb_plot:
@@ -968,7 +968,7 @@ class PerceptionModel:
         if focal_loc is None:
             focal_loc = self.focal_loc
 
-        angles, rho = self.get_target_signals(focal_angle=focal_angle, 
+        angles, rho = self._get_target_signals(focal_angle=focal_angle, 
                                               focal_loc=focal_loc)
         neural_angles = self.get_neural_position(angles)
 
@@ -1526,20 +1526,19 @@ class IsingExtModel:
 
         Theta = np.angle(gamma_star)
         R = np.abs(gamma_star)
-        angles_rel, signals = self.percep_model.get_neural_signals(Theta, focal_loc)
+        neur_angles, signals = self.percep_model.get_neural_signals(Theta, focal_loc)
         k = signals.size
-        # angles_rel = theta_j - Theta
         with np.errstate(over='ignore'):
-            summands = ((signals/np.cosh(k*R*self.cosine(angles_rel)/self.T)**2)
-                        *np.sin(angles_rel)*self.nu*
-                        np.sin(np.pi*np.sign(angles_rel)*np.abs(angles_rel/np.pi)**self.nu)*
-                        np.abs(angles_rel/np.pi)**(self.nu-1))
+            summands = ((signals/np.cosh(k*R*self.cosine(neur_angles)/self.T)**2)
+                        *np.sin(neur_angles)*self.nu*
+                        np.sin(np.pi*np.sign(neur_angles)*np.abs(neur_angles/np.pi)**self.nu)*
+                        np.abs(neur_angles/np.pi)**(self.nu-1))
             A = k*summands.sum()/(2*self.T*signals.sum())
         return A < 1
     
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            pool=None, plot_alg_comparison=True, wb_plot=False):
+                            pool=None, plot_alg_comparison=False, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         find the (eventually) stable equilibria of the direction model dgamma/dt 
         and plot the consensus directions.
