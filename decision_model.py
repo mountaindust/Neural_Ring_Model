@@ -1504,7 +1504,7 @@ class IsingExtModel:
         return ii, jj, final_gammas
     
 
-    def _discrim_A(self, gamma_star, focal_loc):
+    def _discrim_A_nu(self, gamma_star, focal_loc):
         '''Determines stability of equilibria based on perturbation analysis.
         Assumes that the focal_theta is the angle of gamma_star and calculates 
         the A value of the linear coefficient. If A < 1, the equilibrium is stable, 
@@ -1539,7 +1539,7 @@ class IsingExtModel:
     
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            wb_plot=False, pool=None):
+                            pool=None, plot_alg_comparison=True, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         find the (eventually) stable equilibria of the direction model dgamma/dt 
         and plot the consensus directions.
@@ -1556,10 +1556,13 @@ class IsingExtModel:
         ylim : (ymin,ymax) tuple of floats
             y limits for mesh, inclusive
         num_y : number of steps in y direction
-        wb_plot : bool
-            whether or not plotting in a Jupyter notebook
         pool : multiprocessing.Pool, optional
             If provided, use this pool to parallelize the solving of the ODEs.
+        plot_alg_comparison : bool
+            whether or not to run both the original and new equilibrium finding 
+            algorithms and plot them side by side.
+        wb_plot : bool
+            whether or not plotting in a Jupyter notebook
 
         Returns
         -------
@@ -1599,15 +1602,19 @@ class IsingExtModel:
         
         if pool is None:
             results = []
+            results2 = []
             for ii in range(num_x):
                 for jj in range(num_y):
                     print("Processing point ({},{})".format(ii,jj))
                     results.append(self._process_point((ii,jj,X,Y)))
+                    if plot_alg_comparison:
+                        results2.append(self._process_point2((ii,jj,X,Y)))
         else:
             args_list = [(ii, jj, X, Y) for ii in range(num_x) for jj in range(num_y)]
             print("Processing points in parallel using pool...")
             results = pool.map(self._process_point, args_list)
-            results2 = pool.map(self._process_point2, args_list)
+            if plot_alg_comparison:
+                results2 = pool.map(self._process_point2, args_list)
 
         # plot the vector field
         if wb_plot:
@@ -1615,7 +1622,12 @@ class IsingExtModel:
         else:
             fig = plt.figure(figsize=(5.5,5))
 
-        for fignum, result_ver in enumerate([results, results2]):
+        if plot_alg_comparison:
+            result_group = [results, results2]
+        else:
+            result_group = [results]
+
+        for fignum, result_ver in enumerate(result_group):
             for result in result_ver:
                 ii, jj, final_gammas = result
                 for n, gamma in enumerate(final_gammas):
@@ -1629,11 +1641,14 @@ class IsingExtModel:
                     U_list[n][jj,ii] = np.cos(theta)
                     V_list[n][jj,ii] = np.sin(theta)
                     focal_loc = np.array([X[jj,ii], Y[jj,ii]])
-                    stability_list[n][jj,ii] = self._discrim_A(gamma, focal_loc)
+                    stability_list[n][jj,ii] = self._discrim_A_nu(gamma, focal_loc)
                 if len(final_gammas) > 1:
                     multi_sol[jj,ii] = True
 
-            ax = plt.subplot(1,2,fignum+1)
+            if plot_alg_comparison:
+                ax = plt.subplot(1,2,fignum+1)
+            else:
+                ax = plt.subplot(1,1,1)
             # Plot targets
             self.percep_model.targets.plot_targets_to_axis(ax)
             ##### Plot arrows, coloring multi-solution points differently #####
