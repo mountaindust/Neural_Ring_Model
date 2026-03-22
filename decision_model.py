@@ -334,7 +334,7 @@ class PerceptionModel:
     density of neurons in the ring as a function of angle.'''
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, 
-                 neural_weight='cutoff', neural_position='integral', theta_mesh=2000):
+                 neural_weight='cutoff', neural_angle='integral', theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction 
         given by focal_angle, at targets given by the targets object. All three 
         of these can be changed at any time as attributes.
@@ -357,7 +357,7 @@ class PerceptionModel:
                              angles at which the cutoff starts and ends, respectively.
                              See _smooth_cutoff for details.
                 - None : no weighting, i.e. flat. All angles are weighted equally.
-        neural_position : {'integral', 'power', None} (default = 'integral')
+        neural_angle : {'integral', 'power', None} (default = 'integral')
             This defines a mapping between perceived center of each target and 
             the neural position of the corresponding spin group. 
             Options are:
@@ -379,7 +379,7 @@ class PerceptionModel:
         self.focal_loc = np.array(focal_loc, dtype=float)
         self.focal_angle = focal_angle
         self.neural_weight = neural_weight
-        self.neural_position = neural_position
+        self.neural_angle = neural_angle
 
         # Set default parameters for the weighting function.
         if neural_weight == 'cutoff':
@@ -394,7 +394,7 @@ class PerceptionModel:
             self.b = None
 
         # Set default parameters for the neural position transformation function.
-        if neural_position is None or neural_position == 'integral':
+        if neural_angle is None or neural_angle == 'integral':
             self.c = None
             self.d = None
         else:
@@ -705,7 +705,7 @@ class PerceptionModel:
         
 
 
-    def get_neural_position(self, theta):
+    def get_neural_angle(self, theta):
         '''Returns the neural position for a given angle theta based on the 
         neural position transformation function. This is a mapping between the 
         perceived center of each target and the neural position of the 
@@ -722,20 +722,20 @@ class PerceptionModel:
         neural position(s) corresponding to input theta value(s)
         '''
 
-        if self.neural_position is None:
+        if self.neural_angle is None:
             return theta
-        elif self.neural_position == 'integral' and self.neural_weight is None:
+        elif self.neural_angle == 'integral' and self.neural_weight is None:
             return theta
-        elif self.neural_position == 'integral' and self.neural_weight == 'cutoff':
+        elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
             return self._smooth_cutoff_integral(theta, self.a, self.b)
-        elif self.neural_position == 'power':
+        elif self.neural_angle == 'power':
             return self._smooth_power(theta, self.c, self.d)
         else:
             raise NotImplementedError("Unknown neural position function name.")
         
 
 
-    def get_neural_position_inverse(self, theta):
+    def get_neural_angle_inverse(self, theta):
         '''Returns the angle corresponding to a given neural position theta based on the 
         inverse of the neural position transformation function. This is a mapping 
         from neural position back to perceived center of each target. Uses an 
@@ -751,13 +751,13 @@ class PerceptionModel:
         angle(s) corresponding to input neural position value(s)
         '''
 
-        if self.neural_position is None:
+        if self.neural_angle is None:
             return theta
-        elif self.neural_position == 'integral' and self.neural_weight is None:
+        elif self.neural_angle == 'integral' and self.neural_weight is None:
             return theta
-        elif self.neural_position == 'integral' and self.neural_weight == 'cutoff':
+        elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
             return self._smooth_cutoff_int_inverse(theta, self.a, self.b)
-        elif self.neural_position == 'power':
+        elif self.neural_angle == 'power':
             return self._smooth_power_inverse(theta, self.c, self.d)
         else:
             raise NotImplementedError("Unknown neural position function name.")
@@ -889,13 +889,13 @@ class PerceptionModel:
         their associated neural angles, and also the signal distribution from 
         the point of view of the observer.
 
-        Use as a test for _get_target_signals and get_neural_position.
+        Use as a test for _get_target_signals and get_neural_angle.
         
         Set wb_plot to True if plotting in a Jupyber notebook
         '''
 
         vis_angles, signals = self._get_target_signals(full_signal=True)
-        neur_angles = self.get_neural_position(vis_angles)
+        neur_angles = self.get_neural_angle(vis_angles)
 
         if wb_plot:
             plt.figure(figsize=(8,5))
@@ -970,7 +970,7 @@ class PerceptionModel:
 
         angles, rho = self._get_target_signals(focal_angle=focal_angle, 
                                               focal_loc=focal_loc)
-        neural_angles = self.get_neural_position(angles)
+        neural_angles = self.get_neural_angle(angles)
 
         return neural_angles, rho
 
@@ -1105,12 +1105,9 @@ class NeuralBandModel:
     def gamma_equilib(self, focal_angle=None, focal_loc=None):
         '''Attempt to find all zeros (equilibria) of dgamma/dt for a given focal 
         location by using a multistart root finding algorithm on a mesh of 
-        initial gamma values (circle of radius 0.2).
+        initial gamma values (circle of radius 0.5).
         
         Returns a list of unique equilibrium gamma values found.
-
-        TODO: This is more complicated in this setting, because neural angles 
-        are different from physical angles. Need to revise.
 
         Parameters
         ----------
@@ -1118,6 +1115,11 @@ class NeuralBandModel:
             The current heading (angle) of the observer. 
             - If None, use self.percep_model.focal_angle. 
             - If True, assume focal_angle is the argument of the initial gamma value.
+                NOTE: This is what you want to use if creating a bifurcation diagram 
+                in x,y-space because the dgamma/dt equation is derived assuming 
+                that the initial value of gamma is close to the global minimium 
+                of the Hamiltonian, which is most likely to be near the neural 
+                angle corresponding to the focal angle.
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use self.percep_model.focal_loc.
 
@@ -1128,16 +1130,22 @@ class NeuralBandModel:
         '''
         if focal_angle is False:
             focal_angle = None
+        if focal_angle is True:
+            # set a persistant flag
+            get_focal_angle = True
+        else:
+            get_focal_angle = False
 
         init_angles = np.linspace(-np.pi, np.pi-0.01)
-        init_vals = np.zeros((init_angles.size, 2), dtype=np.double)
-        init_vals[:,0] = 0.2*np.cos(init_angles)
-        init_vals[:,1] = 0.2*np.sin(init_angles)
+        init_gammas = np.zeros((init_angles.size, 2), dtype=np.double)
+        init_gammas[:,0] = 0.5*np.cos(init_angles)
+        init_gammas[:,1] = 0.5*np.sin(init_angles)
         final_gammas = []
-        for init_val in init_vals:
-            if focal_angle is True:
-                focal_angle = np.angle(init_val[0] + 1j*init_val[1])
-            sol = root(self.dgamma_dt_vec, init_val, args=(focal_angle, focal_loc),
+        for init_gamma in init_gammas:
+            if get_focal_angle is True:
+                gam_angle = np.angle(init_gamma[0] + 1j*init_gamma[1])
+                focal_angle = self.percep_model.get_neural_angle_inverse(gam_angle)
+            sol = root(self.dgamma_dt_vec, init_gamma, args=(focal_angle, focal_loc),
                        method='hybr', tol=1e-7)
             # Only store unique solutions
             if sol.success:
@@ -1472,7 +1480,7 @@ class IsingExtModel:
         location as focal angle is varied.
         
         Uses a multistart root finding starting from a mesh of points on the 
-        circle of radius 0.2. Returns a list of unique equilibrium gamma values 
+        circle of radius 0.5. Returns a list of unique equilibrium gamma values 
         found.
 
         Parameters
@@ -1492,14 +1500,19 @@ class IsingExtModel:
         '''
         if focal_angle is False:
             focal_angle = None
+        if focal_angle is True:
+            # set a persistant flag
+            get_focal_angle = True
+        else:
+            get_focal_angle = False
 
         init_angles = np.linspace(-np.pi, np.pi-0.01)
         init_vals = np.zeros((init_angles.size, 2), dtype=np.double)
-        init_vals[:,0] = 0.2*np.cos(init_angles)
-        init_vals[:,1] = 0.2*np.sin(init_angles)
+        init_vals[:,0] = 0.5*np.cos(init_angles)
+        init_vals[:,1] = 0.5*np.sin(init_angles)
         final_gammas = []
         for init_val in init_vals:
-            if focal_angle is True:
+            if get_focal_angle is True:
                 focal_angle = np.angle(init_val[0] + 1j*init_val[1])
             sol = root(self.dgamma_dt_vec, init_val, args=(focal_angle, focal_loc),
                        method='hybr', tol=1e-7)
