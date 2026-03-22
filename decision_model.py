@@ -1591,7 +1591,7 @@ class IsingExtModel:
     
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            pool=None, wb_plot=False):
+                            pool=None, axis=None, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         find the equilibria of dgamma/dt and plot the corresponding consensus 
         directions.
@@ -1608,27 +1608,14 @@ class IsingExtModel:
         num_y : number of steps in y direction
         pool : multiprocessing.Pool, optional
             If provided, use this pool to parallelize the solving of the ODEs.
+        axis : matplotlib axis, optional
+            If provided, plot on this axis instead of creating a new figure and axis.
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
 
         Returns
         -------
-        multi_thetas : list of length N arrays
-            Each entry in the list corresponds to one of the multiple solutions
-            found. Each array is of shape (num_y,num_x) and contains the
-            stable equilibrium angle at each mesh point for that solution.
-        X : (num_y,num_x) ndarray
-            x coordinates of the mesh
-        Y : (num_y,num_x) ndarray
-            y coordinates of the mesh
-        U_list : list of (num_y,num_x) ndarrays
-            Each entry in the list corresponds to one of the multiple solutions
-            found. Each array is of shape (num_y,num_x) and contains the
-            x-component of the unit vector at each mesh point for that solution.
-        V_list : list of (num_y,num_x) ndarrays
-            Each entry in the list corresponds to one of the multiple solutions
-            found. Each array is of shape (num_y,num_x) and contains the
-            y-component of the unit vector at each mesh point for that solution.
+        ax : matplotlib axis, if axis was provided as an argument. Otherwise, None.
         '''
 
         # create mesh of focal locations
@@ -1636,16 +1623,7 @@ class IsingExtModel:
         ymesh = np.linspace(ylim[0], ylim[1], num_y)
 
         X, Y = np.meshgrid(xmesh, ymesh)
-        U_list = []
-        V_list = []
-        stability_list = []
-        # boolean mesh for multiple solutions
-        multi_sol = np.full(X.shape, False, dtype=bool)
-
-        # create mesh of initial angles, perturbed slightly to avoid
-        #   exact angles. This is to try and avoid hitting an unstable
-        #   equilibrium exactly.
-        multi_thetas = []
+        
         
         if pool is None:
             results = []
@@ -1664,7 +1642,15 @@ class IsingExtModel:
         else:
             fig = plt.figure(figsize=(5.5,5))
 
-
+        # List of x- and y-components of unit vectors for a list of solution arrays 
+        #   corresponding to solutions found at each mesh point
+        U_list = []; V_list = []
+        # Record stability of each equilibrium solution
+        stability_list = []
+        # boolean mesh for multiple solutions
+        multi_sol = np.full(X.shape, False, dtype=bool)
+        # List of arrays of equilibrium angles for each solution found at each mesh point
+        multi_thetas = []
         for result in results:
             ii, jj, final_gammas = result
             for n, gamma in enumerate(final_gammas):
@@ -1682,7 +1668,8 @@ class IsingExtModel:
             if len(final_gammas) > 1:
                 multi_sol[jj,ii] = True
 
-        ax = plt.subplot(1,1,1)
+        if axis is None:
+            ax = plt.subplot(1,1,1)
         # Plot targets
         self.percep_model.targets.plot_targets_to_axis(ax)
         ##### Plot arrows, coloring multi-solution points differently #####
@@ -1745,8 +1732,11 @@ class IsingExtModel:
         ax.set_aspect('equal')
         ax.set_title('Equilibria from root finding')
         # fig.legend(loc='outside center right')
-        plt.show()
-        return multi_thetas, X, Y, U_list, V_list
+        if axis is None:
+            plt.show()
+        else:
+            return ax
+        
 
 
     def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
