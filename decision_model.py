@@ -1075,6 +1075,85 @@ class NeuralBandModel:
 
 
 
+    def dgamma_dt_vec(self, gamma_vec, focal_angle=None, focal_loc=None):
+        '''Wrapper around dgamma_dt for use in root finding for equilibria.
+        
+        Here, gamma_vec is a length 2 ndarray of real and imaginary parts 
+        representing the complex coherence value of the neural band.
+
+        Parameters
+        ----------
+        gamma_vec : length 2 ndarray of float
+            current (complex) coherence value of the neural band.
+        focal_angle : float, optional
+            the current heading (angle) of the observer. If None, use 
+            self.percep_model.focal_angle.
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use self.percep_model.focal_loc.
+
+        Returns
+        -------
+        dgamma_dt_vec : length 2 ndarray of float
+            complex time derivative of gamma according to the Ising model
+        '''
+        dgamma = self.dgamma_dt(None, gamma_vec[0] + 1j*gamma_vec[1], 
+                                focal_angle, focal_loc)
+        return np.array([dgamma.real, dgamma.imag])
+    
+
+
+    def gamma_equilib(self, focal_angle=None, focal_loc=None):
+        '''Attempt to find all zeros (equilibria) of dgamma/dt for a given focal 
+        location by using a multistart root finding algorithm on a mesh of 
+        initial gamma values (circle of radius 0.2).
+        
+        Returns a list of unique equilibrium gamma values found.
+
+        TODO: This is more complicated in this setting, because neural angles 
+        are different from physical angles. Need to revise.
+
+        Parameters
+        ----------
+        focal_angle : float or bool, optional
+            The current heading (angle) of the observer. 
+            - If None, use self.percep_model.focal_angle. 
+            - If True, assume focal_angle is the argument of the initial gamma value.
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use self.percep_model.focal_loc.
+
+        Returns
+        -------
+        gamma_eqs : list of complex
+            list of equilibrium gamma values
+        '''
+        if focal_angle is False:
+            focal_angle = None
+
+        init_angles = np.linspace(-np.pi, np.pi-0.01)
+        init_vals = np.zeros((init_angles.size, 2), dtype=np.double)
+        init_vals[:,0] = 0.2*np.cos(init_angles)
+        init_vals[:,1] = 0.2*np.sin(init_angles)
+        final_gammas = []
+        for init_val in init_vals:
+            if focal_angle is True:
+                focal_angle = np.angle(init_val[0] + 1j*init_val[1])
+            sol = root(self.dgamma_dt_vec, init_val, args=(focal_angle, focal_loc),
+                       method='hybr', tol=1e-7)
+            # Only store unique solutions
+            if sol.success:
+                gamma_eq = sol.x[0] + 1j*sol.x[1]
+                # Check if close to any existing solution
+                close_check = False
+                for existing_gamma in final_gammas:
+                    if np.abs(gamma_eq - existing_gamma) < 0.001:
+                        close_check = True
+                        break
+                if not close_check:
+                    final_gammas.append(gamma_eq)
+        return final_gammas
+
+
+
 class IsingExtModel:
     '''
     This only extends Ising slightly. The primary novelty is the underlying 
@@ -1254,13 +1333,11 @@ class IsingExtModel:
 
     def run_dgamma_dt(self, focal_angle=None, focal_loc=None, init_gamma=None, 
                       t_Final=30):
-        '''Integrate the dgamma/dt equation in order to approach a stable 
-        equilibrium for the neural ring model. Uses RK45 solver from scipy. 
+        '''Solve the dgamma/dt equation and look for solutions to approach a 
+        stable equilibrium for the neural ring model. Uses RK45 solver from scipy. 
         
         init_gamma is the initial coherence value to start from. If None, 
-        it will see if this object has a current gamma value and use that, 
-        otherwise it will use a 0.1 magnitude vector in the direction of the 
-        percep_model's focal_angle.
+        it will start from self.gamma.
 
         Parameters
         ----------
@@ -1284,13 +1361,13 @@ class IsingExtModel:
         if init_gamma is None:
             init_gamma = self.gamma
 
+        if np.isscalar(init_gamma):
+            init_gamma = np.array([init_gamma])
         # to stop solving for gamma when sufficiently close to equilibrium we:
         # 1) initially solve for 5 unit of time
         #    (Chose 5 by trial and error, seems to balance overshooting vs. looping, at which python is slow)
         # 2) check whether the derivative is bigger than tolerance tol
         # 3) repeat for 1 unit of time, checking the size of the derivative each time
-        if np.isscalar(init_gamma):
-            init_gamma = np.array([init_gamma])
         sol = solve_ivp(self.dgamma_dt, [0, 5], init_gamma, 
                         args=(focal_angle, focal_loc))
         tol = 1e-4
@@ -1388,23 +1465,11 @@ class IsingExtModel:
         # plt.ylim(-1.1,1.1)
         plt.grid()
         plt.show()
-
-
-    def get_direction(self, dt):
-        '''Integrate the Ising torque model for one time step dt to get new direction.
-        
-        Parameters
-        ----------
-        dt : float
-            time step for integration of torque model.
-        '''
-        
-        return convert_angles(solve_ivp(self.dtheta_dt, [0, dt], 
-                              [self.percep_model.focal_angle]).y[0,-1])
     
 
     def gamma_equilib(self, focal_angle=None, focal_loc=None):
-        '''Find zeros (equilibria) of dgamma/dt for a given focal location. 
+        '''Attempt to find all zeros (equilibria) of dgamma/dt for a given focal 
+        location as focal angle is varied.
         
         Uses a multistart root finding starting from a mesh of points on the 
         circle of radius 0.2. Returns a list of unique equilibrium gamma values 
@@ -1871,13 +1936,7 @@ class IsingExtModel:
                     noise = self.rng.normal(scale=std)
                 else:
                     noise = 0
-                # NOTE:
-                # This walk is modeled on a two-step process:
-                # 1) Solve ODE over dt time to get new direction, then add noise.
-                # 2) move forward in that direction a distance of v*dt.
-                # TODO/to try:
-                # simplify this to be an Euler (Honeycutt) step instead of solving the theta equation
-                #theta = self.get_direction(dt) + noise*dt
+                # Use an Euler (TODO: Honeycutt) step instead of solving the theta equation
                 theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
