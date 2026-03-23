@@ -1131,6 +1131,9 @@ class NeuralBandModel:
         -------
         gamma_eqs : list of complex
             list of equilibrium gamma values
+        stability : list of bool
+            for each equilibrium gamma value, whether it is stable (True) or 
+            unstable (False)
         '''
         if focal_angle is False:
             focal_angle = None
@@ -1142,6 +1145,7 @@ class NeuralBandModel:
 
         init_angles = np.linspace(-np.pi, np.pi-0.01)
         final_gammas = []
+        stability = []
         for angle in init_angles:
             if get_focal_angle is True:
                 # Set the focal angle to the initial angle being meshed over, and then
@@ -1166,8 +1170,10 @@ class NeuralBandModel:
                         close_check = True
                         break
                 if not close_check:
+                    # record gamma equilibrium and its stability
                     final_gammas.append(gamma_eq)
-        return final_gammas
+                    stability.append(self._discrim_A(gamma_eq, focal_angle, focal_loc))
+        return final_gammas, stability
     
 
     def convert_gamma(self, gamma):
@@ -1207,19 +1213,55 @@ class NeuralBandModel:
         jj : int
             mesh y index
         thetas : array of float
-            array of stable equilibrium angles found at this mesh point
+            array of equilibrium angles found at this mesh point
         Rs : array of float
             array of coherence strengths corresponding to the equilibrium angles
+        stability : list of bool
+            list indicating whether each equilibrium is stable (True) or unstable (False)
         '''
 
         ii, jj, X, Y = args
         focal_loc = np.array([X[jj,ii], Y[jj,ii]])
 
-        final_gammas = self.gamma_equilib(focal_angle=True, focal_loc=focal_loc)
+        final_gammas, stability = self.gamma_equilib(focal_angle=True, focal_loc=focal_loc)
 
         thetas, Rs = self.convert_gamma(final_gammas)
 
-        return ii, jj, thetas, Rs
+        return ii, jj, thetas, Rs, stability
+    
+
+    def _discrim_A(self, gamma_star, focal_angle, focal_loc):
+        '''Determines stability of equilibria based on perturbation analysis.
+        Assumes that the focal_angle is the angle of gamma_star and calculates 
+        the A value of the linear coefficient. If A < 1, the equilibrium is stable, 
+        if A > 1, the equilibrium is unstable.
+
+        This is based on a cosine kernel with nu exponent.
+
+        Parameters
+        ----------
+        gamma_star : complex
+            equilibrium gamma value at which to compute the Jacobian
+        focal_angle : float
+            the current heading (angle) of the observer. If None, use 
+            self.percep_model.focal_angle.
+        focal_loc : array-like of length 2
+            (x,y) location of the observer
+
+        Returns
+        -------
+        True if stable, False if unstable
+        '''
+
+        Theta = np.angle(gamma_star)
+        R = np.abs(gamma_star)
+        neur_angles, rho = self.percep_model.get_neural_signals(focal_angle, focal_loc)
+        k = rho.size
+        with np.errstate(over='ignore'):
+            summands = ((rho/np.cosh(k*R*np.cos(Theta-neur_angles)/self.T)**2)
+                        *np.sin(Theta-neur_angles)**2)
+            A = k*summands.sum()/(2*self.T)
+        return A < 1
 
 
 
@@ -1640,14 +1682,14 @@ class IsingExtModel:
 
         Theta = np.angle(gamma_star)
         R = np.abs(gamma_star)
-        neur_angles, signals = self.percep_model.get_neural_signals(Theta, focal_loc)
-        k = signals.size
+        neur_angles, rho = self.percep_model.get_neural_signals(Theta, focal_loc)
+        k = rho.size
         with np.errstate(over='ignore'):
-            summands = ((signals/np.cosh(k*R*self.cosine(neur_angles)/self.T)**2)
+            summands = ((rho/np.cosh(k*R*self.cosine(neur_angles)/self.T)**2)
                         *np.sin(neur_angles)*self.nu*
                         np.sin(np.pi*np.sign(neur_angles)*np.abs(neur_angles/np.pi)**self.nu)*
                         np.abs(neur_angles/np.pi)**(self.nu-1))
-            A = k*summands.sum()/(2*self.T*signals.sum())
+            A = k*summands.sum()/(2*self.T)
         return A < 1
     
 
