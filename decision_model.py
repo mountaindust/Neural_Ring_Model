@@ -362,18 +362,19 @@ class PerceptionModel:
                              See _smooth_cutoff for details.
                 - None : no weighting, i.e. flat. All angles are weighted equally.
         neural_angle : {'integral', 'power', None} (default = 'integral')
-            This defines a mapping between perceived center of each target and 
-            the neural position of the corresponding spin group. 
+            This defines a mapping between perceived center of each target and
+            the neural position of the corresponding spin group.
             Options are:
                 - 'integral' : the neural position is given by integrating the
-                               neural weight function like a CDF to the perceived 
+                               neural weight function like a CDF to the perceived
                                center of the target.
-                - 'power' : the neural position is given by applying a smoothed 
-                            power function to the perceived center of the target. 
-                            In this case, parameters c and d are used to control 
-                            the exponent of the power function and the smoothness 
-                            of the cutoff, respectively.
-                - None : no transformation, i.e. identity. The neural position is 
+                - 'power' : the neural position is given by applying a power
+                            function to the perceived center of the target:
+                            f(theta) = pi * sign(theta) * (|theta|/pi)^c.
+                            The parameter c controls the exponent; c = 1 gives
+                            the identity, c < 1 expands front angles, c > 1
+                            compresses them.
+                - None : no transformation, i.e. identity. The neural position is
                          the same as the perceived center of the target.
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
@@ -400,10 +401,8 @@ class PerceptionModel:
         # Set default parameters for the neural position transformation function.
         if neural_angle is None or neural_angle == 'integral':
             self.c = None
-            self.d = None
         else:
             self.c = 0.5
-            self.d = 1.0
 
         if targets is None:
             self.targets = Targets()
@@ -610,74 +609,52 @@ class PerceptionModel:
         return (np.tanh(a*(1-(theta/b)**2) ) + 1.0001)/(1.0001+np.tanh(a))
 
     @staticmethod # Mentioned in our paper, mimics Sridhar but in the perception stage.
-    def _smooth_power(theta, c, d):
+    def _power(theta, c):
         """
-        A smooth power function for weighting neural activity.
+        A power function mapping perceived angles to neural positions.
 
-        This is an alternative to integrating the smooth cutoff function, and it
-        mimics the transformation used in Sridhar et al. (2018) but in the
-        perception stage instead of only the decision stage. Two parameters are
-        added: c controls the exponent of the power function, and d controls the
-        smoothness of the cutoff.
+        Maps theta in [-pi, pi] to [-pi, pi] via
+            f(theta) = pi * sign(theta) * (|theta| / pi)^c,
+        which compresses (c > 1) or expands (c < 1) angles near the front
+        relative to those near the back. Fixed points at -pi, 0, and pi.
+
+        This mimics the transformation used in Sridhar et al. (2018) but
+        applied in the perception stage rather than only the decision stage.
+
+        Parameters
+        ----------
+        theta : float or array_like
+            Angle(s) in [-pi, pi].
+        c : float
+            Exponent (c > 0). c = 1 gives the identity.
         """
-        return np.pi*np.sign(theta)*(np.abs(theta)/np.pi)**c\
-               *(1-np.exp(-np.abs(theta)/d))/(1-np.exp(-np.pi/d))
+        return np.pi * np.sign(theta) * (np.abs(theta) / np.pi) ** c
 
     @staticmethod
-    def _smooth_power_inverse_scalar(y, c, d, tol=1.0e-8):
+    def _power_inverse(y, c):
         """
-        Scalar kernel for _smooth_power_inverse.
-        Finds theta in [-pi, pi] such that _smooth_power(theta, c, d) = y.
-        """
-        if not (-np.pi <= y <= np.pi):
-            raise ValueError(f"y must satisfy -pi <= y <= pi (y={y}).")
-        if y == -np.pi:
-            return -np.pi
-        if y == np.pi:
-            return np.pi
-        if y == 0.0:
-            return 0.0
+        Analytical inverse of _power: find theta such that
+        _power(theta, c) = y, for y in [-pi, pi].
 
-        # _smooth_power is odd, so invert on (0, pi) and reflect.
-        def func(theta):
-            return PerceptionModel._smooth_power(theta, c, d) - abs(y)
+        Because _power(theta, c) = pi * sign(theta) * (|theta|/pi)^c,
+        the inverse is simply theta = pi * sign(y) * (|y|/pi)^(1/c).
 
-        # Bracket: f(0)=0 and f(pi)=pi, strictly increasing on (0, pi).
-        result = brentq(func, 0.0, np.pi, xtol=tol, rtol=tol, maxiter=200)
-        return np.sign(y) * result
-
-    @staticmethod
-    def _smooth_power_inverse(y, c, d, tol=1.0e-8):
-        """
-        Compute the inverse of _smooth_power: find theta such that
-        _smooth_power(theta, c, d) = y, for y in [-pi, pi].
-
-        _smooth_power is strictly increasing and maps [-pi, pi] -> [-pi, pi]
-        with fixed points at -pi, 0, and pi, so the inverse is well-defined.
         Accepts scalar or array y; always returns the same shape.
 
         Parameters
         ----------
-        y   : float or array_like
+        y : float or array_like
             Target value(s); each must satisfy -pi <= y <= pi.
-        c   : float
-            Exponent parameter of _smooth_power (c > 0).
-        d   : float
-            Smoothness/cutoff parameter of _smooth_power (d > 0).
-        tol : float
-            Absolute and relative tolerance passed to scipy brentq.
+        c : float
+            Exponent parameter of _power (c > 0).
 
         Returns
         -------
-        float or ndarray : theta value(s) satisfying _smooth_power(theta, c, d) = y.
+        float or ndarray : theta value(s) satisfying _power(theta, c) = y.
         """
         y = np.asarray(y, dtype=float)
         scalar_input = y.ndim == 0
-        vfunc = np.vectorize(
-            PerceptionModel._smooth_power_inverse_scalar,
-            excluded=['c', 'd', 'tol'],
-        )
-        result = vfunc(y, c=c, d=d, tol=tol)
+        result = np.pi * np.sign(y) * (np.abs(y) / np.pi) ** (1.0 / c)
         return result.item() if scalar_input else result
 
 
@@ -731,7 +708,7 @@ class PerceptionModel:
         elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
             return self._smooth_cutoff_integral(theta, self.a, self.b)
         elif self.neural_angle == 'power':
-            return self._smooth_power(theta, self.c, self.d)
+            return self._power(theta, self.c)
         else:
             raise NotImplementedError("Unknown neural position function name.")
         
@@ -759,7 +736,7 @@ class PerceptionModel:
         elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
             return self._smooth_cutoff_int_inverse(theta, self.a, self.b)
         elif self.neural_angle == 'power':
-            return self._smooth_power_inverse(theta, self.c, self.d)
+            return self._power_inverse(theta, self.c)
         else:
             raise NotImplementedError("Unknown neural position function name.")
 
@@ -1187,12 +1164,12 @@ class NeuralBandModel:
                     angle_eq, _ = self.convert_gamma(gamma_eq)
                     angle_eq = convert_angles(focal_angle+angle_eq)
                     for existing_angle in final_angles:
-                        if np.abs(angle_eq - existing_angle) < 0.001:
+                        if np.abs(angle_eq - existing_angle) < 0.01:
                             close_check = True
                             break
                 else:
                     for existing_gamma in final_gammas:
-                        if np.abs(gamma_eq - existing_gamma) < 0.001:
+                        if np.abs(gamma_eq - existing_gamma) < 0.01:
                             close_check = True
                             break
                 if not close_check:
@@ -1806,7 +1783,7 @@ class IsingExtModel:
                 # Check if close to any existing solution
                 close_check = False
                 for existing_gamma in final_gammas:
-                    if np.abs(gamma_eq - existing_gamma) < 0.001:
+                    if np.abs(gamma_eq - existing_gamma) < 0.01:
                         close_check = True
                         break
                 if not close_check:
