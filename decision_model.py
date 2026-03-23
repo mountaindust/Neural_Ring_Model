@@ -331,7 +331,11 @@ class PerceptionModel:
     observer, and then translates that into a neural angular position and a neural 
     spin group size for each target based on the perceived angular extents of the 
     target, its signal strength, and a weighting function that describes the 
-    density of neurons in the ring as a function of angle.'''
+    density of neurons in the ring as a function of angle.
+    
+    Following mathematics conventions, egocentric angles increase counterclockwise;
+    e.g., positive egocentric angles are to the left of the observer and 
+    negative egocentric angles are to the right.'''
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, 
                  neural_weight='cutoff', neural_angle='integral', theta_mesh=2000):
@@ -928,7 +932,16 @@ class PerceptionModel:
         ax2.plot(self.theta_mesh,p_func)
         ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
         ax2.set_rmin(-0.5)
-        ax2.set_rlabel_position(0)
+        ax2.set_rmax(1)
+        ax2.set_rlabel_position(10)
+        ax2.set_rticks([0, 0.5, 1])
+        # Define positions in degrees (0 to 360)
+        angles_deg = np.linspace(0, 360, 8, endpoint=False)
+        # Define corresponding labels in radians (0 to 2π)
+        labels = [r'$0$', r'$\frac{\pi}{4}$', r'$\frac{\pi}{2}$', r'$\frac{3\pi}{4}$',
+                r'$\pi$', r'$\frac{5\pi}{4}$', r'$\frac{3\pi}{2}$', r'$\frac{7\pi}{4}$']
+
+        ax2.set_thetagrids(angles_deg, labels)
         ax2.set_title('Perception Signal')
 
         plt.show()
@@ -1109,7 +1122,11 @@ class NeuralBandModel:
         minimium of the Hamiltonian, which is most likely to be near the neural 
         angle corresponding to the focal angle (theta=0).
         
-        Returns a list of unique equilibrium gamma values found.
+        Returns a list of unique equilibrium gamma values found if focal_angle 
+        is supplied or None, otherwise returns a list of allocentric equilibrium
+        angles found across the mesh of focal angles. Also returns a list of 
+        booleans indicating whether each equilibrium is stable (True) or unstable
+        (False) based on an analytical perturbation analysis.
 
         Parameters
         ----------
@@ -1129,8 +1146,8 @@ class NeuralBandModel:
 
         Returns
         -------
-        gamma_eqs : list of complex
-            list of equilibrium gamma values
+        gamma_eqs : list of complex OR angle_eqs : list of float
+            list of equilibrium gamma values or allocentric equilibrium angles
         stability : list of bool
             for each equilibrium gamma value, whether it is stable (True) or 
             unstable (False)
@@ -1145,6 +1162,7 @@ class NeuralBandModel:
 
         init_angles = np.linspace(-np.pi, np.pi-0.01)
         final_gammas = []
+        final_angles = []
         stability = []
         for angle in init_angles:
             if get_focal_angle is True:
@@ -1172,8 +1190,17 @@ class NeuralBandModel:
                 if not close_check:
                     # record gamma equilibrium and its stability
                     final_gammas.append(gamma_eq)
+                    if get_focal_angle is True:
+                        # If meshing over focal angle, convert equilibrium gamma to 
+                        #   allocentric angle.
+                        angle_eq, _ = self.convert_gamma(gamma_eq)
+                        # CRAP! Which egocentric direction is positive?
+                        final_angles.append(convert_angles(focal_angle+angle_eq))
                     stability.append(self._discrim_A(gamma_eq, focal_angle, focal_loc))
-        return final_gammas, stability
+        if get_focal_angle is True:
+            return final_angles, stability
+        else:
+            return final_gammas, stability
     
 
     def convert_gamma(self, gamma):
@@ -1194,41 +1221,7 @@ class NeuralBandModel:
         '''
         Theta = np.angle(gamma)
         R = np.abs(gamma)
-        return self.percep_model.get_neural_angle_inverse(Theta), R
-    
-
-    def _process_point(self, args):
-        '''Helper function for processing mesh points in plot_direction_mesh.
         
-        Parameters
-        ----------
-        args : tuple
-            (ii, jj, X, Y) where ii and jj are the mesh indices and X and Y 
-            are the mesh coordinate arrays.
-
-        Returns
-        -------
-        ii : int
-            mesh x index
-        jj : int
-            mesh y index
-        thetas : array of float
-            array of equilibrium angles found at this mesh point
-        Rs : array of float
-            array of coherence strengths corresponding to the equilibrium angles
-        stability : list of bool
-            list indicating whether each equilibrium is stable (True) or unstable (False)
-        '''
-
-        ii, jj, X, Y = args
-        focal_loc = np.array([X[jj,ii], Y[jj,ii]])
-
-        final_gammas, stability = self.gamma_equilib(focal_angle=True, focal_loc=focal_loc)
-
-        thetas, Rs = self.convert_gamma(final_gammas)
-
-        return ii, jj, thetas, Rs, stability
-    
 
     def _discrim_A(self, gamma_star, focal_angle, focal_loc):
         '''Determines stability of equilibria based on perturbation analysis.
@@ -1262,6 +1255,184 @@ class NeuralBandModel:
                         *np.sin(Theta-neur_angles)**2)
             A = k*summands.sum()/(2*self.T)
         return A < 1
+    
+
+    def _process_point(self, args):
+        '''Helper function for processing mesh points in plot_direction_mesh.
+        
+        Parameters
+        ----------
+        args : tuple
+            (ii, jj, X, Y) where ii and jj are the mesh indices and X and Y 
+            are the mesh coordinate arrays.
+
+        Returns
+        -------
+        ii : int
+            mesh x index
+        jj : int
+            mesh y index
+        thetas : array of float
+            array of equilibrium angles found at this mesh point
+        Rs : array of float
+            array of coherence strengths corresponding to the equilibrium angles
+        stability : list of bool
+            list indicating whether each equilibrium is stable (True) or unstable (False)
+        '''
+
+        ii, jj, X, Y = args
+        focal_loc = np.array([X[jj,ii], Y[jj,ii]])
+
+        final_angles, stability = self.gamma_equilib(focal_angle=True, focal_loc=focal_loc)
+
+        return ii, jj, final_angles, stability
+    
+
+    def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
+                            pool=None, axis=None, wb_plot=False):
+        '''Create a mesh of starting locations and, for each point in the mesh, 
+        find the equilibria of dgamma/dt and plot the corresponding consensus 
+        directions.
+
+        Set wb_plot to True if plotting in a Jupyter notebook
+
+        Parameters
+        ----------
+        xlim : (xmin,xmax) tuple of floats
+            x limits for mesh, inclusive
+        num_x : number of steps in x direction
+        ylim : (ymin,ymax) tuple of floats
+            y limits for mesh, inclusive
+        num_y : number of steps in y direction
+        pool : multiprocessing.Pool, optional
+            If provided, use this pool to parallelize the solving of the ODEs.
+        axis : matplotlib axis, optional
+            If provided, plot on this axis instead of creating a new figure and axis.
+        wb_plot : bool
+            whether or not plotting in a Jupyter notebook
+
+        Returns
+        -------
+        ax : matplotlib axis, if axis was provided as an argument. Otherwise, None.
+        '''
+
+        # create mesh of focal locations
+        xmesh = np.linspace(xlim[0], xlim[1], num_x)
+        ymesh = np.linspace(ylim[0], ylim[1], num_y)
+
+        X, Y = np.meshgrid(xmesh, ymesh)
+        
+        
+        if pool is None:
+            results = []
+            for ii in range(num_x):
+                for jj in range(num_y):
+                    print("Processing point ({},{})".format(ii,jj))
+                    results.append(self._process_point((ii,jj,X,Y)))
+        else:
+            args_list = [(ii, jj, X, Y) for ii in range(num_x) for jj in range(num_y)]
+            print("Processing points in parallel using pool...")
+            results = pool.map(self._process_point, args_list)
+
+        # plot the vector field
+        if axis is None:
+            if wb_plot:
+                fig = plt.figure(figsize=(12,6))
+            else:
+                fig = plt.figure(figsize=(5.5,5))
+
+        # List of x- and y-components of unit vectors for a list of solution arrays 
+        #   corresponding to solutions found at each mesh point
+        U_list = []; V_list = []
+        # Record stability of each equilibrium solution
+        stability_list = []
+        # boolean mesh for multiple solutions
+        multi_sol = np.full(X.shape, False, dtype=bool)
+        # List of arrays of equilibrium angles for each solution found at each mesh point
+        multi_thetas = []
+        for result in results:
+            ii, jj, thetas, stabilities = result
+            for n, theta, stable in enumerate(zip(thetas, stabilities)):
+                if len(multi_thetas) < n+1:
+                    multi_thetas.append(np.zeros(X.shape))
+                    U_list.append(np.zeros(X.shape))
+                    V_list.append(np.zeros(X.shape))
+                    stability_list.append(np.full(X.shape, False, dtype=bool))
+                multi_thetas[n][jj,ii] = theta
+                U_list[n][jj,ii] = np.cos(theta)
+                V_list[n][jj,ii] = np.sin(theta)
+                stability_list[n][jj,ii] = stable
+            if len(thetas) > 1:
+                multi_sol[jj,ii] = True
+
+        if axis is None:
+            ax = plt.subplot(1,1,1)
+        # Plot targets
+        self.percep_model.targets.plot_targets_to_axis(ax)
+        ##### Plot arrows, coloring multi-solution points differently #####
+        # Single solution points (blue if stable, cyan if unstable)
+        X_single_stable = X[(multi_sol==False) & stability_list[0]]
+        Y_single_stable = Y[(multi_sol==False) & stability_list[0]]
+        U_single_stable = U_list[0][(multi_sol==False) & stability_list[0]]
+        V_single_stable = V_list[0][(multi_sol==False) & stability_list[0]]
+        ax.quiver(X_single_stable, Y_single_stable, U_single_stable, V_single_stable,
+                angles='xy', color='blue', scale=30, width=0.004,
+                label='Single Solution (Stable)')
+        X_single_unstable = X[(multi_sol==False) & ~stability_list[0]]
+        Y_single_unstable = Y[(multi_sol==False) & ~stability_list[0]]
+        U_single_unstable = U_list[0][(multi_sol==False) & ~stability_list[0]]
+        V_single_unstable = V_list[0][(multi_sol==False) & ~stability_list[0]]
+        ax.quiver(X_single_unstable, Y_single_unstable, U_single_unstable, V_single_unstable,
+                angles='xy', color='cyan', scale=30, width=0.004,
+                label='Single Solution (Unstable)')
+        # ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
+        #             U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
+        #             angles='xy', color='blue', scale=30, width=0.004, 
+        #             label='Single Solution')
+        # Multi solution points (red if stable, black if unstable)
+        X_multi_stable = X[multi_sol & stability_list[0]]
+        Y_multi_stable = Y[multi_sol & stability_list[0]]
+        U_multi_stable = U_list[0][multi_sol & stability_list[0]]
+        V_multi_stable = V_list[0][multi_sol & stability_list[0]]
+        ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
+                angles='xy', color='black', scale=30, width=0.004,
+                label='Multiple Solutions (Stable)')
+        X_multi_unstable = X[multi_sol & ~stability_list[0]]
+        Y_multi_unstable = Y[multi_sol & ~stability_list[0]]
+        U_multi_unstable = U_list[0][multi_sol & ~stability_list[0]]
+        V_multi_unstable = V_list[0][multi_sol & ~stability_list[0]]
+        ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
+                angles='xy', color='red', scale=30, width=0.004,
+                label='Multiple Solutions (Unstable)')
+        # ax.quiver(X[multi_sol], Y[multi_sol], 
+        #             U_list[0][multi_sol], V_list[0][multi_sol], 
+        #             angles='xy', color='red', scale=30, width=0.004,
+        #             label='Multiple Solutions')
+        for n in range(1, len(U_list)):
+            # Continue with multi-solution points, coloring them red if stable and black if unstable
+            nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
+            X_multi_stable = X[nonzero_mask & stability_list[n]]
+            Y_multi_stable = Y[nonzero_mask & stability_list[n]]
+            U_multi_stable = U_list[n][nonzero_mask & stability_list[n]]
+            V_multi_stable = V_list[n][nonzero_mask & stability_list[n]]
+            ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
+                    angles='xy', color='black', scale=30, width=0.004)
+            X_multi_unstable = X[nonzero_mask & ~stability_list[n]]
+            Y_multi_unstable = Y[nonzero_mask & ~stability_list[n]]
+            U_multi_unstable = U_list[n][nonzero_mask & ~stability_list[n]]
+            V_multi_unstable = V_list[n][nonzero_mask & ~stability_list[n]]
+            ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
+                    angles='xy', color='red', scale=30, width=0.004)
+            # ax.quiver(X[nonzero_mask], Y[nonzero_mask], 
+            #           U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
+            #           angles='xy', color='red', scale=30, width=0.004)
+        ax.set_aspect('equal')
+        ax.set_title('New model equilibrium plot')
+        if axis is None:
+            fig.legend(loc='outside center right')
+            plt.show()
+        else:
+            return ax
 
 
 
@@ -1740,10 +1911,11 @@ class IsingExtModel:
             results = pool.map(self._process_point, args_list)
 
         # plot the vector field
-        if wb_plot:
-            fig = plt.figure(figsize=(12,6))
-        else:
-            fig = plt.figure(figsize=(5.5,5))
+        if axis is None:
+            if wb_plot:
+                fig = plt.figure(figsize=(12,6))
+            else:
+                fig = plt.figure(figsize=(5.5,5))
 
         # List of x- and y-components of unit vectors for a list of solution arrays 
         #   corresponding to solutions found at each mesh point
@@ -1833,14 +2005,13 @@ class IsingExtModel:
             #           U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
             #           angles='xy', color='red', scale=30, width=0.004)
         ax.set_aspect('equal')
-        ax.set_title('Equilibria from root finding')
-        # fig.legend(loc='outside center right')
+        ax.set_title('Equilibrium plot')
         if axis is None:
+            fig.legend(loc='outside center right')
             plt.show()
         else:
             return ax
         
-
 
     def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
                      start_loc=None, start_angle=None, plot_tracks=False, 
