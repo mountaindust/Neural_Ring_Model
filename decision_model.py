@@ -1165,7 +1165,7 @@ class NeuralBandModel:
         final_angles = []
         stability = []
         for angle in init_angles:
-            if get_focal_angle is True:
+            if get_focal_angle:
                 # Set the focal angle to the initial angle being meshed over, and then
                 #   use the neural angle corresponding to that focal angle 
                 #   (e.g. 0) to determine the initial gamma value.
@@ -1183,21 +1183,26 @@ class NeuralBandModel:
                 gamma_eq = sol.x[0] + 1j*sol.x[1]
                 # Check if close to any existing solution
                 close_check = False
-                for existing_gamma in final_gammas:
-                    if np.abs(gamma_eq - existing_gamma) < 0.001:
-                        close_check = True
-                        break
+                if get_focal_angle:
+                    angle_eq, _ = self.convert_gamma(gamma_eq)
+                    angle_eq = convert_angles(focal_angle+angle_eq)
+                    for existing_angle in final_angles:
+                        if np.abs(angle_eq - existing_angle) < 0.001:
+                            close_check = True
+                            break
+                else:
+                    for existing_gamma in final_gammas:
+                        if np.abs(gamma_eq - existing_gamma) < 0.001:
+                            close_check = True
+                            break
                 if not close_check:
-                    # record gamma equilibrium and its stability
-                    final_gammas.append(gamma_eq)
-                    if get_focal_angle is True:
-                        # If meshing over focal angle, convert equilibrium gamma to 
-                        #   allocentric angle.
-                        angle_eq, _ = self.convert_gamma(gamma_eq)
-                        # CRAP! Which egocentric direction is positive?
-                        final_angles.append(convert_angles(focal_angle+angle_eq))
+                    # record equilibrium and its stability
+                    if get_focal_angle:
+                        final_angles.append(angle_eq)
+                    else:
+                        final_gammas.append(gamma_eq)
                     stability.append(self._discrim_A(gamma_eq, focal_angle, focal_loc))
-        if get_focal_angle is True:
+        if get_focal_angle:
             return final_angles, stability
         else:
             return final_gammas, stability
@@ -1221,6 +1226,7 @@ class NeuralBandModel:
         '''
         Theta = np.angle(gamma)
         R = np.abs(gamma)
+        return self.percep_model.get_neural_angle_inverse(Theta), R
         
 
     def _discrim_A(self, gamma_star, focal_angle, focal_loc):
@@ -1289,7 +1295,7 @@ class NeuralBandModel:
     
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            pool=None, axis=None, wb_plot=False):
+                            pool=None, ax=None, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         find the equilibria of dgamma/dt and plot the corresponding consensus 
         directions.
@@ -1335,11 +1341,14 @@ class NeuralBandModel:
             results = pool.map(self._process_point, args_list)
 
         # plot the vector field
-        if axis is None:
+        if ax is None:
+            local_plot = True
             if wb_plot:
                 fig = plt.figure(figsize=(12,6))
             else:
                 fig = plt.figure(figsize=(5.5,5))
+        else:
+            local_plot = False
 
         # List of x- and y-components of unit vectors for a list of solution arrays 
         #   corresponding to solutions found at each mesh point
@@ -1352,7 +1361,7 @@ class NeuralBandModel:
         multi_thetas = []
         for result in results:
             ii, jj, thetas, stabilities = result
-            for n, theta, stable in enumerate(zip(thetas, stabilities)):
+            for n, (theta, stable) in enumerate(zip(thetas, stabilities)):
                 if len(multi_thetas) < n+1:
                     multi_thetas.append(np.zeros(X.shape))
                     U_list.append(np.zeros(X.shape))
@@ -1365,8 +1374,9 @@ class NeuralBandModel:
             if len(thetas) > 1:
                 multi_sol[jj,ii] = True
 
-        if axis is None:
+        if local_plot:
             ax = plt.subplot(1,1,1)
+
         # Plot targets
         self.percep_model.targets.plot_targets_to_axis(ax)
         ##### Plot arrows, coloring multi-solution points differently #####
@@ -1428,7 +1438,7 @@ class NeuralBandModel:
             #           angles='xy', color='red', scale=30, width=0.004)
         ax.set_aspect('equal')
         ax.set_title('New model equilibrium plot')
-        if axis is None:
+        if local_plot:
             fig.legend(loc='outside center right')
             plt.show()
         else:
@@ -1865,7 +1875,7 @@ class IsingExtModel:
     
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            pool=None, axis=None, wb_plot=False):
+                            pool=None, ax=None, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         find the equilibria of dgamma/dt and plot the corresponding consensus 
         directions.
@@ -1911,11 +1921,14 @@ class IsingExtModel:
             results = pool.map(self._process_point, args_list)
 
         # plot the vector field
-        if axis is None:
+        if ax is None:
+            local_plot = True
             if wb_plot:
                 fig = plt.figure(figsize=(12,6))
             else:
                 fig = plt.figure(figsize=(5.5,5))
+        else:
+            local_plot = False
 
         # List of x- and y-components of unit vectors for a list of solution arrays 
         #   corresponding to solutions found at each mesh point
@@ -1943,8 +1956,9 @@ class IsingExtModel:
             if len(final_gammas) > 1:
                 multi_sol[jj,ii] = True
 
-        if axis is None:
+        if local_plot:
             ax = plt.subplot(1,1,1)
+
         # Plot targets
         self.percep_model.targets.plot_targets_to_axis(ax)
         ##### Plot arrows, coloring multi-solution points differently #####
@@ -2006,7 +2020,7 @@ class IsingExtModel:
             #           angles='xy', color='red', scale=30, width=0.004)
         ax.set_aspect('equal')
         ax.set_title('Equilibrium plot')
-        if axis is None:
+        if local_plot:
             fig.legend(loc='outside center right')
             plt.show()
         else:
