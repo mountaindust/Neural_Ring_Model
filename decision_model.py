@@ -677,7 +677,6 @@ class PerceptionModel:
         return result.item() if scalar_input else result
 
 
-
     def get_neural_weight(self, theta):
         '''Returns the neural weight for given angles theta based on the 
         weighting function. This is a proxy for the density of neurons in the 
@@ -703,7 +702,6 @@ class PerceptionModel:
         else:
             raise NotImplementedError("Unknown neural weight function name.")
         
-
 
     def get_neural_angle(self, theta):
         '''Returns the neural position for a given angle theta based on the 
@@ -734,7 +732,6 @@ class PerceptionModel:
             raise NotImplementedError("Unknown neural position function name.")
         
 
-
     def get_neural_angle_inverse(self, theta):
         '''Returns the angle corresponding to a given neural position theta based on the 
         inverse of the neural position transformation function. This is a mapping 
@@ -761,7 +758,6 @@ class PerceptionModel:
             return self._smooth_power_inverse(theta, self.c, self.d)
         else:
             raise NotImplementedError("Unknown neural position function name.")
-
 
 
     def _get_target_signals(self, focal_angle=None, focal_loc=None, full_signal=False):
@@ -883,7 +879,6 @@ class PerceptionModel:
             return c_angles, G/G.sum()
 
 
-
     def plot_blocked_signals(self, wb_plot=False):
         '''Plots visible targets, their angular direction from the observer, 
         their associated neural angles, and also the signal distribution from 
@@ -937,7 +932,6 @@ class PerceptionModel:
         ax2.set_title('Perception Signal')
 
         plt.show()
-
 
 
     def get_neural_signals(self, focal_angle=None, focal_loc=None):
@@ -1023,7 +1017,6 @@ class NeuralBandModel:
         self.rng = np.random.default_rng()
 
 
-
     def dgamma_dt(self, t=None, gamma=None, focal_angle=None, focal_loc=None):
         '''Get the complex time derivative of gamma according to the 
         Ising model. For use directly in ODE solvers.
@@ -1074,7 +1067,6 @@ class NeuralBandModel:
         return np.sum(summands) - gamma
 
 
-
     def dgamma_dt_vec(self, gamma_vec, focal_angle=None, focal_loc=None):
         '''Wrapper around dgamma_dt for use in root finding for equilibria.
         
@@ -1101,11 +1093,21 @@ class NeuralBandModel:
         return np.array([dgamma.real, dgamma.imag])
     
 
-
     def gamma_equilib(self, focal_angle=None, focal_loc=None):
         '''Attempt to find all zeros (equilibria) of dgamma/dt for a given focal 
         location by using a multistart root finding algorithm on a mesh of 
-        initial gamma values (circle of radius 0.5).
+        initial angle values. 
+        
+        If focal_angle is supplied or None, the initial angle values will 
+        correspond to the argument of the initial gamma value with coherence 
+        strength of 0.5. If focal_angle is True, the initial angle values will 
+        correspond to the focal angle, and the argument of the initial gamma 
+        value will be zero (i.e., the neural angle corresponding to the focal 
+        angle). This second option is what you want to use if creating a 
+        bifurcation diagram in x,y-space because the dgamma/dt equation is 
+        derived assuming that the initial value of gamma is close to the global 
+        minimium of the Hamiltonian, which is most likely to be near the neural 
+        angle corresponding to the focal angle (theta=0).
         
         Returns a list of unique equilibrium gamma values found.
 
@@ -1114,12 +1116,14 @@ class NeuralBandModel:
         focal_angle : float or bool, optional
             The current heading (angle) of the observer. 
             - If None, use self.percep_model.focal_angle. 
-            - If True, assume focal_angle is the argument of the initial gamma value.
+            - If True, assume focal_angle changes according to the multistart mesh,
+                with the initial gamma angle corresponding to the neural angle 
+                of the focal angle.
                 NOTE: This is what you want to use if creating a bifurcation diagram 
                 in x,y-space because the dgamma/dt equation is derived assuming 
                 that the initial value of gamma is close to the global minimium 
-                of the Hamiltonian, which is most likely to be near the neural 
-                angle corresponding to the focal angle.
+                of the Hamiltonian, which is most likely to be near the zero neural 
+                angle since that corresponds to the focal angle.
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use self.percep_model.focal_loc.
 
@@ -1137,14 +1141,19 @@ class NeuralBandModel:
             get_focal_angle = False
 
         init_angles = np.linspace(-np.pi, np.pi-0.01)
-        init_gammas = np.zeros((init_angles.size, 2), dtype=np.double)
-        init_gammas[:,0] = 0.5*np.cos(init_angles)
-        init_gammas[:,1] = 0.5*np.sin(init_angles)
         final_gammas = []
-        for init_gamma in init_gammas:
+        for angle in init_angles:
             if get_focal_angle is True:
-                gam_angle = np.angle(init_gamma[0] + 1j*init_gamma[1])
-                focal_angle = self.percep_model.get_neural_angle_inverse(gam_angle)
+                # Set the focal angle to the initial angle being meshed over, and then
+                #   use the neural angle corresponding to that focal angle 
+                #   (e.g. 0) to determine the initial gamma value.
+                focal_angle = angle
+                init_gamma = np.array([0.5, 0.0]) # corresponds to the neural 
+                                                  #   angle of the focal angle.
+            else:
+                # Use the initial angle being meshed over directly as the angle 
+                #   of the initial gamma value for root finding.
+                init_gamma = np.array([0.5*np.cos(angle), 0.5*np.sin(angle)])
             sol = root(self.dgamma_dt_vec, init_gamma, args=(focal_angle, focal_loc),
                        method='hybr', tol=1e-7)
             # Only store unique solutions
@@ -1159,6 +1168,58 @@ class NeuralBandModel:
                 if not close_check:
                     final_gammas.append(gamma_eq)
         return final_gammas
+    
+
+    def convert_gamma(self, gamma):
+        '''Convert a given neural gamma value to an egocentric physical coherence 
+        angle and coherence strength.
+
+        Parameters
+        ----------
+        gamma : complex or array of complex
+            coherence value of the neural band
+
+        Returns
+        -------
+        angle : float or array of float
+            physical angle corresponding to the input gamma value
+        R : float or array of float
+            coherence strength corresponding to the input gamma value
+        '''
+        Theta = np.angle(gamma)
+        R = np.abs(gamma)
+        return self.percep_model.get_neural_angle_inverse(Theta), R
+    
+
+    def _process_point(self, args):
+        '''Helper function for processing mesh points in plot_direction_mesh.
+        
+        Parameters
+        ----------
+        args : tuple
+            (ii, jj, X, Y) where ii and jj are the mesh indices and X and Y 
+            are the mesh coordinate arrays.
+
+        Returns
+        -------
+        ii : int
+            mesh x index
+        jj : int
+            mesh y index
+        thetas : array of float
+            array of stable equilibrium angles found at this mesh point
+        Rs : array of float
+            array of coherence strengths corresponding to the equilibrium angles
+        '''
+
+        ii, jj, X, Y = args
+        focal_loc = np.array([X[jj,ii], Y[jj,ii]])
+
+        final_gammas = self.gamma_equilib(focal_angle=True, focal_loc=focal_loc)
+
+        thetas, Rs = self.convert_gamma(final_gammas)
+
+        return ii, jj, thetas, Rs
 
 
 
@@ -1507,11 +1568,11 @@ class IsingExtModel:
             get_focal_angle = False
 
         init_angles = np.linspace(-np.pi, np.pi-0.01)
-        init_vals = np.zeros((init_angles.size, 2), dtype=np.double)
-        init_vals[:,0] = 0.5*np.cos(init_angles)
-        init_vals[:,1] = 0.5*np.sin(init_angles)
+        init_gamma_vecs = np.zeros((init_angles.size, 2), dtype=np.double)
+        init_gamma_vecs[:,0] = 0.5*np.cos(init_angles)
+        init_gamma_vecs[:,1] = 0.5*np.sin(init_angles)
         final_gammas = []
-        for init_val in init_vals:
+        for init_val in init_gamma_vecs:
             if get_focal_angle is True:
                 focal_angle = np.angle(init_val[0] + 1j*init_val[1])
             sol = root(self.dgamma_dt_vec, init_val, args=(focal_angle, focal_loc),
