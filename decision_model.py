@@ -658,10 +658,170 @@ class PerceptionModel:
         return result.item() if scalar_input else result
 
 
+    @staticmethod
+    def _subtract_interval_pair(interval, hole):
+        """Subtract a single non-wrapping hole from a single non-wrapping interval.
+
+        Both interval and hole must satisfy lo <= hi (non-wrapping).
+
+        Parameters
+        ----------
+        interval : (float, float)
+            Non-wrapping interval [lo, hi] with lo <= hi.
+        hole : (float, float)
+            Non-wrapping hole [lo, hi] with lo <= hi.
+
+        Returns
+        -------
+        list of (float, float)
+            Remaining non-wrapping intervals after subtraction.
+        """
+        a, b = interval
+        h_lo, h_hi = hole
+        eps = 1e-14
+
+        # Degenerate hole (zero width)
+        if h_hi - h_lo <= eps:
+            return [(a, b)]
+
+        # No overlap
+        if h_hi <= a or h_lo >= b:
+            return [(a, b)]
+        # Full overlap
+        if h_lo <= a and h_hi >= b:
+            return []
+        # Left bite
+        if h_lo <= a and h_hi < b:
+            if b - h_hi > eps:
+                return [(h_hi, b)]
+            return []
+        # Right bite
+        if h_lo > a and h_hi >= b:
+            if h_lo - a > eps:
+                return [(a, h_lo)]
+            return []
+        # Middle bite: h_lo > a and h_hi < b
+        result = []
+        if h_lo - a > eps:
+            result.append((a, h_lo))
+        if b - h_hi > eps:
+            result.append((h_hi, b))
+        return result
+
+    @staticmethod
+    def _unwrap_interval(interval):
+        """Decompose an angular interval into non-wrapping pieces.
+
+        If lo <= hi, the interval is already non-wrapping and returned as-is.
+        If lo > hi, the interval wraps around ±pi and is split into
+        (lo, pi) and (-pi, hi).
+
+        Parameters
+        ----------
+        interval : (float, float)
+            Angular interval (lo, hi) on [-pi, pi].
+
+        Returns
+        -------
+        list of (float, float)
+            One or two non-wrapping intervals with lo <= hi.
+        """
+        lo, hi = interval
+        if lo <= hi:
+            return [(lo, hi)]
+        else:
+            pieces = []
+            if np.pi - lo > 1e-14:
+                pieces.append((lo, np.pi))
+            if hi - (-np.pi) > 1e-14:
+                pieces.append((-np.pi, hi))
+            return pieces
+
+    @staticmethod
+    def _subtract_intervals_circle(intervals, hole):
+        """Subtract an angular interval (hole) from a list of angular intervals
+        on the circle [-pi, pi].
+
+        Both the input intervals and the hole may wrap around ±pi (lo > hi).
+        All returned intervals are non-wrapping (lo <= hi).
+
+        Parameters
+        ----------
+        intervals : list of (float, float)
+            Angular intervals on [-pi, pi]. Each (lo, hi) with lo <= hi is
+            the arc [lo, hi]. If lo > hi, the interval wraps around ±pi.
+        hole : (float, float)
+            The angular interval to subtract. May wrap around ±pi.
+
+        Returns
+        -------
+        list of (float, float)
+            Remaining non-wrapping intervals after subtraction.
+        """
+        # Decompose all input intervals into non-wrapping pieces
+        unwrapped = []
+        for iv in intervals:
+            unwrapped.extend(PerceptionModel._unwrap_interval(iv))
+
+        # Decompose the hole into non-wrapping pieces
+        hole_pieces = PerceptionModel._unwrap_interval(hole)
+
+        # Subtract each hole piece from each interval piece
+        current = unwrapped
+        for hp in hole_pieces:
+            next_intervals = []
+            for iv in current:
+                next_intervals.extend(
+                    PerceptionModel._subtract_interval_pair(iv, hp))
+            current = next_intervals
+
+        return current
+
+
+    def _integrate_neural_weight(self, intervals):
+        """Integrate the neural weight function over a union of angular intervals.
+
+        Computes the exact integral of get_neural_weight(theta) over the
+        given intervals. For the 'cutoff' weight, this uses the existing
+        _smooth_cutoff_integral antiderivative. For uniform weight (None),
+        the integral is simply the total arc length.
+
+        Parameters
+        ----------
+        intervals : list of (float, float)
+            Non-wrapping intervals [lo, hi] with lo <= hi, all in [-pi, pi].
+
+        Returns
+        -------
+        float
+            The integral value. A shared constant factor (from the
+            _smooth_cutoff_integral normalization) is present but cancels
+            in rho = G / G.sum(), so the result is suitable for relative
+            group size computation.
+        """
+        if not intervals:
+            return 0.0
+
+        if self.neural_weight is None:
+            # Uniform weight: integral is arc length
+            return sum(hi - lo for lo, hi in intervals)
+        elif self.neural_weight == 'cutoff':
+            # Use _smooth_cutoff_integral_scalar as antiderivative F(theta).
+            # F(theta) = norm * integral_0^theta cutoff(x) dx
+            # where norm = 2*pi/(a+b). The constant cancels in
+            # rho = G/G.sum(), so we use F(hi) - F(lo) directly.
+            # Call the scalar kernel directly to avoid np.vectorize overhead.
+            F = self._smooth_cutoff_integral_scalar
+            a, b = self.a, self.b
+            return sum(F(hi, a, b) - F(lo, a, b) for lo, hi in intervals)
+        else:
+            raise NotImplementedError("Unknown neural weight function name.")
+
+
     def get_neural_weight(self, theta):
-        '''Returns the neural weight for given angles theta based on the 
-        weighting function. This is a proxy for the density of neurons in the 
-        ring as a function of angle, and weights things in front more highly than 
+        '''Returns the neural weight for given angles theta based on the
+        weighting function. This is a proxy for the density of neurons in the
+        ring as a function of angle, and weights things in front more highly than
         in back. Uses a standard cuttoff function or tanh_plus or returns ones.
 
         Parameters
@@ -741,43 +901,42 @@ class PerceptionModel:
             raise NotImplementedError("Unknown neural position function name.")
 
 
-    def _get_target_signals(self, focal_angle=None, focal_loc=None, full_signal=False):
-        '''Returns the egocentric angular location of the center of each VISIBLE 
-        target (closer targets that are not delta functions block ones behind) as 
-        a length N array, and a normalized neural group size (rho) for each. 
-        Alternatively, if full_signal is True, returns the full weighting of 
-        the neural band (before integration, including attractiveness) for each 
-        target as a function of angle on the theta mesh, which is an array of 
-        shape Nxlen(theta_mesh), where N is the number of visible targets. 
-        
-        Uses a mesh of theta values to determine blocking, resulting in an 
-        approximation of extents. This adds noise, but maybe the right kind of 
-        noise (i.e., if less than 2pi/len(self.theta_mesh) is visible to the right 
-        or left of a blocking locust, then the blocked locust is treated as not 
-        visible). Larger meshes result in a finer mesh and a better approximation 
-        of exact blocking.
+    def _get_target_signals(self, focal_angle=None, focal_loc=None, mesh_signal=False):
+        '''Returns the egocentric angular location of the center of each VISIBLE
+        target (closer targets that are not delta functions block ones behind) as
+        a length N array, and a normalized neural group size (rho) for each.
+
+        For circle (and segment) targets, blocking and neural group sizes are
+        computed using exact interval arithmetic rather than a discrete mesh.
+
+        If mesh_signal is True, instead returns the neural weighting
+        (including attractiveness) for each target evaluated on the theta mesh,
+        as an Nxlen(theta_mesh) array. This is used for plotting the perception
+        signal (see plot_blocked_signals).
+
+        If all targets are fully blocked or have zero neural weight, returns
+        empty arrays (length-0 c_angles and rho).
 
         Parameters
         ----------
         focal_angle : float, optional
-            the focal angle for egocentric perception. If None, uses the object's 
+            the focal angle for egocentric perception. If None, uses the object's
             focal_angle attribute.
         focal_loc : array-like, optional
-            the (x,y) focal location for egocentric perception. If None, uses the 
+            the (x,y) focal location for egocentric perception. If None, uses the
             object's focal_loc attribute.
-        full_signal : bool
-            if True, return the full signal for each target as a theta mesh, 
-            otherwise return only the value of the signal for each target
+        mesh_signal : bool
+            if True, return the neural weighting for each target on the theta
+            mesh (for plotting). Otherwise return integrated group sizes (rho).
 
         Returns
         -------
-        angles : length N ndarray
+        c_angles : length N ndarray
             angles to the visual centers of visible targets
-        rho : length N or Nxlen(theta_mesh) ndarray
-            normalized neural group size for each visible target. If full_signal
-            is True, return the neural weighting (including attractiveness) as a 
-            function of angle for each target as an array of shape 
-            Nxlen(theta_mesh) instead.
+        rho : length N ndarray (mesh_signal=False)
+            normalized neural group size for each visible target, sums to 1.
+        signals : Nxlen(theta_mesh) ndarray (mesh_signal=True)
+            neural weighting times attractiveness on the theta mesh.
         '''
 
         if focal_angle is None:
@@ -790,74 +949,100 @@ class PerceptionModel:
         dists = self.targets.get_dist_to_targets(focal_loc)
         c_angles = self.targets.get_angles_to_targets(focal_loc, focal_angle)
         angles = self.targets.get_percep_angles(focal_loc, focal_angle)
-        # This array will be 1 where the target is visible and 0 where it is 
-        #   blocked, for each target and each angle in the mesh.
-        theta_supp = np.zeros((angles.shape[0], self.theta_mesh.size))
 
         if self.targets.geom_name is None:
-            # TODO: come back to this
-            for n, theta in enumerate(angles):
-                idx = np.searchsorted(self.theta_mesh,theta)
-                if idx == len(self.theta_mesh):
-                    idx = 0
-                # step function perception
-                if idx != 0 and \
-                theta-self.theta_mesh[idx-1] < self.theta_mesh[idx]-theta:
-                    theta_supp[n,idx-1] = 1
-                elif idx == 0 and \
-                theta-self.theta_mesh[-1] < -self.theta_mesh[0]-theta:
-                    theta_supp[n,-1] = 1
-                else:
-                    theta_supp[n,idx] = 1
-                s_values = self.targets.values
+            ##### Delta function targets (no blocking) #####
+            # Each target is a single angle; evaluate neural weight there directly.
+            s_values = self.targets.values
+            G = self.get_neural_weight(angles) * s_values
+
+            if mesh_signal:
+                theta_supp = np.zeros((angles.shape[0], self.theta_mesh.size))
+                for n, theta in enumerate(angles):
+                    idx = np.searchsorted(self.theta_mesh, theta)
+                    if idx == len(self.theta_mesh):
+                        idx = 0
+                    elif idx != 0 and \
+                    theta-self.theta_mesh[idx-1] < self.theta_mesh[idx]-theta:
+                        idx = idx - 1
+                    theta_supp[n, idx] = 1
+                weighted_signals = theta_supp*self.get_neural_weight(self.theta_mesh)
+                return c_angles, weighted_signals*s_values[:, np.newaxis]
+            else:
+                G_total = G.sum()
+                if G_total == 0:
+                    return np.array([]), np.array([])
+                return c_angles, G/G_total
 
         elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
-            # sort by distance
-            # TODO: Andy points out that you can have two line segments where 
-            # the one with the farther center occludes the one with the closer center.
+            ##### Extended targets: exact interval arithmetic #####
+            # Sort by distance (closest first for blocking priority).
+            # TODO: Andy points out that you can have two line segments where
+            # the one with the farther center occludes the one with the closer
+            # center. This sort-by-center-distance is correct for circles but
+            # not for segments in general.
             arg_srt = dists.argsort()
-            angles = angles[arg_srt]
-            c_angles = c_angles[arg_srt]
-            # determine blocking by creating binary theta_supp for each angle extent
-            for n, thetas in enumerate(angles):
-                if thetas[1] > thetas[0]:
-                    theta_bool = np.logical_and(thetas[0]<=self.theta_mesh,
-                                                self.theta_mesh<=thetas[1])
-                else:
-                    theta_bool = np.logical_or(thetas[0]<=self.theta_mesh,
-                                               self.theta_mesh<=thetas[1])
-                theta_supp[n,theta_bool] = 1
-            # determine blocking based on sorted order
-            # closest targets are earlier in the theta_supp array
-            blocked = theta_supp[0,:] != 0
-            for n in range(1,theta_supp.shape[0]):
-                theta_supp[n,blocked] = 0
-                blocked = np.logical_or(blocked, theta_supp[n,:] != 0)
-            # undo sorting to main target consistency across methods
+            angles_sorted = angles[arg_srt]
+            c_angles_sorted = c_angles[arg_srt]
+
+            # Build visible intervals for each target using interval subtraction.
+            # Each target starts with its full angular extent, then all closer
+            # targets' original extents are subtracted (they block it).
+            num_targets = len(arg_srt)
+            # original_extents[n] = (lo, hi) as returned by get_percep_angles
+            original_extents = [(float(angles_sorted[n, 0]),
+                                 float(angles_sorted[n, 1]))
+                                for n in range(num_targets)]
+            visible_intervals = []  # list of lists of (lo, hi) tuples
+            for n in range(num_targets):
+                intervals = [original_extents[n]]
+                for closer in range(n):
+                    intervals = self._subtract_intervals_circle(
+                        intervals, original_extents[closer])
+                    if not intervals:
+                        break
+                visible_intervals.append(intervals)
+
+            # Compute neural group sizes by integrating neural weight over
+            # visible intervals, weighted by target attractiveness.
+            G_sorted = np.empty(num_targets)
+            for n in range(num_targets):
+                G_sorted[n] = self._integrate_neural_weight(
+                    visible_intervals[n]) * self.targets.values[arg_srt[n]]
+
+            # Undo sorting to restore original target order
             inv_arg_srt = np.empty_like(arg_srt)
-            inv_arg_srt[arg_srt] = np.arange(len(arg_srt))
-            theta_supp = theta_supp[inv_arg_srt,:]
-            c_angles = c_angles[inv_arg_srt]
-            # remove all completely blocked targets
-            vis = theta_supp.max(axis=1) > 0
-            theta_supp = theta_supp[vis,:]
+            inv_arg_srt[arg_srt] = np.arange(num_targets)
+            G = G_sorted[inv_arg_srt]
+            c_angles = c_angles_sorted[inv_arg_srt]
+            visible_intervals_orig = [visible_intervals[inv_arg_srt[n]]
+                                      for n in range(num_targets)]
+
+            # Remove completely blocked targets (G == 0)
+            vis = G > 0
             c_angles = c_angles[vis]
             s_values = self.targets.values[vis]
+            G = G[vis]
+            visible_intervals_vis = [visible_intervals_orig[n]
+                                     for n in range(num_targets) if vis[n]]
+
+            if mesh_signal:
+                # Build mesh representation from exact intervals for plotting
+                theta_supp = np.zeros((len(c_angles), self.theta_mesh.size))
+                for n, ivs in enumerate(visible_intervals_vis):
+                    for lo, hi in ivs:
+                        mask = (self.theta_mesh >= lo) & (self.theta_mesh <= hi)
+                        theta_supp[n, mask] = 1
+                weighted_signals = theta_supp*self.get_neural_weight(self.theta_mesh)
+                return c_angles, weighted_signals*s_values[:, np.newaxis]
+            else:
+                G_total = G.sum()
+                if G_total == 0:
+                    return np.array([]), np.array([])
+                return c_angles, G/G_total
 
         else:
             raise NotImplementedError("Unknown target geometry name.")
-        
-        # Apply neural weighting to theta extents
-        weighted_signals = theta_supp*self.get_neural_weight(self.theta_mesh)
-        
-        # calculate neural group sizes and divide by the sum of them all 
-        #   to get rho.
-        G = weighted_signals.sum(axis=1)*s_values
-
-        if full_signal:
-            return c_angles, weighted_signals*s_values[:, np.newaxis]
-        else:
-            return c_angles, G/G.sum()
 
 
     def plot_blocked_signals(self, wb_plot=False):
@@ -870,7 +1055,7 @@ class PerceptionModel:
         Set wb_plot to True if plotting in a Jupyber notebook
         '''
 
-        vis_angles, signals = self._get_target_signals(full_signal=True)
+        vis_angles, signals = self._get_target_signals(mesh_signal=True)
         neur_angles = self.get_neural_angle(vis_angles)
 
         if wb_plot:
@@ -1157,84 +1342,57 @@ class NeuralBandModel:
             # Find self-consistent equilibria: heading = consensus direction.
             # gamma = R + 0j, solve dgamma_dt(R+0j, theta, focal_loc) = 0.
             #
-            # Strategy: scan for sign changes in Im(dgamma_dt) across theta
-            # at several R values to find candidate theta values, then solve
-            # Re(dgamma_dt) = 0 for R at each candidate theta using brentq.
-            # Finally, polish with the 2D root finder.
-            #
-            # This is more robust than the 2D root finder alone because the
-            # Jacobian has a near-block-diagonal structure (Im depends mostly
-            # on theta, Re depends mostly on R).
+            # Strategy: scan Im(dgamma_dt) across theta at a probe R to find
+            # sign changes, use brentq to pin down candidate theta values,
+            # then polish each candidate with the 2D hybr root finder.
+            # The Jacobian is near-block-diagonal (Im depends mostly on theta,
+            # Re depends mostly on R), so the Im scan seeds theta well and
+            # hybr converges reliably from there.
 
-            theta_mesh = np.linspace(-np.pi, np.pi, 500)
+            theta_mesh = np.linspace(-np.pi, np.pi, 100)
             final_angles = []
             stability = []
+            R_probe = 0.5
 
-            # Collect candidate (theta, R) pairs from sign changes in Im
+            # Collect candidate theta values from sign changes in Im
             candidates = []
-            for R_probe in [0.2, 0.5, 0.8, 0.95]:
-                imag_vals = np.array([self.dgamma_dt(
-                    gamma=R_probe+0j, focal_angle=t,
-                    focal_loc=focal_loc).imag for t in theta_mesh])
-                for i in range(len(imag_vals)-1):
-                    if imag_vals[i]*imag_vals[i+1] < 0:
-                        try:
-                            theta_c = brentq(
-                                lambda t: self.dgamma_dt(
-                                    gamma=R_probe+0j, focal_angle=t,
-                                    focal_loc=focal_loc).imag,
-                                theta_mesh[i], theta_mesh[i+1])
-                            candidates.append((theta_c, R_probe))
-                        except ValueError:
-                            pass
-            # Always include theta=0 and theta=pi as candidates since
-            # Im(dgamma_dt) is often zero there by symmetry
+            imag_vals = np.array([self.dgamma_dt(
+                gamma=R_probe+0j, focal_angle=t,
+                focal_loc=focal_loc).imag for t in theta_mesh])
+            for i in range(len(imag_vals)-1):
+                if imag_vals[i]*imag_vals[i+1] < 0:
+                    try:
+                        theta_c = brentq(
+                            lambda t: self.dgamma_dt(
+                                gamma=R_probe+0j, focal_angle=t,
+                                focal_loc=focal_loc).imag,
+                            theta_mesh[i], theta_mesh[i+1])
+                        candidates.append(theta_c)
+                    except ValueError:
+                        pass
+            # Always include theta=0 and theta=+-pi as candidates since
+            # Im(dgamma_dt) is often zero there by symmetry but the sign
+            # change can be narrower than the mesh spacing.
             for theta_extra in [0.0, np.pi, -np.pi]:
-                candidates.append((theta_extra, 0.5))
+                candidates.append(theta_extra)
 
-            # For each candidate, solve Re=0 for R, then polish with 2D solver
-            R_lo, R_hi = 0.01, 0.9995
-            for theta_c, R_probe in candidates:
-                # Find R where Re(dgamma_dt) = 0 at this theta
-                try:
-                    re_lo = self.dgamma_dt(
-                        gamma=R_lo+0j, focal_angle=theta_c,
-                        focal_loc=focal_loc).real
-                    re_hi = self.dgamma_dt(
-                        gamma=R_hi+0j, focal_angle=theta_c,
-                        focal_loc=focal_loc).real
-                    if re_lo * re_hi >= 0:
-                        # No sign change; try polishing from probe R
-                        R_c = R_probe
-                    else:
-                        R_c = brentq(
-                            lambda R: self.dgamma_dt(
-                                gamma=R+0j, focal_angle=theta_c,
-                                focal_loc=focal_loc).real,
-                            R_lo, R_hi)
-                except ValueError:
-                    R_c = R_probe
-
-                # Polish with 2D root finder
-                sol = root(self._self_consistent_eq, [theta_c, R_c],
-                           args=(focal_loc,), method='hybr', tol=1e-8)
-                if sol.success:
-                    theta_eq = convert_angles(sol.x[0])
-                    R_eq = sol.x[1]
-                else:
-                    theta_eq = convert_angles(theta_c)
-                    R_eq = R_c
+            # Polish each candidate with the 2D root finder
+            for theta_c in candidates:
+                sol = root(self._self_consistent_eq, [theta_c, R_probe],
+                           args=(focal_loc,), method='hybr', tol=1e-10)
+                if not sol.success:
+                    continue
+                theta_eq = convert_angles(sol.x[0])
+                R_eq = sol.x[1]
 
                 if R_eq < 0.01 or R_eq > 1.0:
                     continue
 
-                # Verify residual is small (2e-3 tolerance accommodates
-                # circle geometry where the self-consistent constraint
-                # has irreducible ~1e-3 residuals)
+                # Verify residual is small
                 residual = self.dgamma_dt(gamma=R_eq+0j,
                                           focal_angle=theta_eq,
                                           focal_loc=focal_loc)
-                if np.abs(residual) > 2e-3:
+                if np.abs(residual) > 1e-6:
                     continue
 
                 # Check if close to any existing solution
@@ -1250,40 +1408,6 @@ class NeuralBandModel:
                     gamma_eq = R_eq + 0j
                     stability.append(self._discrim_A(
                         gamma_eq, theta_eq, focal_loc))
-
-            # Second pass: multistart 2D root finding to catch equilibria
-            # missed by the brentq approach (e.g., circle geometry targets
-            # where Im=0 and Re=0 contours don't align at probe R values).
-            init_thetas = np.linspace(-np.pi, np.pi, 25, endpoint=False)
-            init_Rs = [0.2, 0.4, 0.6, 0.8]
-            for theta_init in init_thetas:
-                for R_init in init_Rs:
-                    sol = root(self._self_consistent_eq,
-                               [theta_init, R_init],
-                               args=(focal_loc,), method='hybr', tol=1e-8)
-                    if not sol.success:
-                        continue
-                    theta_eq = convert_angles(sol.x[0])
-                    R_eq = sol.x[1]
-                    if R_eq < 0.01 or R_eq > 1.0:
-                        continue
-                    residual = self.dgamma_dt(gamma=R_eq+0j,
-                                              focal_angle=theta_eq,
-                                              focal_loc=focal_loc)
-                    if np.abs(residual) > 1e-3:
-                        continue
-                    close_check = False
-                    for existing_angle in final_angles:
-                        angle_diff = np.abs(convert_angles(
-                            theta_eq - existing_angle))
-                        if angle_diff < 0.02:
-                            close_check = True
-                            break
-                    if not close_check:
-                        final_angles.append(theta_eq)
-                        gamma_eq = R_eq + 0j
-                        stability.append(self._discrim_A(
-                            gamma_eq, theta_eq, focal_loc))
 
             return final_angles, stability
         else:
