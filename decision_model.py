@@ -1083,41 +1083,63 @@ class NeuralBandModel:
         return np.array([dgamma.real, dgamma.imag])
     
 
+    def _self_consistent_eq(self, x, focal_loc):
+        '''System of equations for finding self-consistent equilibria.
+
+        At a self-consistent equilibrium, the observer is facing the consensus
+        direction (heading = allocentric consensus), which means the egocentric
+        consensus angle is zero, and therefore Theta_neural = 0 (gamma is real
+        positive). We solve dgamma_dt(R + 0j, theta, focal_loc) = 0 for both
+        theta (the allocentric heading/consensus direction) and R (the coherence
+        strength).
+
+        Parameters
+        ----------
+        x : length 2 ndarray
+            [theta, R] where theta is the allocentric heading and R is the
+            coherence strength.
+        focal_loc : array-like of length 2
+            (x,y) location of the observer.
+
+        Returns
+        -------
+        length 2 ndarray : [Re(dgamma_dt), Im(dgamma_dt)]
+        '''
+        theta, R = x
+        gamma = R + 0j
+        dg = self.dgamma_dt(gamma=gamma, focal_angle=theta, focal_loc=focal_loc)
+        return np.array([dg.real, dg.imag])
+
     def gamma_equilib(self, focal_angle=None, focal_loc=None):
-        '''Attempt to find all zeros (equilibria) of dgamma/dt for a given focal 
-        location by using a multistart root finding algorithm on a mesh of 
-        initial angle values. 
-        
-        If focal_angle is supplied or None, the initial angle values will 
-        correspond to the argument of the initial gamma value with coherence 
-        strength of 0.5. If focal_angle is True, the initial angle values will 
-        correspond to the focal angle, and the argument of the initial gamma 
-        value will be zero (i.e., the neural angle corresponding to the focal 
-        angle). This second option is what you want to use if creating a 
-        bifurcation diagram in x,y-space because the dgamma/dt equation is 
-        derived assuming that the initial value of gamma is close to the global 
-        minimium of the Hamiltonian, which is most likely to be near the neural 
-        angle corresponding to the focal angle (theta=0).
-        
-        Returns a list of unique equilibrium gamma values found if focal_angle 
+        '''Attempt to find all zeros (equilibria) of dgamma/dt for a given focal
+        location by using a multistart root finding algorithm on a mesh of
+        initial angle values.
+
+        If focal_angle is supplied or None, the initial angle values will
+        correspond to the argument of the initial gamma value with coherence
+        strength of 0.5. If focal_angle is True, find self-consistent equilibria
+        where the observer's heading equals the allocentric consensus direction.
+        This is what you want to use for creating a bifurcation diagram in
+        x,y-space because it finds the physically meaningful equilibria of the
+        coupled heading-consensus system.
+
+        Self-consistent equilibria have gamma = R + 0j (real positive), since
+        the egocentric consensus angle is zero when heading equals consensus.
+        The method sweeps over candidate allocentric headings and solves
+        dgamma_dt(R + 0j, theta, focal_loc) = 0 for theta and R simultaneously.
+
+        Returns a list of unique equilibrium gamma values found if focal_angle
         is supplied or None, otherwise returns a list of allocentric equilibrium
-        angles found across the mesh of focal angles. Also returns a list of 
-        booleans indicating whether each equilibrium is stable (True) or unstable
-        (False) based on an analytical perturbation analysis.
+        angles found. Also returns a list of booleans indicating whether each
+        equilibrium is stable (True) or unstable (False) based on an analytical
+        perturbation analysis.
 
         Parameters
         ----------
         focal_angle : float or bool, optional
-            The current heading (angle) of the observer. 
-            - If None, use self.percep_model.focal_angle. 
-            - If True, assume focal_angle changes according to the multistart mesh,
-                with the initial gamma angle corresponding to the neural angle 
-                of the focal angle.
-                NOTE: This is what you want to use if creating a bifurcation diagram 
-                in x,y-space because the dgamma/dt equation is derived assuming 
-                that the initial value of gamma is close to the global minimium 
-                of the Hamiltonian, which is most likely to be near the zero neural 
-                angle since that corresponds to the focal angle.
+            The current heading (angle) of the observer.
+            - If None, use self.percep_model.focal_angle.
+            - If True, find self-consistent equilibria across all headings.
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use self.percep_model.focal_loc.
 
@@ -1126,62 +1148,167 @@ class NeuralBandModel:
         gamma_eqs : list of complex OR angle_eqs : list of float
             list of equilibrium gamma values or allocentric equilibrium angles
         stability : list of bool
-            for each equilibrium gamma value, whether it is stable (True) or 
+            for each equilibrium gamma value, whether it is stable (True) or
             unstable (False)
         '''
         if focal_angle is False:
             focal_angle = None
         if focal_angle is True:
-            # set a persistant flag
-            get_focal_angle = True
-        else:
-            get_focal_angle = False
+            # Find self-consistent equilibria: heading = consensus direction.
+            # gamma = R + 0j, solve dgamma_dt(R+0j, theta, focal_loc) = 0.
+            #
+            # Strategy: scan for sign changes in Im(dgamma_dt) across theta
+            # at several R values to find candidate theta values, then solve
+            # Re(dgamma_dt) = 0 for R at each candidate theta using brentq.
+            # Finally, polish with the 2D root finder.
+            #
+            # This is more robust than the 2D root finder alone because the
+            # Jacobian has a near-block-diagonal structure (Im depends mostly
+            # on theta, Re depends mostly on R).
 
-        init_angles = np.linspace(-np.pi, np.pi-0.01)
-        final_gammas = []
-        final_angles = []
-        stability = []
-        for angle in init_angles:
-            if get_focal_angle:
-                # Set the focal angle to the initial angle being meshed over, and then
-                #   use the neural angle corresponding to that focal angle 
-                #   (e.g. 0) to determine the initial gamma value.
-                focal_angle = angle
-                init_gamma = np.array([0.5, 0.0]) # corresponds to the neural 
-                                                  #   angle of the focal angle.
-            else:
-                # Use the initial angle being meshed over directly as the angle 
-                #   of the initial gamma value for root finding.
-                init_gamma = np.array([0.5*np.cos(angle), 0.5*np.sin(angle)])
-            sol = root(self.dgamma_dt_vec, init_gamma, args=(focal_angle, focal_loc),
-                       method='hybr', tol=1e-7)
-            # Only store unique solutions
-            if sol.success:
-                gamma_eq = sol.x[0] + 1j*sol.x[1]
+            theta_mesh = np.linspace(-np.pi, np.pi, 500)
+            final_angles = []
+            stability = []
+
+            # Collect candidate (theta, R) pairs from sign changes in Im
+            candidates = []
+            for R_probe in [0.2, 0.5, 0.8, 0.95]:
+                imag_vals = np.array([self.dgamma_dt(
+                    gamma=R_probe+0j, focal_angle=t,
+                    focal_loc=focal_loc).imag for t in theta_mesh])
+                for i in range(len(imag_vals)-1):
+                    if imag_vals[i]*imag_vals[i+1] < 0:
+                        try:
+                            theta_c = brentq(
+                                lambda t: self.dgamma_dt(
+                                    gamma=R_probe+0j, focal_angle=t,
+                                    focal_loc=focal_loc).imag,
+                                theta_mesh[i], theta_mesh[i+1])
+                            candidates.append((theta_c, R_probe))
+                        except ValueError:
+                            pass
+            # Always include theta=0 and theta=pi as candidates since
+            # Im(dgamma_dt) is often zero there by symmetry
+            for theta_extra in [0.0, np.pi, -np.pi]:
+                candidates.append((theta_extra, 0.5))
+
+            # For each candidate, solve Re=0 for R, then polish with 2D solver
+            R_lo, R_hi = 0.01, 0.9995
+            for theta_c, R_probe in candidates:
+                # Find R where Re(dgamma_dt) = 0 at this theta
+                try:
+                    re_lo = self.dgamma_dt(
+                        gamma=R_lo+0j, focal_angle=theta_c,
+                        focal_loc=focal_loc).real
+                    re_hi = self.dgamma_dt(
+                        gamma=R_hi+0j, focal_angle=theta_c,
+                        focal_loc=focal_loc).real
+                    if re_lo * re_hi >= 0:
+                        # No sign change; try polishing from probe R
+                        R_c = R_probe
+                    else:
+                        R_c = brentq(
+                            lambda R: self.dgamma_dt(
+                                gamma=R+0j, focal_angle=theta_c,
+                                focal_loc=focal_loc).real,
+                            R_lo, R_hi)
+                except ValueError:
+                    R_c = R_probe
+
+                # Polish with 2D root finder
+                sol = root(self._self_consistent_eq, [theta_c, R_c],
+                           args=(focal_loc,), method='hybr', tol=1e-8)
+                if sol.success:
+                    theta_eq = convert_angles(sol.x[0])
+                    R_eq = sol.x[1]
+                else:
+                    theta_eq = convert_angles(theta_c)
+                    R_eq = R_c
+
+                if R_eq < 0.01 or R_eq > 1.0:
+                    continue
+
+                # Verify residual is small (2e-3 tolerance accommodates
+                # circle geometry where the self-consistent constraint
+                # has irreducible ~1e-3 residuals)
+                residual = self.dgamma_dt(gamma=R_eq+0j,
+                                          focal_angle=theta_eq,
+                                          focal_loc=focal_loc)
+                if np.abs(residual) > 2e-3:
+                    continue
+
                 # Check if close to any existing solution
                 close_check = False
-                if get_focal_angle:
-                    angle_eq, _ = self.convert_gamma(gamma_eq)
-                    angle_eq = convert_angles(focal_angle+angle_eq)
+                for existing_angle in final_angles:
+                    angle_diff = np.abs(convert_angles(
+                        theta_eq - existing_angle))
+                    if angle_diff < 0.02:
+                        close_check = True
+                        break
+                if not close_check:
+                    final_angles.append(theta_eq)
+                    gamma_eq = R_eq + 0j
+                    stability.append(self._discrim_A(
+                        gamma_eq, theta_eq, focal_loc))
+
+            # Second pass: multistart 2D root finding to catch equilibria
+            # missed by the brentq approach (e.g., circle geometry targets
+            # where Im=0 and Re=0 contours don't align at probe R values).
+            init_thetas = np.linspace(-np.pi, np.pi, 25, endpoint=False)
+            init_Rs = [0.2, 0.4, 0.6, 0.8]
+            for theta_init in init_thetas:
+                for R_init in init_Rs:
+                    sol = root(self._self_consistent_eq,
+                               [theta_init, R_init],
+                               args=(focal_loc,), method='hybr', tol=1e-8)
+                    if not sol.success:
+                        continue
+                    theta_eq = convert_angles(sol.x[0])
+                    R_eq = sol.x[1]
+                    if R_eq < 0.01 or R_eq > 1.0:
+                        continue
+                    residual = self.dgamma_dt(gamma=R_eq+0j,
+                                              focal_angle=theta_eq,
+                                              focal_loc=focal_loc)
+                    if np.abs(residual) > 1e-3:
+                        continue
+                    close_check = False
                     for existing_angle in final_angles:
-                        if np.abs(angle_eq - existing_angle) < 0.01:
+                        angle_diff = np.abs(convert_angles(
+                            theta_eq - existing_angle))
+                        if angle_diff < 0.02:
                             close_check = True
                             break
-                else:
+                    if not close_check:
+                        final_angles.append(theta_eq)
+                        gamma_eq = R_eq + 0j
+                        stability.append(self._discrim_A(
+                            gamma_eq, theta_eq, focal_loc))
+
+            return final_angles, stability
+        else:
+            # Fixed focal_angle: find gamma equilibria in the neural plane.
+            if focal_angle is None:
+                focal_angle = self.percep_model.focal_angle
+            init_angles = np.linspace(-np.pi, np.pi-0.01)
+            final_gammas = []
+            stability = []
+            for angle in init_angles:
+                init_gamma = np.array([0.5*np.cos(angle), 0.5*np.sin(angle)])
+                sol = root(self.dgamma_dt_vec, init_gamma,
+                           args=(focal_angle, focal_loc),
+                           method='hybr', tol=1e-7)
+                if sol.success:
+                    gamma_eq = sol.x[0] + 1j*sol.x[1]
+                    close_check = False
                     for existing_gamma in final_gammas:
                         if np.abs(gamma_eq - existing_gamma) < 0.01:
                             close_check = True
                             break
-                if not close_check:
-                    # record equilibrium and its stability
-                    if get_focal_angle:
-                        final_angles.append(angle_eq)
-                    else:
+                    if not close_check:
                         final_gammas.append(gamma_eq)
-                    stability.append(self._discrim_A(gamma_eq, focal_angle, focal_loc))
-        if get_focal_angle:
-            return final_angles, stability
-        else:
+                        stability.append(self._discrim_A(
+                            gamma_eq, focal_angle, focal_loc))
             return final_gammas, stability
     
 
