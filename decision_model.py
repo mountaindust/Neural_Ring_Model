@@ -593,6 +593,7 @@ class PerceptionModel:
         vfunc = np.vectorize(
             PerceptionModel._smooth_cutoff_integral_scalar,
             excluded=['a', 'b', 'tol'],
+            otypes=[float],
         )
         result = vfunc(theta, a=a, b=b, tol=tol)
         return result.item() if scalar_input else result
@@ -659,6 +660,7 @@ class PerceptionModel:
         vfunc = np.vectorize(
             PerceptionModel._smooth_cutoff_int_inverse_scalar,
             excluded=['a', 'b', 'tol'],
+            otypes=[float],
         )
         result = vfunc(y, a=a, b=b, tol=tol)
         return result.item() if scalar_input else result
@@ -1198,8 +1200,10 @@ class PerceptionModel:
         if focal_loc is None:
             focal_loc = self.focal_loc
 
-        angles, rho = self._get_target_signals(focal_angle=focal_angle, 
+        angles, rho = self._get_target_signals(focal_angle=focal_angle,
                                               focal_loc=focal_loc)
+        if angles.size == 0:
+            return angles, rho
         neural_angles = self.get_neural_angle(angles)
 
         return neural_angles, rho
