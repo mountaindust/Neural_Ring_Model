@@ -11,47 +11,79 @@ import matplotlib.pyplot as plt
 from matplotlib.image import NonUniformImage
 
 def convert_angles(theta):
-    '''Given a scalar or array of angles, convert to angles in 
+    '''Given a scalar or array of angles, convert to angles in
     [-np.pi,np.pi]
     '''
     return theta - (theta+np.pi)//(2*np.pi)*2*np.pi
 
 
+def _smallest_enclosing_arc(angles):
+    """Return (lo, hi) for the shortest arc on [-pi, pi] containing all angles.
+
+    The arc goes counter-clockwise from lo to hi. If lo > hi, the arc wraps
+    around ±pi. Input angles must be in [-pi, pi].
+
+    Parameters
+    ----------
+    angles : 1D array
+        Angles in [-pi, pi].
+
+    Returns
+    -------
+    (lo, hi) : tuple of float
+    """
+    s = np.sort(angles % (2*np.pi))  # sort on [0, 2pi)
+    n = len(s)
+    # Compute the gap between consecutive sorted angles (including wrap-around)
+    gaps = np.empty(n)
+    gaps[:-1] = s[1:] - s[:-1]
+    gaps[-1] = s[0] + 2*np.pi - s[-1]
+    # The largest gap is the one NOT covered by the arc.
+    # The arc starts just after the largest gap and ends just before it.
+    k = np.argmax(gaps)
+    # lo is the angle just after the largest gap, hi is the angle just before it
+    lo = s[(k + 1) % n]
+    hi = s[k]
+    return (convert_angles(lo), convert_angles(hi))
+
+
 class Targets:
 
-    def __init__(self, locs=None, geom_name=None, r=None, l=None, theta=0, 
-                 values=1):
+    def __init__(self, locs=None, geom_name=None, r=None, l=None, w=0,
+                 theta=0, values=1):
         '''Set up targets for attraction model.
-        The only thing taken care of here is storage of target locations and 
-        calculation of unbiased, unwarped perception of the targets (angluar 
+        The only thing taken care of here is storage of target locations and
+        calculation of unbiased, unwarped perception of the targets (angluar
         interval) depending on the geometry of the targets.
 
-        Default is two targets located at (15,5) and (15,15) so that an organism 
-        starting at (0,10) is right inbetween them as it moves along the 
+        Default is two targets located at (15,5) and (15,15) so that an organism
+        starting at (0,10) is right inbetween them as it moves along the
         x-direction.
 
         Parameters
         ----------
         locs : Nx2 ndarray (default=np.array([[15,5],[15,15]]))
             x,y coordinates of targets
-        geom : {'circle','segment'}, (optional)
-            geometry of targets. Depending on the choice, additional parameters 
+        geom_name : {'circle','capsule'}, (optional)
+            geometry of targets. Depending on the choice, additional parameters
             must be set to quantify the geometry. Options are:
-            - 'circle' : must specify a radius r to be used for all targets or 
-            an array of radii r, one for each target. The position of the target 
+            - 'circle' : must specify a radius r to be used for all targets or
+            an array of radii r, one for each target. The position of the target
             is the midpoint of the circle.
-            - 'segment' : must specify a length l to be used for all targets or 
-            an array of lengths l, one for each target. Similarly, must specify 
-            a theta (for all targets or each), specifying the angle each target 
-            segment is at in the plane. The position of the target is the 
-            midpoint of the segment.
+            - 'capsule' : a line segment of length l with semicircular endcaps
+            of radius w/2. Must specify l (scalar or array) and theta (scalar
+            or array) for the orientation of each target. The position of the
+            target is the midpoint of the spine. w defaults to 0 (zero-width
+            line segment).
         r : float or sequence of length N
-            radius of circles in the geometry; see geom for requirements
+            radius of circles in the geometry; see geom_name for requirements
         l : float or sequence of length N
-            line segment lengths in the geometry; see geom for requirements
+            spine length of capsules; see geom_name for requirements
+        w : float or sequence of length N, default=0
+            width (diameter of endcaps) of capsules
         theta : float or length N ndarray, default=0
-            orientation of targets; see geom for requirements
-        value : float or length N ndarray, default=1
+            orientation of targets; see geom_name for requirements
+        values : float or length N ndarray, default=1
             attractiveness of each target as a scalar
         '''
 
@@ -77,6 +109,11 @@ class Targets:
             self.l = np.array(l)
         else:
             self.l = l
+        if hasattr(w,'__iter__'):
+            assert len(w) == self.locs.shape[0], "length of w must match first dim of locs"
+            self.w = np.array(w)
+        else:
+            self.w = w
         if hasattr(theta,'__iter__'):
             assert len(theta) == self.locs.shape[0], "length of theta must match first dim of locs"
             self.theta = convert_angles(np.array(theta))
@@ -148,35 +185,48 @@ class Targets:
                                                          target_angles+pm_theta-angle]))
                 return angle_to_targets
 
-        elif self.geom_name == 'segment':
-            ##### Segment targets #####
-            # find location of segment endpoints
+        elif self.geom_name == 'capsule':
+            ##### Capsule targets (line segment spine + semicircular endcaps) #####
+            on_target_bool = self.check_target_overlap(loc)
+            # Spine endpoint locations
             diff = np.column_stack([self.l/2*np.cos(self.theta),
                                     self.l/2*np.sin(self.theta)])
             endpt1 = self.locs + diff
-            endpt2 = self.locs - diff # difference in heading angle is pi between seg endpoints
-             # check for loc on segment
-            on_target_bool = self.check_target_overlap(loc)
-            # get a vector to each
-            vecs1 = endpt1[~on_target_bool] - loc
-            vecs2 = endpt2[~on_target_bool] - loc
-            # get angles to each
-            angles1 = convert_angles(np.arctan2(vecs1[:,1],vecs1[:,0])-angle)
-            angles2 = convert_angles(np.arctan2(vecs2[:,1],vecs2[:,0])-angle)
-            # store sorted
-            target_angles = np.zeros((len(angles1),2))
-            one_two = np.logical_and(angles1 <= angles2, angles2-angles1 < np.pi)
-            one_two = np.logical_or(one_two, np.logical_and(angles1 > angles2,
-                                                            angles2+2*np.pi-angles1 < np.pi))
-            target_angles[one_two,:] = np.column_stack([angles1[one_two],
-                                                         angles2[one_two]])
-            target_angles[~one_two,:] = np.column_stack([angles2[~one_two],
-                                                         angles1[~one_two]])
+            endpt2 = self.locs - diff
+            # Work only with non-overlapping targets
+            ep1 = endpt1[~on_target_bool]
+            ep2 = endpt2[~on_target_bool]
+            if isinstance(self.w, np.ndarray):
+                hw = self.w[~on_target_bool] / 2
+            else:
+                hw = self.w / 2  # half-width (endcap radius)
+            vecs1 = ep1 - loc
+            vecs2 = ep2 - loc
+            d1 = np.linalg.norm(vecs1, axis=1)
+            d2 = np.linalg.norm(vecs2, axis=1)
+            center_angles1 = np.arctan2(vecs1[:,1], vecs1[:,0]) - angle
+            center_angles2 = np.arctan2(vecs2[:,1], vecs2[:,0]) - angle
+            # Angular half-width of each endcap circle from the observer.
+            # Clamp hw/d to 1 to handle observer very close to an endpoint.
+            half1 = np.arcsin(np.minimum(hw / np.maximum(d1, 1e-15), 1.0))
+            half2 = np.arcsin(np.minimum(hw / np.maximum(d2, 1e-15), 1.0))
+            # Four candidate tangent angles (egocentric)
+            t1lo = convert_angles(center_angles1 - half1)
+            t1hi = convert_angles(center_angles1 + half1)
+            t2lo = convert_angles(center_angles2 - half2)
+            t2hi = convert_angles(center_angles2 + half2)
+            # The capsule extent is the shortest arc containing all 4 tangent
+            # angles. For each target, find (lo, hi) giving the smallest arc.
+            num = len(d1)
+            target_angles = np.zeros((num, 2))
+            for n in range(num):
+                pts = np.array([t1lo[n], t1hi[n], t2lo[n], t2hi[n]])
+                target_angles[n] = _smallest_enclosing_arc(pts)
             if not np.any(on_target_bool):
                 return target_angles
             else:
                 angle_to_targets = np.zeros(self.locs.shape)
-                angle_to_targets[on_target_bool] = np.array([-np.pi,np.pi])
+                angle_to_targets[on_target_bool] = np.array([-np.pi, np.pi])
                 angle_to_targets[~on_target_bool] = target_angles
                 return angle_to_targets
         
@@ -222,10 +272,12 @@ class Targets:
             return np.linalg.norm(loc-self.locs, axis=1)
         elif self.geom_name == 'circle':
             return np.linalg.norm(loc-self.locs, axis=1) - self.r
-        elif self.geom_name == 'segment':
-            seg_vec = 0.5*self.l*np.array([np.cos(self.theta),np.sin(self.theta)]).T
-            return self.closest_dist_btwn_lines_and_pt(self.locs-seg_vec,
-                                                       self.locs+seg_vec, loc)
+        elif self.geom_name == 'capsule':
+            seg_vec = np.column_stack([self.l/2*np.cos(self.theta),
+                                       self.l/2*np.sin(self.theta)])
+            spine_dist = self.closest_dist_btwn_lines_and_pt(
+                self.locs - seg_vec, self.locs + seg_vec, loc)
+            return np.maximum(spine_dist - self.w / 2, 0.0)
 
 
     def check_target_overlap(self,loc):
@@ -238,20 +290,13 @@ class Targets:
             return (self.locs == loc).all(axis=1)
         elif self.geom_name == 'circle':
             return np.linalg.norm(self.locs - loc,axis=1) <= self.r
-        elif self.geom_name == 'segment':
-            # Make sure locs is 2D
-            if self.locs.ndim == 1:
-                self.locs = np.array([self.locs])
-            diff = np.column_stack([self.l/2*np.cos(self.theta),
-                                    self.l/2*np.sin(self.theta)])
-            pt1 = self.locs + diff
-            pt2 = self.locs - diff
-            cross = (loc[1]-pt1[:,1])*(pt2[:,0]-pt1[:,0])-\
-                    (loc[0]-pt1[:,0])*(pt2[:,1]-pt1[:,1])
-            dot = (loc[0]-pt1[:,0])*(pt2[:,0]-pt1[:,0])+\
-                  (loc[1]-pt1[:,1])*(pt2[:,1]-pt1[:,1])
-            sqdist = (pt2[:,0]-pt1[:,0])**2 + (pt2[:,1]-pt1[:,1])**2
-            return np.abs(cross)<eps & dot>=0 & dot<=sqdist
+        elif self.geom_name == 'capsule':
+            # Observer is inside the capsule if distance to spine <= w/2
+            seg_vec = np.column_stack([self.l/2*np.cos(self.theta),
+                                       self.l/2*np.sin(self.theta)])
+            spine_dist = self.closest_dist_btwn_lines_and_pt(
+                self.locs - seg_vec, self.locs + seg_vec, loc)
+            return spine_dist <= self.w / 2
     
 
     @staticmethod
@@ -280,11 +325,11 @@ class Targets:
 
         Q0 = Q0_list[~z_check]
         Q1 = Q1_list[~z_check]
-        seg_lengths_2[~z_check] = seg_lengths_2
+        seg_len2 = seg_lengths_2[~z_check]
 
         # For the rest, follow the same math as in closest_dist_btwn_line_and_pts
         # First, find the projection of the point onto the line and clamp to segments
-        dot = ((pt-Q0)*(Q1-Q0)).sum(1)/seg_lengths_2 # dot prod of each row vec
+        dot = ((pt-Q0)*(Q1-Q0)).sum(1)/seg_len2 # dot prod of each row vec
         t_list = np.maximum(0,np.minimum(1,dot))
         # Find the point on the segments
         proj_pt_list = Q0 + np.tile(t_list,(pt.shape[0],1)).T*(Q1-Q0)
@@ -307,20 +352,34 @@ class Targets:
                 except TypeError:
                     circle = plt.Circle(pos, self.r, color='b')
                 ax.add_patch(circle)
-        elif self.geom_name == 'segment':
-            # plot segment targets
-            for n,pos in enumerate(self.locs):
-                try:
-                    l = self.l[n]
-                except TypeError:
-                    l = self.l
-                try:
-                    theta = self.theta[n]
-                except TypeError:
-                    theta = self.theta
-                x = (pos[0] - l/2*np.cos(theta), pos[0] + l/2*np.cos(theta))
-                y = (pos[1] - l/2*np.sin(theta), pos[1] + l/2*np.sin(theta))
-                ax.plot(x,y,'b')
+        elif self.geom_name == 'capsule':
+            from matplotlib.patches import FancyBboxPatch
+            for n, pos in enumerate(self.locs):
+                l_n = self.l[n] if isinstance(self.l, np.ndarray) else self.l
+                w_n = self.w[n] if isinstance(self.w, np.ndarray) else self.w
+                th_n = self.theta[n] if isinstance(self.theta, np.ndarray) else float(self.theta)
+                hw = w_n / 2
+                if hw < 1e-15:
+                    # Zero-width: draw as a line segment
+                    dx, dy = l_n/2*np.cos(th_n), l_n/2*np.sin(th_n)
+                    ax.plot([pos[0]-dx, pos[0]+dx],
+                            [pos[1]-dy, pos[1]+dy], 'b')
+                else:
+                    # Draw two endpoint circles + connecting rectangle
+                    ep1 = pos + np.array([l_n/2*np.cos(th_n), l_n/2*np.sin(th_n)])
+                    ep2 = pos - np.array([l_n/2*np.cos(th_n), l_n/2*np.sin(th_n)])
+                    # Perpendicular direction for rectangle edges
+                    perp = np.array([-np.sin(th_n), np.cos(th_n)]) * hw
+                    rect_x = [ep1[0]+perp[0], ep2[0]+perp[0],
+                              ep2[0]-perp[0], ep1[0]-perp[0], ep1[0]+perp[0]]
+                    rect_y = [ep1[1]+perp[1], ep2[1]+perp[1],
+                              ep2[1]-perp[1], ep1[1]-perp[1], ep1[1]+perp[1]]
+                    ax.fill(rect_x, rect_y, color='b', alpha=0.3)
+                    ax.plot(rect_x, rect_y, 'b')
+                    c1 = plt.Circle(ep1, hw, color='b', alpha=0.3)
+                    c2 = plt.Circle(ep2, hw, color='b', alpha=0.3)
+                    ax.add_patch(c1)
+                    ax.add_patch(c2)
         else:
             raise NotImplementedError("This geometry still TBD in Targets.")
 
@@ -906,7 +965,7 @@ class PerceptionModel:
         target (closer targets that are not delta functions block ones behind) as
         a length N array, and a normalized neural group size (rho) for each.
 
-        For circle (and segment) targets, blocking and neural group sizes are
+        For circle (and capsule) targets, blocking and neural group sizes are
         computed using exact interval arithmetic rather than a discrete mesh.
 
         If mesh_signal is True, instead returns the neural weighting
@@ -974,13 +1033,15 @@ class PerceptionModel:
                     return np.array([]), np.array([])
                 return c_angles, G/G_total
 
-        elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'segment':
+        elif self.targets.geom_name == 'circle' or self.targets.geom_name == 'capsule':
             ##### Extended targets: exact interval arithmetic #####
-            # Sort by distance (closest first for blocking priority).
-            # TODO: Andy points out that you can have two line segments where
-            # the one with the farther center occludes the one with the closer
-            # center. This sort-by-center-distance is correct for circles but
-            # not for segments in general.
+            # Sort by closest-point distance (closest first for blocking).
+            # For circles this is exact. For capsules, two capsules can
+            # mutually occlude each other at different angles (the one with
+            # the farther closest-point can still cross in front at some
+            # angles). A fully correct solution would require per-angle
+            # depth comparison; this closest-point sort is a practical
+            # approximation.
             arg_srt = dists.argsort()
             angles_sorted = angles[arg_srt]
             c_angles_sorted = c_angles[arg_srt]
