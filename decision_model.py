@@ -2028,9 +2028,19 @@ class IsingExtModel:
                 focal_angle = np.angle(init_val[0] + 1j*init_val[1])
             sol = root(self.dgamma_dt_vec, init_val, args=(focal_angle, focal_loc),
                        method='hybr', tol=1e-7)
-            # Only store unique solutions
             if sol.success:
                 gamma_eq = sol.x[0] + 1j*sol.x[1]
+                # When sweeping focal_angle (self-consistent mode), verify
+                # that the found gamma is actually a self-consistent
+                # equilibrium: dgamma_dt must be zero when focal_angle
+                # equals the allocentric consensus direction angle(gamma).
+                if get_focal_angle:
+                    residual = self.dgamma_dt(
+                        gamma=gamma_eq,
+                        focal_angle=np.angle(gamma_eq),
+                        focal_loc=focal_loc)
+                    if np.abs(residual) > 1e-6:
+                        continue
                 # Check if close to any existing solution
                 close_check = False
                 for existing_gamma in final_gammas:
