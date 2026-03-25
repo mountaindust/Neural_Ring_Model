@@ -1392,7 +1392,7 @@ class NeuralBandModel:
                 residual = self.dgamma_dt(gamma=R_eq+0j,
                                           focal_angle=theta_eq,
                                           focal_loc=focal_loc)
-                if np.abs(residual) > 1e-6:
+                if np.abs(residual) > 1e-4:
                     continue
 
                 # Check if close to any existing solution
