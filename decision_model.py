@@ -2169,10 +2169,17 @@ class IsingExtModel:
         neur_angles, rho = self.percep_model.get_neural_signals(Theta, focal_loc)
         k = rho.size
         with np.errstate(over='ignore'):
-            summands = ((rho/np.cosh(k*R*self.cosine(neur_angles)/self.T)**2)
-                        *np.sin(neur_angles)*self.nu*
-                        np.sin(np.pi*np.sign(neur_angles)*np.abs(neur_angles/np.pi)**self.nu)*
-                        np.abs(neur_angles/np.pi)**(self.nu-1))
+            # When nu < 1, |x/pi|^(nu-1) diverges at x=0 but the full
+            # summand has a removable singularity (limit is 0).  Mask those
+            # entries to avoid divide-by-zero and 0*inf = NaN.
+            nonzero = neur_angles != 0
+            na = neur_angles[nonzero]
+            summands = np.zeros_like(neur_angles)
+            summands[nonzero] = (
+                (rho[nonzero]/np.cosh(k*R*self.cosine(na)/self.T)**2)
+                *np.sin(na)*self.nu*
+                np.sin(np.pi*np.sign(na)*np.abs(na/np.pi)**self.nu)*
+                np.abs(na/np.pi)**(self.nu-1))
             A = k*summands.sum()/(2*self.T)
         return A < 1
     
