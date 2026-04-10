@@ -1523,9 +1523,11 @@ class NeuralBandModel:
 
 
     def run_dgamma_dt(self, focal_angle=None, focal_loc=None, init_gamma=None,
-                      t_Final=30):
+                      t_Final=100):
         '''Solve the dgamma/dt equation and look for solutions to approach a
-        stable equilibrium for the neural band model. Uses RK45 solver from scipy.
+        stable equilibrium for the neural band model. Uses LSODA solver from
+        scipy with a real-valued reformulation so that stiff-capable solvers
+        can be applied.
 
         init_gamma is the initial coherence value to start from. If None,
         it will start from self.gamma.
@@ -1541,7 +1543,7 @@ class NeuralBandModel:
         init_gamma : complex float, optional
             initial coherence value. If None, use the model's current gamma value.
         t_Final : float, optional
-            maximum total time for integration (default 30).
+            maximum total time for integration (default 100).
 
         Returns
         -------
@@ -1552,29 +1554,27 @@ class NeuralBandModel:
         if init_gamma is None:
             init_gamma = self.gamma
 
-        if np.isscalar(init_gamma):
-            init_gamma = np.array([init_gamma])
-        # to stop solving for gamma when sufficiently close to equilibrium we:
-        # 1) initially solve for 5 units of time
-        # 2) check whether the derivative is bigger than tolerance tol
-        # 3) repeat for 1 unit of time, checking the size of the derivative each time
-        sol = solve_ivp(self.dgamma_dt, [0, 5], init_gamma,
-                        args=(focal_angle, focal_loc))
+        # Reformulate the complex ODE as a real 2D system so that LSODA
+        # (a stiff-capable solver) can be used. Near-zero Jacobian eigenvalues
+        # in the slow manifold between equilibria make LSODA significantly
+        # more efficient than explicit RK45 with restarted windows.
+        def dgamma_real(t, y):
+            gamma = y[0] + 1j*y[1]
+            dg = self.dgamma_dt(t, gamma, focal_angle, focal_loc)
+            return [dg.real, dg.imag]
+
+        y0 = [np.real(init_gamma), np.imag(init_gamma)]
+        sol = solve_ivp(dgamma_real, [0, t_Final], y0, method='LSODA')
+
+        result = sol.y[0,-1] + 1j*sol.y[1,-1]
         tol = 1e-4
-        T = 1
-        while np.abs(sol.y[0,-1]-sol.y[0,-2])/(sol.t[-1]-sol.t[-2]) > tol:
-            sol = solve_ivp(self.dgamma_dt, [0, 1], sol.y[:,-1],
-                        args=(focal_angle, focal_loc))
-            T += 1
-            if T > t_Final:
-                break
-        if np.abs(sol.y[0,-1]-sol.y[0,-2])/(sol.t[-1]-sol.t[-2]) > tol:
+        if np.abs(self.dgamma_dt(None, result, focal_angle, focal_loc)) > tol:
             print("Warning: Integration may not have reached equilibrium.")
-        return sol.y[0,-1]
+        return result
 
 
     def dtheta_dt(self, t=None, theta=None, gamma=None, focal_loc=None,
-                  t_Final=30):
+                  t_Final=100):
         '''Turning rate based on the neural band model coherence value.
 
         Runs dgamma_dt to steady state, applies the inverse neural-to-egocentric
@@ -1597,7 +1597,7 @@ class NeuralBandModel:
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use the percep_model's
             focal_loc.
-        t_Final : float, optional (default=30)
+        t_Final : float, optional (default=100)
             final time for integration of dgamma_dt if gamma is None.
         '''
         if theta is None:
