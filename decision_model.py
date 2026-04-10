@@ -1247,9 +1247,9 @@ class NeuralBandModel:
             "percep_model must be a PerceptionModel object."
             self.percep_model = percep_model
 
-        # Initial gamma value based on the focal angle of the perception model, 
-        #   with a small coherence strength of 1e-5.
-        self.gamma = 1e-5*np.exp(1j*self.percep_model.focal_angle)
+        # Initial gamma value with a small coherence strength of 1e-5.
+        # Phase is 0 in neural angle space (corresponding to straight ahead).
+        self.gamma = complex(1e-5)
 
         # Random number generator for certain processes within the class;
         #   Can seed here for reproducability.
@@ -1258,7 +1258,7 @@ class NeuralBandModel:
 
 
     def dgamma_dt(self, t=None, gamma=None, focal_angle=None, focal_loc=None):
-        '''Get the complex time derivative of gamma according to the 
+        '''Get the complex time derivative of gamma according to the
         Ising model. For use directly in ODE solvers.
 
         gamma is the coherence value of the neural band, which is a complex 
@@ -1271,9 +1271,8 @@ class NeuralBandModel:
         t : float, optional
             time variable for ODE solver compatibility. Not used.
         gamma : complex, optional
-            current coherence value of the neural band. 
-            If None, use self.percep_model.focal_angle with a coherence 
-            strength of 0.1.
+            current coherence value of the neural band.
+            If None, use self.gamma.
         focal_angle : float, optional
             the current heading (angle) of the observer. If None, use 
             self.percep_model.focal_angle.
@@ -1359,6 +1358,7 @@ class NeuralBandModel:
         gamma = R + 0j
         dg = self.dgamma_dt(gamma=gamma, focal_angle=theta, focal_loc=focal_loc)
         return np.array([dg.real, dg.imag])
+
 
     def gamma_equilib(self, focal_angle=None, focal_loc=None):
         '''Attempt to find all zeros (equilibria) of dgamma/dt for a given focal
@@ -1520,22 +1520,111 @@ class NeuralBandModel:
         Theta = np.angle(gamma)
         R = np.abs(gamma)
         return self.percep_model.get_neural_angle_inverse(Theta), R
-        
+
+
+    def run_dgamma_dt(self, focal_angle=None, focal_loc=None, init_gamma=None,
+                      t_Final=30):
+        '''Solve the dgamma/dt equation and look for solutions to approach a
+        stable equilibrium for the neural band model. Uses RK45 solver from scipy.
+
+        init_gamma is the initial coherence value to start from. If None,
+        it will start from self.gamma.
+
+        Parameters
+        ----------
+        focal_angle : float, optional
+            the current heading (angle) of the observer. If None, use
+            self.percep_model.focal_angle.
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use the percep_model's
+            focal_loc.
+        init_gamma : complex float, optional
+            initial coherence value. If None, use the model's current gamma value.
+        t_Final : float, optional
+            maximum total time for integration (default 30).
+
+        Returns
+        -------
+        gamma_equilib : complex float
+            Equilibrium gamma value reached by integration.
+        '''
+
+        if init_gamma is None:
+            init_gamma = self.gamma
+
+        if np.isscalar(init_gamma):
+            init_gamma = np.array([init_gamma])
+        # to stop solving for gamma when sufficiently close to equilibrium we:
+        # 1) initially solve for 5 units of time
+        # 2) check whether the derivative is bigger than tolerance tol
+        # 3) repeat for 1 unit of time, checking the size of the derivative each time
+        sol = solve_ivp(self.dgamma_dt, [0, 5], init_gamma,
+                        args=(focal_angle, focal_loc))
+        tol = 1e-4
+        T = 1
+        while np.abs(sol.y[0,-1]-sol.y[0,-2])/(sol.t[-1]-sol.t[-2]) > tol:
+            sol = solve_ivp(self.dgamma_dt, [0, 1], sol.y[:,-1],
+                        args=(focal_angle, focal_loc))
+            T += 1
+            if T > t_Final:
+                break
+        if np.abs(sol.y[0,-1]-sol.y[0,-2])/(sol.t[-1]-sol.t[-2]) > tol:
+            print("Warning: Integration may not have reached equilibrium.")
+        return sol.y[0,-1]
+
+
+    def dtheta_dt(self, t=None, theta=None, gamma=None, focal_loc=None,
+                  t_Final=30):
+        '''Turning rate based on the neural band model coherence value.
+
+        Runs dgamma_dt to steady state, applies the inverse neural-to-egocentric
+        mapping, and returns the Kuramoto-style torque K*R*sin(ego_angle).
+
+        Parameters
+        ----------
+        t : float, optional
+            time variable for ODE solver compatibility. Not used.
+        theta : float, optional
+            current heading angle of the observer in allocentric coordinates.
+            If None, use self.percep_model.focal_angle.
+        gamma : complex float, optional
+            Equilibrium coherence value from neural band. If None, it will be
+            computed by solving dgamma_dt to t_Final (using run_dgamma_dt) and
+            taking the final solution as an equilibrium value. The IC for
+            run_dgamma_dt will be self.gamma, and self.gamma will be updated
+            to the result. If a complex value is provided, it is used directly
+            (no ODE solve).
+        focal_loc : array-like of length 2, optional
+            (x,y) location of the observer. If None, use the percep_model's
+            focal_loc.
+        t_Final : float, optional (default=30)
+            final time for integration of dgamma_dt if gamma is None.
+        '''
+        if theta is None:
+            theta = self.percep_model.focal_angle
+        if gamma is None:
+            self.gamma = self.run_dgamma_dt(focal_angle=theta, focal_loc=focal_loc,
+                                             init_gamma=None, t_Final=t_Final)
+            gamma = self.gamma
+        # Convert from neural space to egocentric physical angle
+        ego_angle, R = self.convert_gamma(gamma)
+        return self.K * R * np.sin(ego_angle)
+
 
     def _discrim_A(self, gamma_star, focal_angle, focal_loc):
         '''Determines stability of equilibria based on perturbation analysis.
-        Assumes that the focal_angle is the angle of gamma_star and calculates 
-        the A value of the linear coefficient. If A < 1, the equilibrium is stable, 
+        Assumes that the focal_angle is the angle of gamma_star and calculates
+        the A value of the linear coefficient. If A < 1, the equilibrium is stable,
         if A > 1, the equilibrium is unstable.
 
-        This is based on a cosine kernel with nu exponent.
+        This is based on a cosine kernel.
 
         Parameters
         ----------
         gamma_star : complex
             equilibrium gamma value at which to compute the Jacobian
         focal_angle : float
-            the current heading (angle) of the observer. If None, use 
+            the current heading (angle) of the observer. If None, use
             self.percep_model.focal_angle.
         focal_loc : array-like of length 2
             (x,y) location of the observer
@@ -1554,7 +1643,7 @@ class NeuralBandModel:
                         *np.sin(Theta-neur_angles)**2)
             A = k*summands.sum()/(2*self.T)
         return A < 1
-    
+
 
     def _process_point(self, args):
         '''Helper function for processing mesh points in plot_direction_mesh.
@@ -1736,6 +1825,157 @@ class NeuralBandModel:
             plt.show()
         else:
             return ax
+
+
+    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
+                     start_loc=None, start_angle=None, plot_tracks=False,
+                     wb_plot=False):
+        '''Plot a walker that starts at a specified location looking in a
+        specified angle (defaults to the focal_loc and focal_angle in attached
+        PerceptionModel) and moves according to the neural band torque model on
+        a dt step size with zero-mean angular Gaussian noise with standard
+        deviation as specified. Repeat for a number of repetitions and plot a
+        heat map of these walks in 2D space.
+
+        At each step, dgamma_dt is run to steady state to find the local
+        equilibrium, which is then mapped from neural angle space back to an
+        egocentric physical angle via the inverse neural mapping. The resulting
+        torque K*R*sin(ego_angle) drives the heading update.
+
+        The walker stops whenever it is detected to be overlapping a target or
+        after max_steps.
+
+        Set wb_plot to True if plotting in a Jupyter notebook
+
+        Parameters
+        ----------
+        dt : float
+            Time step for the walk
+        v : float
+            Speed of the walker, assumed constant
+        std : float
+            Standard deviation of angular Gaussian noise with mean zero.
+            If zero (default), run without any angular noise.
+        repetitions : int
+            Number of walks to perform and aggregate
+        max_steps : int
+            Maximum number of steps for each walker
+        start_loc : (x,y) coordinates, optional
+            Starting location of the walk, defaults to focal_loc in the attached
+            PerceptionModel
+        start_angle : float
+            Starting direction that the walker is facing. Defaults to
+            focal_angle in the attached PerceptionModel
+        plot_tracks : bool
+            Whether or not to overlay the walker trajectories
+        wb_plot : bool
+            Whether or not plotting in a Jupyter notebook (adjusts size of figure)
+        '''
+
+        if start_loc is None:
+            start_loc = self.percep_model.focal_loc.copy()
+        else:
+            start_loc = np.array(start_loc, dtype=float)
+        if start_angle is None:
+            start_angle = self.percep_model.focal_angle
+        orig_loc = self.percep_model.focal_loc.copy()
+        orig_angle = self.percep_model.focal_angle
+        orig_gamma = self.gamma
+
+        all_walks = []
+
+        for n in range(repetitions):
+            self.percep_model.focal_loc = start_loc.copy()
+            self.percep_model.focal_angle = start_angle
+            self.gamma = orig_gamma
+            walk = [start_loc.copy()]
+            for step in range(max_steps):
+                # check for target overlap
+                if np.any(self.percep_model.targets.check_target_overlap(
+                          self.percep_model.focal_loc)):
+                    break
+                elif self.percep_model.targets.geom_name is None and \
+                np.any(np.linalg.norm(
+                       self.percep_model.focal_loc-self.percep_model.targets.locs,
+                       axis=1)<v*dt):
+                    break
+                # determine allocentric direction and take a step
+                if std > 0:
+                    noise = self.rng.normal(scale=std)
+                else:
+                    noise = 0
+                # Use an Euler step for the heading SDE
+                theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
+                mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
+                self.percep_model.focal_loc += mv_vec
+                self.percep_model.focal_angle = convert_angles(theta)
+                # append location to walk list
+                walk.append(self.percep_model.focal_loc.copy())
+            # done. save to all_walks
+            all_walks.append(list(walk))
+
+        # Restore focal location, angle, and gamma
+        self.percep_model.focal_loc = orig_loc
+        self.percep_model.focal_angle = orig_angle
+        self.gamma = orig_gamma
+
+        # concatenate walks
+        walks = sum(all_walks, [])
+
+        # Convert list to 2xN array: row of x-vals then row of y-vals
+        walks = np.column_stack(walks)
+        # Detect good bin edges
+        dim_min = np.floor(walks.min(axis=1))
+        dim_max = np.ceil(walks.max(axis=1))
+        n_xedges = max(2, round((dim_max[0]-dim_min[0])/0.25))
+        n_yedges = max(2, round((dim_max[1]-dim_min[1])/0.25))
+        xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
+        yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
+
+        H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:],
+                                           bins=(xedges,yedges))
+        # Keep original H for interpolation (shape: (len(xcenters), len(ycenters)))
+        H_for_spline = H.copy()
+        # For plotting with imshow, use transposed version
+        H_plot = H_for_spline.T
+
+        if wb_plot:
+            fig = plt.figure(figsize=(6.5,4))
+        else:
+            fig = plt.figure(figsize=(5.5,5))
+
+        # Get bin centers
+        xcenters = (xedges[:-1] + xedges[1:]) / 2
+        ycenters = (yedges[:-1] + yedges[1:]) / 2
+        # Interpolate to finer grid for smoother plotting
+        # Guard against degenerate bin centers
+        if xcenters.size < 2 or ycenters.size < 2:
+            # fall back to simple imshow without interpolation
+            ax = fig.add_subplot(title='Random walker path histogram, interpolated',
+                                 aspect='equal')
+            im = ax.imshow(H_plot, extent=(xedges[0], xedges[-1], yedges[0], yedges[-1]),
+                           origin='lower', interpolation='nearest', aspect='equal')
+            fig.colorbar(im, ax=ax)
+        else:
+            x_fine = np.linspace(xcenters[0], xcenters[-1], 1000)
+            y_fine = np.linspace(ycenters[0], ycenters[-1], 1000)
+            spline_interp = RectBivariateSpline(xcenters, ycenters, H_for_spline)
+            H_fine = spline_interp(x_fine, y_fine).T  # transpose to shape (len(y_fine), len(x_fine))
+            # Plot interpolated histogram
+            ax = fig.add_subplot(title='Random walker path histogram, interpolated',
+                                 aspect='equal')
+            im = ax.imshow(H_fine, extent=(x_fine[0], x_fine[-1], y_fine[0], y_fine[-1]),
+                           origin='lower', interpolation='bilinear', aspect='equal')
+            fig.colorbar(im, ax=ax)
+
+        self.percep_model.targets.plot_targets_to_axis(ax)
+
+        # Plot individual walks
+        if plot_tracks:
+            for walk in all_walks:
+                walk = np.column_stack(walk)
+                ax.plot(walk[0,:], walk[1,:], 'k')
+        plt.show()
 
 
 
