@@ -8,7 +8,6 @@ from scipy.integrate import solve_ivp, quad
 from scipy.optimize import root, brentq
 from scipy.interpolate import RectBivariateSpline
 import matplotlib.pyplot as plt
-from matplotlib.image import NonUniformImage
 
 def convert_angles(theta):
     '''Given a scalar or array of angles, convert to angles in
@@ -665,6 +664,35 @@ class PerceptionModel:
         result = vfunc(y, a=a, b=b, tol=tol)
         return result.item() if scalar_input else result
     
+    @staticmethod
+    def _expcos(theta, k):
+        """A von Mises function that is smooth and bell-shaped around 0.
+
+        f(theta) = exp(k * cos(theta))
+
+        The parameter k controls the width of the bell: larger k gives a 
+        narrower peak. It integrates to 2*pi*I0(k), where I0 is the modified 
+        Bessel function of the first kind of order 0.
+
+        Parameters
+        ----------
+        theta : float or array_like
+            Angle(s) in radians.
+        k : float
+            Concentration parameter; must be positive.
+
+        Returns
+        -------
+        float or ndarray : The value(s) of the function at the given theta.
+        """
+
+        if k <= 0:
+            raise ValueError(f"Parameter k must be positive (k={k}).")
+        theta = np.asarray(theta, dtype=float)
+        scalar_input = theta.ndim == 0
+        result = np.exp(k * np.cos(theta))
+        return result.item() if scalar_input else result
+
     @staticmethod # An alternative idea to the cutoff function? Currently unused.
     def _tanh_plus(theta, a, b):
         return (np.tanh(a*(1-(theta/b)**2) ) + 1.0001)/(1.0001+np.tanh(a))
@@ -717,7 +745,6 @@ class PerceptionModel:
         scalar_input = y.ndim == 0
         result = np.pi * np.sign(y) * (np.abs(y) / np.pi) ** (1.0 / c)
         return result.item() if scalar_input else result
-
 
     @staticmethod
     def _subtract_interval_pair(interval, hole):
