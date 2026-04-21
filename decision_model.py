@@ -7,6 +7,8 @@ import numpy as np
 from scipy.integrate import solve_ivp, quad
 from scipy.optimize import root, brentq
 from scipy.interpolate import RectBivariateSpline
+from scipy.special import i0
+from scipy.stats import vonmises
 import matplotlib.pyplot as plt
 
 def convert_angles(theta):
@@ -411,13 +413,17 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        neural_weight : {'cutoff', 'tanh_plus', None} (default = 'cutoff')
+        neural_weight : {'cutoff', 'vonmises', 'tanh_plus', None} (default = 'cutoff')
             Weighting function for the neural band.
-                - 'cutoff' : a smooth cutoff function that is 1 in front and 
-                             0 in back, with a smooth transition in between. 
-                             It is parameterized by a and b, which control the 
+                - 'cutoff' : a smooth cutoff function that is 1 in front and
+                             0 in back, with a smooth transition in between.
+                             It is parameterized by a and b, which control the
                              angles at which the cutoff starts and ends, respectively.
                              See _smooth_cutoff for details.
+                - 'vonmises' : a von Mises pdf, exp(k*cos(theta))/(2*pi*I0(k)).
+                             The single parameter k controls the width: larger k
+                             gives a narrower peak (stronger front bias). See
+                             _vonmises for details.
                 - None : no weighting, i.e. flat. All angles are weighted equally.
         neural_angle : {'integral', 'power', None} (default = 'integral')
             This defines a mapping between perceived center of each target and
@@ -445,16 +451,19 @@ class PerceptionModel:
         self.neural_angle = neural_angle
 
         # Set default parameters for the weighting function.
+        self.a = None
+        self.b = None
+        self.k = None
         if neural_weight == 'cutoff':
             # = 1 when |theta|<self.a, = 0 when |theta|>self.b, smooth in between
-            self.a = np.pi/3 
+            self.a = np.pi/3
             self.b = 4*np.pi/5
+        elif neural_weight == 'vonmises':
+            # f(theta) = exp(k*cos(theta))/(2*pi*I0(k)); larger k = narrower peak.
+            self.k = 2.0
         # elif neural_weight == 'tanh_plus':
         #     self.a = 2
         #     self.b = 2*np.pi/3
-        else:
-            self.a = None
-            self.b = None
 
         # Set default parameters for the neural position transformation function.
         if neural_angle is None or neural_angle == 'integral':
@@ -665,14 +674,17 @@ class PerceptionModel:
         return result.item() if scalar_input else result
     
     @staticmethod
-    def _expcos(theta, k):
-        """A von Mises function that is smooth and bell-shaped around 0.
+    def _vonmises(theta, k):
+        """A von Mises pdf, smooth and bell-shaped around 0.
 
-        f(theta) = exp(k * cos(theta))
+        f(theta) = exp(k*cos(theta)) / (2*pi*I0(k))
 
-        The parameter k controls the width of the bell: larger k gives a 
-        narrower peak. It integrates to 2*pi*I0(k), where I0 is the modified 
-        Bessel function of the first kind of order 0.
+        where I0 is the modified Bessel function of the first kind of order 0.
+        The parameter k controls the width of the bell: larger k gives a
+        narrower peak. Integrates to 1 over [-pi, pi].
+
+        Implemented directly rather than via scipy.stats.vonmises.pdf to avoid
+        the rv_continuous dispatch overhead.
 
         Parameters
         ----------
@@ -683,14 +695,75 @@ class PerceptionModel:
 
         Returns
         -------
-        float or ndarray : The value(s) of the function at the given theta.
+        float or ndarray : The value(s) of the pdf at the given theta.
         """
 
         if k <= 0:
             raise ValueError(f"Parameter k must be positive (k={k}).")
         theta = np.asarray(theta, dtype=float)
         scalar_input = theta.ndim == 0
-        result = np.exp(k * np.cos(theta))
+        result = np.exp(k * np.cos(theta)) / (2*np.pi*i0(k))
+        return result.item() if scalar_input else result
+
+    @staticmethod
+    def _vonmises_integral(theta, k):
+        """
+        Compute G(theta; k) = (1/I0(k)) * integral from 0 to theta of
+        exp(k*cos(x)) dx. Maps [-pi, pi] to [-pi, pi] (i.e. G(+/-pi) = +/-pi),
+        playing the role of a CDF-like transformation for the _vonmises weight.
+
+        Equivalently (by a constant factor): G(theta; k) =
+        2*pi*(vonmises_cdf(theta, k) - 0.5), which is how it is computed here
+        via scipy.stats.vonmises.cdf.
+
+        Parameters
+        ----------
+        theta : float or array_like
+            Upper limit(s) of integration.
+        k : float
+            Concentration parameter; must be positive.
+
+        Returns
+        -------
+        float or ndarray : The value(s) of G(theta; k).
+        """
+        if k <= 0:
+            raise ValueError(f"Parameter k must be positive (k={k}).")
+        theta = np.asarray(theta, dtype=float)
+        scalar_input = theta.ndim == 0
+        result = 2*np.pi*(vonmises.cdf(theta, k) - 0.5)
+        return result.item() if scalar_input else result
+
+    @staticmethod
+    def _vonmises_int_inverse(y, k):
+        """
+        Compute G^{-1}(y; k): the value of theta such that
+        G(theta; k) = y, for y in [-pi, pi].
+
+        Uses scipy.stats.vonmises.ppf: since G = 2*pi*(cdf - 0.5),
+        theta = vonmises.ppf(y/(2*pi) + 0.5, k).
+
+        Parameters
+        ----------
+        y : float or array_like
+            Target value(s); each must satisfy -pi <= y <= pi.
+        k : float
+            Concentration parameter; must be positive.
+
+        Returns
+        -------
+        float or ndarray : theta value(s) satisfying G(theta; k) = y.
+        """
+        if k <= 0:
+            raise ValueError(f"Parameter k must be positive (k={k}).")
+        y = np.asarray(y, dtype=float)
+        scalar_input = y.ndim == 0
+        if np.any(y < -np.pi) or np.any(y > np.pi):
+            raise ValueError("y must satisfy -pi <= y <= pi.")
+        result = vonmises.ppf(y/(2*np.pi) + 0.5, k)
+        # Force exact endpoints (scipy's ppf can return nan/inf at 0 or 1).
+        result = np.where(y == np.pi, np.pi, result)
+        result = np.where(y == -np.pi, -np.pi, result)
         return result.item() if scalar_input else result
 
     @staticmethod # An alternative idea to the cutoff function? Currently unused.
@@ -902,6 +975,12 @@ class PerceptionModel:
             F = self._smooth_cutoff_integral_scalar
             a, b = self.a, self.b
             return sum(F(hi, a, b) - F(lo, a, b) for lo, hi in intervals)
+        elif self.neural_weight == 'vonmises':
+            # G(theta) is proportional to integral_0^theta exp(k*cos(x)) dx
+            # (differing by a constant factor, which cancels in rho).
+            F = self._vonmises_integral
+            k = self.k
+            return sum(F(hi, k) - F(lo, k) for lo, hi in intervals)
         else:
             raise NotImplementedError("Unknown neural weight function name.")
 
@@ -926,6 +1005,8 @@ class PerceptionModel:
             return np.ones_like(theta)
         elif self.neural_weight == 'cutoff':
             return self._smooth_cutoff(theta, self.a, self.b)
+        elif self.neural_weight == 'vonmises':
+            return self._vonmises(theta, self.k)
         # elif self.neural_weight == 'tanh_plus':
         #     return self._tanh_plus(theta, self.a, self.b)
         else:
@@ -955,11 +1036,13 @@ class PerceptionModel:
             return theta
         elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
             return self._smooth_cutoff_integral(theta, self.a, self.b)
+        elif self.neural_angle == 'integral' and self.neural_weight == 'vonmises':
+            return self._vonmises_integral(theta, self.k)
         elif self.neural_angle == 'power':
             return self._power(theta, self.c)
         else:
             raise NotImplementedError("Unknown neural position function name.")
-        
+
 
     def get_neural_angle_inverse(self, theta):
         '''Returns the angle corresponding to a given neural position theta based on the 
@@ -983,6 +1066,8 @@ class PerceptionModel:
             return theta
         elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
             return self._smooth_cutoff_int_inverse(theta, self.a, self.b)
+        elif self.neural_angle == 'integral' and self.neural_weight == 'vonmises':
+            return self._vonmises_int_inverse(theta, self.k)
         elif self.neural_angle == 'power':
             return self._power_inverse(theta, self.c)
         else:
