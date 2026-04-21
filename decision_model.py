@@ -466,10 +466,11 @@ class PerceptionModel:
         #     self.b = 2*np.pi/3
 
         # Set default parameters for the neural position transformation function.
-        if neural_angle is None or neural_angle == 'integral':
-            self.c = None
-        else:
+        if neural_angle == 'power':
+            # f(theta) = pi * sign(theta) * (|theta|/pi)^c. c=1 is identity.
             self.c = 0.5
+        else:
+            self.c = None
 
         if targets is None:
             self.targets = Targets()
