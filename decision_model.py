@@ -3,6 +3,8 @@ Sets up a scenario in which a single locust makes decisions about the direction
 it wants to go based on static targets with certain geometry
 '''
 
+import warnings
+
 import numpy as np
 from scipy.integrate import solve_ivp, quad
 from scipy.optimize import root, brentq
@@ -397,8 +399,9 @@ class PerceptionModel:
     e.g., positive egocentric angles are to the left of the observer and 
     negative egocentric angles are to the right.'''
 
-    def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0, 
-                 neural_weight='cutoff', neural_angle='integral', theta_mesh=2000):
+    def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0,
+                 neural_weight='cutoff', neural_angle='integral',
+                 weight_angle_only=False, theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction 
         given by focal_angle, at targets given by the targets object. All three 
         of these can be changed at any time as attributes.
@@ -440,6 +443,15 @@ class PerceptionModel:
                             compresses them.
                 - None : no transformation, i.e. identity. The neural position is
                          the same as the perceived center of the target.
+        weight_angle_only : bool (default = False)
+            If True, the neural_weight function is used only inside
+            get_neural_angle / get_neural_angle_inverse (i.e. for the
+            'integral' neural_angle transformation). Everywhere else
+            (group-size integration in _get_target_signals, the
+            get_neural_weight accessor, and any plotting that consults it)
+            behaves as if neural_weight had been set to None. This isolates
+            the contribution of the neural-angle warping from the
+            front-bias attractiveness weighting.
         theta_mesh : float or 1D ndarray
             the number of equally spaced mesh points on [-pi,pi) to evaluate at 
             or a mesh of theta values to evaluate at
@@ -449,6 +461,18 @@ class PerceptionModel:
         self.focal_angle = focal_angle
         self.neural_weight = neural_weight
         self.neural_angle = neural_angle
+        self.weight_angle_only = weight_angle_only
+
+        if weight_angle_only and (neural_angle != 'integral'
+                                  or neural_weight is None):
+            warnings.warn(
+                "weight_angle_only=True has no effect when neural_angle is "
+                f"{neural_angle!r} with neural_weight={neural_weight!r}: the "
+                "weight function is not consulted by this configuration in "
+                "any code path. Set neural_angle='integral' with a non-None "
+                "neural_weight, or leave weight_angle_only=False.",
+                stacklevel=2,
+            )
 
         # Set default parameters for the weighting function.
         self.a = None
@@ -964,7 +988,7 @@ class PerceptionModel:
         if not intervals:
             return 0.0
 
-        if self.neural_weight is None:
+        if self.neural_weight is None or self.weight_angle_only:
             # Uniform weight: integral is arc length
             return sum(hi - lo for lo, hi in intervals)
         elif self.neural_weight == 'cutoff':
@@ -1002,7 +1026,7 @@ class PerceptionModel:
         neural weight(s) corresponding to input theta value(s)
         '''
 
-        if self.neural_weight is None:
+        if self.neural_weight is None or self.weight_angle_only:
             return np.ones_like(theta)
         elif self.neural_weight == 'cutoff':
             return self._smooth_cutoff(theta, self.a, self.b)
