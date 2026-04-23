@@ -8,7 +8,7 @@ import warnings
 import numpy as np
 from scipy.integrate import solve_ivp, quad
 from scipy.optimize import root, brentq
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline, CubicSpline
 from scipy.special import i0
 from scipy.stats import vonmises
 import matplotlib.pyplot as plt
@@ -402,17 +402,21 @@ class PerceptionModel:
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0,
                  neural_weight='cutoff', neural_angle='integral',
                  weight_angle_only=False, theta_mesh=2000):
-        '''Establishes an observer at location focal_loc, looking in a direction 
-        given by focal_angle, at targets given by the targets object. All three 
-        of these can be changed at any time as attributes.
+        '''Establishes an observer at location focal_loc, looking in a direction
+        given by focal_angle, at targets given by the targets object. The
+        attributes focal_loc, focal_angle, targets, a, b, and k can be changed
+        at any time; reassigning a, b, or k automatically rebuilds the internal
+        integral splines used by get_neural_angle / get_neural_angle_inverse.
+        In contrast, neural_weight and neural_angle are NOT mutable post-init
+        (changing them would require a different set of splines, or none at all).
 
         Parameters
         ----------
         targets : Targets object, optional.
-            the targets around the observer as a Targets object. If no targets 
+            the targets around the observer as a Targets object. If no targets
             object is given, a default target object will be set.
         focal_loc : array-like of length 2
-            (x,y) location of observer in Euclidean space. Will be stored as an 
+            (x,y) location of observer in Euclidean space. Will be stored as an
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
@@ -475,19 +479,21 @@ class PerceptionModel:
             )
 
         # Set default parameters for the weighting function.
-        self.a = None
-        self.b = None
-        self.k = None
+        # Write to the backing attributes directly so the property setters
+        # (which would trigger a spline rebuild) are bypassed during init.
+        self._a = None
+        self._b = None
+        self._k = None
         if neural_weight == 'cutoff':
             # = 1 when |theta|<self.a, = 0 when |theta|>self.b, smooth in between
-            self.a = np.pi/3
-            self.b = 4*np.pi/5
+            self._a = np.pi/3
+            self._b = 4*np.pi/5
         elif neural_weight == 'vonmises':
             # f(theta) = exp(k*cos(theta))/(2*pi*I0(k)); larger k = narrower peak.
-            self.k = 2.0
+            self._k = 2.0
         # elif neural_weight == 'tanh_plus':
-        #     self.a = 2
-        #     self.b = 2*np.pi/3
+        #     self._a = 2
+        #     self._b = 2*np.pi/3
 
         # Set default parameters for the neural position transformation function.
         if neural_angle == 'power':
@@ -505,6 +511,169 @@ class PerceptionModel:
             self.theta_mesh = np.linspace(-np.pi, np.pi, theta_mesh+1)[:-1]
         else:
             self.theta_mesh = theta_mesh
+
+        # Build spline lookups for the integral transforms exactly once,
+        # using the final values of the backing attributes.
+        self._build_integral_splines()
+
+    # --- a, b, k as properties: reassignment triggers a spline rebuild ---
+
+    @property
+    def a(self):
+        return self._a
+
+    @a.setter
+    def a(self, value):
+        self._a = value
+        self._build_integral_splines()
+
+    @property
+    def b(self):
+        return self._b
+
+    @b.setter
+    def b(self, value):
+        self._b = value
+        self._build_integral_splines()
+
+    @property
+    def k(self):
+        return self._k
+
+    @k.setter
+    def k(self, value):
+        self._k = value
+        self._build_integral_splines()
+
+    def _build_integral_splines(self):
+        """Precompute spline lookups for the 'integral' neural-angle transform.
+
+        Builds forward and inverse CubicSplines for the current configuration
+        so that get_neural_angle / get_neural_angle_inverse (and the
+        antiderivative calls inside _integrate_neural_weight) can evaluate
+        in O(1) instead of calling scipy.integrate.quad or brentq on every
+        invocation.
+
+        Only 'integral' + ('cutoff' | 'vonmises') configurations build splines;
+        everything else is identity or analytical and the spline attributes
+        stay None.
+        """
+        self._cutoff_forward_spline = None
+        self._cutoff_inverse_spline = None
+        self._vonmises_forward_spline = None
+        self._vonmises_inverse_spline = None
+
+        # Splines are used both by the 'integral' neural-angle transformation
+        # (forward + inverse) and by _integrate_neural_weight (forward only,
+        # as an antiderivative for integrating the weight over angular
+        # intervals). Build whenever neural_weight is 'cutoff' or 'vonmises',
+        # independent of neural_angle.
+
+        if self.neural_weight == 'cutoff':
+            if self._a is None or self._b is None:
+                return
+            a = self._a
+            b = self._b
+            n_nodes = 2001
+            x_nodes = np.linspace(-b, b, n_nodes)
+            # Snap the center node to 0 exactly (should already hold for an
+            # odd number of equispaced nodes but avoids floating-point drift).
+            center = n_nodes // 2
+            x_nodes[center] = 0.0
+            y_nodes = np.empty(n_nodes)
+            for i, x in enumerate(x_nodes):
+                y_nodes[i] = PerceptionModel._smooth_cutoff_integral(x, a, b)
+            # Snap endpoints and center to the exact theoretical values,
+            # preserving F(-b) = -pi, F(b) = pi, and F(0) = 0 so symmetry
+            # and saturation are honored at roundoff level.
+            y_nodes[0] = -np.pi
+            y_nodes[-1] = np.pi
+            y_nodes[center] = 0.0
+            # Near +/-b the cutoff is exponentially small, so quad can return
+            # F values that collapse to -pi (or pi) in floating point for
+            # multiple adjacent nodes. Enforce strict monotonicity by dropping
+            # interior nodes whose y does not strictly increase past the
+            # running maximum; always keep the two boundary nodes with their
+            # exact snapped values.
+            kept = [0]
+            for i in range(1, n_nodes - 1):
+                if y_nodes[i] > y_nodes[kept[-1]]:
+                    kept.append(i)
+            while kept and y_nodes[kept[-1]] >= y_nodes[-1]:
+                kept.pop()
+            kept.append(n_nodes - 1)
+            kept = np.array(kept)
+            x_kept = x_nodes[kept]
+            y_kept = y_nodes[kept]
+            self._cutoff_forward_spline = CubicSpline(
+                x_kept, y_kept, bc_type='natural')
+            self._cutoff_inverse_spline = CubicSpline(
+                y_kept, x_kept, bc_type='natural')
+        elif self.neural_weight == 'vonmises':
+            if self._k is None:
+                return
+            k_val = self._k
+            n_nodes = 2001
+            theta_nodes = np.linspace(-np.pi, np.pi, n_nodes)
+            center = n_nodes // 2
+            theta_nodes[center] = 0.0
+            y_nodes = 2*np.pi*(vonmises.cdf(theta_nodes, k_val) - 0.5)
+            y_nodes[0] = -np.pi
+            y_nodes[-1] = np.pi
+            y_nodes[center] = 0.0
+            self._vonmises_forward_spline = CubicSpline(
+                theta_nodes, y_nodes, bc_type='natural')
+            self._vonmises_inverse_spline = CubicSpline(
+                y_nodes, theta_nodes, bc_type='natural')
+
+    def _neural_angle_cutoff(self, theta):
+        """Spline evaluation of F(theta; a, b) for the smooth-cutoff weight.
+
+        Saturates to +-pi outside [-b, b] to match the analytical antiderivative.
+        """
+        theta_arr = np.asarray(theta, dtype=float)
+        scalar = theta_arr.ndim == 0
+        b = self._b
+        clamped = np.clip(theta_arr, -b, b)
+        result = self._cutoff_forward_spline(clamped)
+        result = np.where(theta_arr >= b, np.pi, result)
+        result = np.where(theta_arr <= -b, -np.pi, result)
+        return float(result) if scalar else result
+
+    def _neural_angle_cutoff_inverse(self, y):
+        """Spline evaluation of F^{-1}(y; a, b) for the smooth-cutoff weight."""
+        y_arr = np.asarray(y, dtype=float)
+        scalar = y_arr.ndim == 0
+        if np.any((y_arr < -np.pi) | (y_arr > np.pi)):
+            raise ValueError("y must satisfy -pi <= y <= pi.")
+        result = self._cutoff_inverse_spline(y_arr)
+        result = np.where(y_arr == np.pi, self._b, result)
+        result = np.where(y_arr == -np.pi, -self._b, result)
+        return float(result) if scalar else result
+
+    def _neural_angle_vonmises(self, theta):
+        """Spline evaluation of G(theta; k) for the von Mises weight.
+
+        Saturates to +-pi outside [-pi, pi] (the natural domain of the mapping).
+        """
+        theta_arr = np.asarray(theta, dtype=float)
+        scalar = theta_arr.ndim == 0
+        clamped = np.clip(theta_arr, -np.pi, np.pi)
+        result = self._vonmises_forward_spline(clamped)
+        result = np.where(theta_arr >= np.pi, np.pi, result)
+        result = np.where(theta_arr <= -np.pi, -np.pi, result)
+        return float(result) if scalar else result
+
+    def _neural_angle_vonmises_inverse(self, y):
+        """Spline evaluation of G^{-1}(y; k) for the von Mises weight."""
+        y_arr = np.asarray(y, dtype=float)
+        scalar = y_arr.ndim == 0
+        if np.any((y_arr < -np.pi) | (y_arr > np.pi)):
+            raise ValueError("y must satisfy -pi <= y <= pi.")
+        result = self._vonmises_inverse_spline(y_arr)
+        result = np.where(y_arr == np.pi, np.pi, result)
+        result = np.where(y_arr == -np.pi, -np.pi, result)
+        return float(result) if scalar else result
     
     @staticmethod
     def _smooth_cutoff(x, a, b):
@@ -542,10 +711,14 @@ class PerceptionModel:
         return result.item() if scalar_input else result
         
     @staticmethod
-    def _smooth_cutoff_integral_scalar(theta, a, b, tol=1.49e-10):
+    def _smooth_cutoff_integral(theta, a, b, tol=1.49e-10):
         """
-        Scalar kernel for _smooth_cutoff_integral. Computes F(theta; a, b)
-        for a single float theta.
+        Compute F(theta; a, b) = norm * integral from 0 to theta of
+        _smooth_cutoff(x; a, b) dx for a single float theta, where
+        norm = 2*pi/(a+b). The normalization makes F(+/-b) = +/-pi so F
+        plays the role of a CDF-like transformation. Used as the
+        reference implementation; hot-path callers use the precomputed
+        spline in PerceptionModel._neural_angle_cutoff instead.
         """
         if theta < 0:
             NEG = True
@@ -605,37 +778,12 @@ class PerceptionModel:
             return (a + result)*norm
 
     @staticmethod
-    def _smooth_cutoff_integral(theta, a, b, tol=1.49e-10):
+    def _smooth_cutoff_int_inverse(y, a, b, tol=1.0e-8):
         """
-        Compute F(x; a, b) = integral from 0 to x of the smooth cutoff function.
-        Accepts scalar or array theta; always returns the same shape.
-
-        Parameters
-        ----------
-        theta : float or array_like
-            Upper limit(s) of integration.
-        a, b : Parameters of the smooth cutoff function; must satisfy 0 <= a < b.
-        tol  : Absolute and relative tolerance passed to scipy quad.
-
-        Returns
-        -------
-        float or ndarray : The value(s) of the integral.
-        """
-        theta = np.asarray(theta, dtype=float)
-        scalar_input = theta.ndim == 0
-        vfunc = np.vectorize(
-            PerceptionModel._smooth_cutoff_integral_scalar,
-            excluded=['a', 'b', 'tol'],
-            otypes=[float],
-        )
-        result = vfunc(theta, a=a, b=b, tol=tol)
-        return result.item() if scalar_input else result
-
-    @staticmethod
-    def _smooth_cutoff_int_inverse_scalar(y, a, b, tol=1.0e-8):
-        """
-        Scalar kernel for _smooth_cutoff_int_inverse. Computes F^{-1}(y; a, b)
-        for a single float y.
+        Compute F^{-1}(y; a, b) for a single float y (the inverse of
+        _smooth_cutoff_integral). Used as the reference implementation;
+        hot-path callers use the precomputed spline in
+        PerceptionModel._neural_angle_cutoff_inverse instead.
         """
         if not (0 <= a < b):
             raise ValueError(f"Parameters must satisfy 0 <= a < b (a={a}, b={b}).")
@@ -661,7 +809,7 @@ class PerceptionModel:
         # Calculate inverse by finding root of F(theta) - y.
 
         def func(theta):
-            return PerceptionModel._smooth_cutoff_integral_scalar(theta, a, b, tol) - np.abs(y)
+            return PerceptionModel._smooth_cutoff_integral(theta, a, b, tol) - np.abs(y)
 
         # Bracket: F is strictly increasing from 0 to pi on (a, b).
         eps = (b - a) * 1e-12
@@ -671,33 +819,6 @@ class PerceptionModel:
         result = brentq(func, x_lo, x_hi, xtol=tol, rtol=tol, maxiter=200)
         return np.sign(y) * result
 
-    @staticmethod
-    def _smooth_cutoff_int_inverse(y, a, b, tol=1.0e-8):
-        """
-        Compute F^{-1}(y; a, b): the value of x such that F(x; a, b) = y.
-        Accepts scalar or array y; always returns the same shape.
-
-        Parameters
-        ----------
-        y    : float or array_like
-            Target value(s); each must satisfy -pi <= y <= pi.
-        a, b : Parameters of the smooth cutoff function; must satisfy 0 <= a < b.
-        tol  : Absolute and relative tolerance passed to scipy brentq.
-
-        Returns
-        -------
-        float or ndarray : The value(s) of x such that F(x; a, b) = y.
-        """
-        y = np.asarray(y, dtype=float)
-        scalar_input = y.ndim == 0
-        vfunc = np.vectorize(
-            PerceptionModel._smooth_cutoff_int_inverse_scalar,
-            excluded=['a', 'b', 'tol'],
-            otypes=[float],
-        )
-        result = vfunc(y, a=a, b=b, tol=tol)
-        return result.item() if scalar_input else result
-    
     @staticmethod
     def _vonmises(theta, k):
         """A von Mises pdf, smooth and bell-shaped around 0.
@@ -992,20 +1113,16 @@ class PerceptionModel:
             # Uniform weight: integral is arc length
             return sum(hi - lo for lo, hi in intervals)
         elif self.neural_weight == 'cutoff':
-            # Use _smooth_cutoff_integral_scalar as antiderivative F(theta).
-            # F(theta) = norm * integral_0^theta cutoff(x) dx
-            # where norm = 2*pi/(a+b). The constant cancels in
-            # rho = G/G.sum(), so we use F(hi) - F(lo) directly.
-            # Call the scalar kernel directly to avoid np.vectorize overhead.
-            F = self._smooth_cutoff_integral_scalar
-            a, b = self.a, self.b
-            return sum(F(hi, a, b) - F(lo, a, b) for lo, hi in intervals)
+            # F(theta) = norm * integral_0^theta cutoff(x) dx with
+            # norm = 2*pi/(a+b). The constant cancels in rho = G/G.sum(),
+            # so F(hi) - F(lo) is what we need. Use the precomputed spline.
+            F = self._neural_angle_cutoff
+            return sum(F(hi) - F(lo) for lo, hi in intervals)
         elif self.neural_weight == 'vonmises':
-            # G(theta) is proportional to integral_0^theta exp(k*cos(x)) dx
-            # (differing by a constant factor, which cancels in rho).
-            F = self._vonmises_integral
-            k = self.k
-            return sum(F(hi, k) - F(lo, k) for lo, hi in intervals)
+            # G(theta) = 2*pi*(vonmises.cdf(theta, k) - 0.5); the constant
+            # factor cancels in rho. Use the precomputed spline.
+            F = self._neural_angle_vonmises
+            return sum(F(hi) - F(lo) for lo, hi in intervals)
         else:
             raise NotImplementedError("Unknown neural weight function name.")
 
@@ -1060,9 +1177,9 @@ class PerceptionModel:
         elif self.neural_angle == 'integral' and self.neural_weight is None:
             return theta
         elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
-            return self._smooth_cutoff_integral(theta, self.a, self.b)
+            return self._neural_angle_cutoff(theta)
         elif self.neural_angle == 'integral' and self.neural_weight == 'vonmises':
-            return self._vonmises_integral(theta, self.k)
+            return self._neural_angle_vonmises(theta)
         elif self.neural_angle == 'power':
             return self._power(theta, self.c)
         else:
@@ -1090,9 +1207,9 @@ class PerceptionModel:
         elif self.neural_angle == 'integral' and self.neural_weight is None:
             return theta
         elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
-            return self._smooth_cutoff_int_inverse(theta, self.a, self.b)
+            return self._neural_angle_cutoff_inverse(theta)
         elif self.neural_angle == 'integral' and self.neural_weight == 'vonmises':
-            return self._vonmises_int_inverse(theta, self.k)
+            return self._neural_angle_vonmises_inverse(theta)
         elif self.neural_angle == 'power':
             return self._power_inverse(theta, self.c)
         else:
