@@ -490,7 +490,7 @@ class PerceptionModel:
             self._b = 4*np.pi/5
         elif neural_weight == 'vonmises':
             # f(theta) = exp(k*cos(theta))/(2*pi*I0(k)); larger k = narrower peak.
-            self._k = 2.0
+            self._k = 1.0
         # elif neural_weight == 'tanh_plus':
         #     self._a = 2
         #     self._b = 2*np.pi/3
@@ -1365,7 +1365,8 @@ class PerceptionModel:
     def plot_blocked_signals(self, wb_plot=False):
         '''Plots visible targets, their angular direction from the observer, 
         their associated neural angles, and also the signal distribution from 
-        the point of view of the observer.
+        the point of view of the observer normalized so that the maximum signal 
+        strength is 1.
 
         Use as a test for _get_target_signals and get_neural_angle.
         
@@ -1406,7 +1407,10 @@ class PerceptionModel:
         ###### Perception Signal Plot ######
         ax2 = plt.subplot(122, projection='polar')
 
-        p_func = signals.sum(axis=0)
+        if signals.max() == 0:
+            p_func = signals.sum(axis=0)
+        else:
+            p_func = signals.sum(axis=0)/signals.max()
 
         ax2.plot(self.theta_mesh,p_func)
         ax2.arrow(0,-0.5,0,0.25, width=0.2, head_length=0.15)
