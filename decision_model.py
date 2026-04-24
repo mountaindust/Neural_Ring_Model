@@ -1362,6 +1362,75 @@ class PerceptionModel:
             raise NotImplementedError("Unknown target geometry name.")
 
 
+    def plot_neural_weight(self, polar=False, ax=None, wb_plot=False):
+        '''Plot the neural weighting function on [-pi, pi], with the max weight 
+        normalized to 1.
+
+        Parameters
+        ----------
+        polar : bool, optional
+            If True, use a polar plot. Default False (linear plot).
+        ax : matplotlib axis, optional
+            If provided, the curve is added to this axis (no figure created,
+            no plt.show). For polar=True, the axis must have been created
+            with projection='polar'. If None, a new figure and axis are
+            created and plt.show() is called.
+        wb_plot : bool
+            whether or not plotting in a Jupyter notebook
+
+        Returns
+        -------
+        ax : matplotlib axis, if axis was provided as an argument.
+            Otherwise, None.
+        '''
+
+        theta = np.linspace(-np.pi, np.pi, 361)
+        weights = self.get_neural_weight(theta)
+        weights = weights/weights.max()
+
+        if ax is None:
+            local_plot = True
+            if wb_plot:
+                fig = plt.figure(figsize=(8, 5))
+            else:
+                fig = plt.figure(figsize=(6, 5))
+            if polar:
+                ax = plt.subplot(1, 1, 1, projection='polar')
+            else:
+                ax = plt.subplot(1, 1, 1)
+        else:
+            local_plot = False
+
+        ax.plot(theta, weights, label=self.neural_weight)
+
+        if polar:
+            # Match the tick scheme used in plot_blocked_signals, but with
+            # labels in [-pi, pi] on the back half so it mirrors the data range.
+            angles_deg = np.linspace(0, 360, 8, endpoint=False)
+            labels = [r'$0$', r'$\frac{\pi}{4}$', r'$\frac{\pi}{2}$',
+                      r'$\frac{3\pi}{4}$', r'$\pm\pi$', r'$-\frac{3\pi}{4}$',
+                      r'$-\frac{\pi}{2}$', r'$-\frac{\pi}{4}$']
+            ax.set_thetagrids(angles_deg, labels)
+        else:
+            tick_locs = np.array([-np.pi, -3*np.pi/4, -np.pi/2, -np.pi/4, 0,
+                                  np.pi/4, np.pi/2, 3*np.pi/4, np.pi])
+            tick_labels = [r'$-\pi$', r'$-\frac{3\pi}{4}$', r'$-\frac{\pi}{2}$',
+                           r'$-\frac{\pi}{4}$', r'$0$', r'$\frac{\pi}{4}$',
+                           r'$\frac{\pi}{2}$', r'$\frac{3\pi}{4}$', r'$\pi$']
+            ax.set_xticks(tick_locs)
+            ax.set_xticklabels(tick_labels)
+            ax.set_xlabel(r'$\theta$')
+            ax.set_ylabel('Neural weight')
+            ax.set_xlim(-np.pi, np.pi)
+
+        if local_plot:
+            ax.set_title('Neural Weighting Function')
+            ax.legend()
+            plt.show()
+        else:
+            return ax
+
+
     def plot_blocked_signals(self, wb_plot=False):
         '''Plots visible targets, their angular direction from the observer, 
         their associated neural angles, and also the signal distribution from 
@@ -1935,7 +2004,7 @@ class NeuralBandModel:
     
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            pool=None, ax=None, wb_plot=False):
+                            pool=None, ax=None, title=None, wb_plot=False):
         '''Create a mesh of starting locations and, for each point in the mesh, 
         find the equilibria of dgamma/dt and plot the corresponding consensus 
         directions.
@@ -1954,6 +2023,8 @@ class NeuralBandModel:
             If provided, use this pool to parallelize the solving of the ODEs.
         axis : matplotlib axis, optional
             If provided, plot on this axis instead of creating a new figure and axis.
+        title : str, optional
+            title for the quiver plot.
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
 
@@ -2077,7 +2148,10 @@ class NeuralBandModel:
             #           U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
             #           angles='xy', color='red', scale=30, width=0.004)
         ax.set_aspect('equal')
-        ax.set_title('New model equilibrium plot')
+        if title is not None:
+            ax.set_title(title)
+        else:
+            ax.set_title('Neural band equilibrium plot')
         if local_plot:
             fig.legend(loc='outside center right')
             plt.show()
