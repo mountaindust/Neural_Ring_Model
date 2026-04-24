@@ -12,6 +12,7 @@ from scipy.interpolate import RectBivariateSpline, CubicSpline
 from scipy.special import i0
 from scipy.stats import vonmises
 import matplotlib.pyplot as plt
+from matplotlib.colors import BoundaryNorm
 
 def convert_angles(theta):
     '''Given a scalar or array of angles, convert to angles in
@@ -2154,6 +2155,217 @@ class NeuralBandModel:
             ax.set_title('Neural band equilibrium plot')
         if local_plot:
             fig.legend(loc='outside center right')
+            plt.show()
+        else:
+            return ax
+
+
+    def _count_stable_at(self, args):
+        '''Helper function for plot_bifurcation_diagram: evaluate the number
+        of stable self-consistent equilibria at a single (x,y) location.
+
+        Parameters
+        ----------
+        args : tuple
+            (key, x, y), where key is an arbitrary hashable identifier (used
+            by the caller to reassemble results) and (x,y) is the focal
+            location in world coordinates.
+
+        Returns
+        -------
+        key : hashable
+            echoed back from the input for lookup
+        count : int
+            number of stable self-consistent equilibria at (x,y)
+        '''
+        key, x, y = args
+        focal_loc = np.array([x, y])
+        _, stability = self.gamma_equilib(focal_angle=True, focal_loc=focal_loc)
+        return key, int(sum(stability))
+
+
+    def plot_bifurcation_diagram(self, xlim=(0,6), num_x=29, ylim=(-3.5,3.5),
+                                 num_y=29, refinement_levels=3, max_count=None,
+                                 pool=None, ax=None, title=None, wb_plot=False):
+        '''Plot a 2D colormap showing the number of stable self-consistent
+        equilibria as a function of observer (x,y) location.
+
+        Starts from a coarse ``num_x`` by ``num_y`` grid and adaptively
+        subdivides cells whose four corners disagree on the number of stable
+        equilibria, up to ``refinement_levels`` times. Evaluated points are
+        cached so that corners shared between cells are not recomputed.
+
+        Parameters
+        ----------
+        xlim : (xmin,xmax) tuple of floats
+            x limits for the base mesh, inclusive
+        num_x : int
+            number of steps in x direction for the base mesh
+        ylim : (ymin,ymax) tuple of floats
+            y limits for the base mesh, inclusive
+        num_y : int
+            number of steps in y direction for the base mesh
+        refinement_levels : int
+            number of adaptive subdivision passes. 0 => base mesh only.
+            Each pass halves cell size at boundaries where the stable count
+            changes. Final virtual grid resolution is
+            ((num_x-1)*2**L + 1) by ((num_y-1)*2**L + 1).
+        max_count : int, optional
+            maximum expected number of stable equilibria. Pins the color
+            scale so that count=N maps to the same color across multiple
+            calls (e.g. side-by-side subplots comparing models). If None,
+            auto-detected from the data. Values in the data exceeding
+            max_count are clipped with a warning.
+        pool : multiprocessing.Pool, optional
+            If provided, evaluate new points at each refinement level in
+            parallel.
+        ax : matplotlib axis, optional
+            If provided, plot on this axis instead of creating a new figure.
+        title : str, optional
+            title for the plot
+        wb_plot : bool
+            whether or not plotting in a Jupyter notebook
+
+        Returns
+        -------
+        ax : matplotlib axis, if ax was provided as an argument.
+            Otherwise, None.
+        '''
+        assert refinement_levels >= 0, "refinement_levels must be >= 0"
+
+        L = refinement_levels
+        step0 = 2**L
+        # Virtual fine-grid resolution (points, not cells)
+        NI = (num_x - 1)*step0 + 1
+        NJ = (num_y - 1)*step0 + 1
+
+        def idx_to_xy(I, J):
+            x = xlim[0] + (xlim[1] - xlim[0])*I/(NI - 1)
+            y = ylim[0] + (ylim[1] - ylim[0])*J/(NJ - 1)
+            return x, y
+
+        cache = {}  # (I, J) -> stable count
+
+        def evaluate_points(keys):
+            keys = [k for k in keys if k not in cache]
+            if not keys:
+                return
+            args_list = [(k, *idx_to_xy(*k)) for k in keys]
+            if pool is None:
+                for args in args_list:
+                    key, count = self._count_stable_at(args)
+                    cache[key] = count
+            else:
+                results = pool.map(self._count_stable_at, args_list)
+                for key, count in results:
+                    cache[key] = count
+
+        # 1. Evaluate base grid
+        base_keys = [(i*step0, j*step0)
+                     for i in range(num_x) for j in range(num_y)]
+        evaluate_points(base_keys)
+
+        # 2. Initial cells: each cell is (I_ll, J_ll, side) in virtual units
+        cells = [(i*step0, j*step0, step0)
+                 for i in range(num_x - 1) for j in range(num_y - 1)]
+
+        # 3. Refinement loop
+        for _ in range(L):
+            settled = []
+            to_refine = []
+            new_points = set()
+            for (I, J, s) in cells:
+                corner_counts = {cache[(I, J)], cache[(I+s, J)],
+                                 cache[(I, J+s)], cache[(I+s, J+s)]}
+                if len(corner_counts) == 1:
+                    settled.append((I, J, s))
+                else:
+                    to_refine.append((I, J, s))
+                    half = s // 2
+                    for m in [(I+half, J), (I, J+half),
+                              (I+s, J+half), (I+half, J+s),
+                              (I+half, J+half)]:
+                        if m not in cache:
+                            new_points.add(m)
+            evaluate_points(new_points)
+            cells = settled
+            for (I, J, s) in to_refine:
+                half = s // 2
+                cells.append((I, J, half))
+                cells.append((I+half, J, half))
+                cells.append((I, J+half, half))
+                cells.append((I+half, J+half, half))
+
+        # 4. Rasterize leaf cells into an int image at virtual-pixel
+        #    resolution. img[row=J, col=I] -> count at virtual pixel (I,J).
+        data_max = max(cache.values())
+        if max_count is None:
+            effective_max = data_max
+        else:
+            effective_max = max_count
+            if data_max > effective_max:
+                warnings.warn(
+                    "Data contains stable-equilibrium counts up to "
+                    f"{data_max} but max_count={effective_max}; "
+                    "values above max_count will be clipped.")
+        img = np.zeros((NJ - 1, NI - 1), dtype=int)
+        for (I, J, s) in cells:
+            cLL = cache[(I, J)]
+            cLR = cache[(I+s, J)]
+            cUL = cache[(I, J+s)]
+            cUR = cache[(I+s, J+s)]
+            if cLL == cLR == cUL == cUR:
+                img[J:J+s, I:I+s] = cLL
+            elif s == 1:
+                # max depth, single pixel cell, 4 corner values disagree;
+                # use lower-left arbitrarily
+                img[J, I] = cLL
+            else:
+                half = s // 2
+                img[J:J+half, I:I+half] = cLL
+                img[J:J+half, I+half:I+s] = cLR
+                img[J+half:J+s, I:I+half] = cUL
+                img[J+half:J+s, I+half:I+s] = cUR
+
+        # 5. Plot
+        if ax is None:
+            local_plot = True
+            if wb_plot:
+                fig = plt.figure(figsize=(12,6))
+            else:
+                fig = plt.figure(figsize=(5.5,5))
+            ax = plt.subplot(1,1,1)
+        else:
+            local_plot = False
+
+        cmap = plt.get_cmap('viridis', effective_max + 1)
+        norm = BoundaryNorm(boundaries=np.arange(-0.5, effective_max + 1.5),
+                            ncolors=effective_max + 1)
+        img = np.clip(img, 0, effective_max)
+        ax.imshow(img, origin='lower',
+                  extent=[xlim[0], xlim[1], ylim[0], ylim[1]],
+                  aspect='equal', interpolation='nearest',
+                  cmap=cmap, norm=norm)
+
+        self.percep_model.targets.plot_targets_to_axis(ax)
+
+        # Attach labeled proxy artists so that a later ax.legend() or
+        # plt.legend() call picks up one entry per integer count. These are
+        # zero-data plots -- they render nothing, but the legend machinery
+        # sees them as labeled handles.
+        for n in range(effective_max + 1):
+            ax.plot([], [], marker='s', markersize=10, linestyle='',
+                    color=cmap(norm(n)), label=f'{n}')
+
+        if title is not None:
+            ax.set_title(title)
+        else:
+            ax.set_title('Neural band bifurcation diagram')
+
+        if local_plot:
+            ax.legend(title='# stable\nequilibria', loc='center left',
+                      bbox_to_anchor=(1.02, 0.5), frameon=False)
+            fig.tight_layout()
             plt.show()
         else:
             return ax
