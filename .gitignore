@@ -3,6 +3,7 @@
 .virtual_documents
 .Rhistory
 *.png
+!VM_bifurcations/*.png
 .~*
 *.swp
 __pycache__/
@@ -25,3 +26,5 @@ codegen/
 *.log
 *.gz
 *.pdf
+# Claude
+*.lock
