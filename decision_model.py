@@ -12,20 +12,7 @@ from scipy.interpolate import RectBivariateSpline, CubicSpline
 from scipy.special import i0
 from scipy.stats import vonmises
 import matplotlib.pyplot as plt
-from matplotlib.colors import BoundaryNorm, ListedColormap
-
-
-def _bifurcation_palette():
-    '''Fixed palette for bifurcation-diagram (n_stable, n_unstable) categories.
-
-    Returns 60 distinct colors (tab20 + tab20b + tab20c). Indexing into this
-    by `cat = n_unstable * (max_stable + 1) + n_stable` guarantees the same
-    (n_stable, n_unstable) pair maps to the same color across calls when the
-    same `max_stable`/`max_unstable` are used.
-    '''
-    return (list(plt.cm.tab20.colors)
-            + list(plt.cm.tab20b.colors)
-            + list(plt.cm.tab20c.colors))
+from matplotlib.colors import BoundaryNorm
 
 
 def convert_angles(theta):
@@ -360,15 +347,23 @@ class Targets:
         '''Plots the targets on a given axis object.
         '''
 
+        target_color = '0.5'  # medium grey
+        # Render targets above other layers (e.g., direction-mesh quivers)
+        # and fully opaque so they hide arrows passing through them.
+        zo = 5
+
         if self.geom_name is None:
             # delta functions
-            ax.plot(self.locs[:,0],self.locs[:,1],'.')
+            ax.plot(self.locs[:,0],self.locs[:,1],'.', color=target_color,
+                    zorder=zo)
         elif self.geom_name == 'circle':
             for n,pos in enumerate(self.locs):
                 try:
-                    circle = plt.Circle(pos, self.r[n], color='b')
+                    circle = plt.Circle(pos, self.r[n], color=target_color,
+                                        zorder=zo)
                 except TypeError:
-                    circle = plt.Circle(pos, self.r, color='b')
+                    circle = plt.Circle(pos, self.r, color=target_color,
+                                        zorder=zo)
                 ax.add_patch(circle)
         elif self.geom_name == 'capsule':
             from matplotlib.patches import FancyBboxPatch
@@ -381,7 +376,8 @@ class Targets:
                     # Zero-width: draw as a line segment
                     dx, dy = l_n/2*np.cos(th_n), l_n/2*np.sin(th_n)
                     ax.plot([pos[0]-dx, pos[0]+dx],
-                            [pos[1]-dy, pos[1]+dy], 'b')
+                            [pos[1]-dy, pos[1]+dy], color=target_color,
+                            zorder=zo)
                 else:
                     # Draw two endpoint circles + connecting rectangle
                     ep1 = pos + np.array([l_n/2*np.cos(th_n), l_n/2*np.sin(th_n)])
@@ -392,10 +388,10 @@ class Targets:
                               ep2[0]-perp[0], ep1[0]-perp[0], ep1[0]+perp[0]]
                     rect_y = [ep1[1]+perp[1], ep2[1]+perp[1],
                               ep2[1]-perp[1], ep1[1]-perp[1], ep1[1]+perp[1]]
-                    ax.fill(rect_x, rect_y, color='b', alpha=0.3)
-                    ax.plot(rect_x, rect_y, 'b')
-                    c1 = plt.Circle(ep1, hw, color='b', alpha=0.3)
-                    c2 = plt.Circle(ep2, hw, color='b', alpha=0.3)
+                    ax.fill(rect_x, rect_y, color=target_color, zorder=zo)
+                    ax.plot(rect_x, rect_y, color=target_color, zorder=zo)
+                    c1 = plt.Circle(ep1, hw, color=target_color, zorder=zo)
+                    c2 = plt.Circle(ep2, hw, color=target_color, zorder=zo)
                     ax.add_patch(c1)
                     ax.add_patch(c2)
         else:
@@ -2230,8 +2226,7 @@ class NeuralBandModel:
 
     def _count_stable_at(self, args):
         '''Helper function for plot_bifurcation_diagram: evaluate the number
-        of stable and unstable self-consistent equilibria at a single
-        (x,y) location.
+        of stable self-consistent equilibria at a single (x,y) location.
 
         Parameters
         ----------
@@ -2245,40 +2240,28 @@ class NeuralBandModel:
         -------
         key : hashable
             echoed back from the input for lookup
-        n_stable : int
+        count : int
             number of stable self-consistent equilibria at (x,y)
-        n_unstable : int
-            number of unstable self-consistent equilibria at (x,y)
         '''
         key, x, y, stability_criterion = args
         focal_loc = np.array([x, y])
         _, stability = self.gamma_equilib(
             focal_angle=True, focal_loc=focal_loc,
             stability_criterion=stability_criterion)
-        n_stable = int(sum(stability))
-        n_unstable = len(stability) - n_stable
-        return key, n_stable, n_unstable
+        return key, int(sum(stability))
 
 
     def plot_bifurcation_diagram(self, xlim=(0,6), num_x=29, ylim=(-3.5,3.5),
-                                 num_y=29, refinement_levels=3,
-                                 max_stable=4, max_unstable=4,
+                                 num_y=29, refinement_levels=3, max_count=None,
                                  pool=None, ax=None, title=None, wb_plot=False,
                                  stability_criterion='coupled'):
-        '''Plot a 2D colormap showing the number of stable and unstable
-        self-consistent equilibria as a function of observer (x,y) location.
-
-        Each pixel is colored by its (n_stable, n_unstable) pair, drawn from
-        a fixed palette indexed by ``cat = n_unstable * (max_stable + 1) +
-        n_stable``. The same (n_stable, n_unstable) pair maps to the same
-        color across calls when the same ``max_stable``/``max_unstable`` are
-        passed -- so panels passed an ``ax`` will share colors.
+        '''Plot a 2D colormap showing the number of stable self-consistent
+        equilibria as a function of observer (x,y) location.
 
         Starts from a coarse ``num_x`` by ``num_y`` grid and adaptively
-        subdivides cells whose four corners disagree on the (n_stable,
-        n_unstable) pair, up to ``refinement_levels`` times. Evaluated
-        points are cached so that corners shared between cells are not
-        recomputed.
+        subdivides cells whose four corners disagree on the number of stable
+        equilibria, up to ``refinement_levels`` times. Evaluated points are
+        cached so that corners shared between cells are not recomputed.
 
         Parameters
         ----------
@@ -2292,16 +2275,15 @@ class NeuralBandModel:
             number of steps in y direction for the base mesh
         refinement_levels : int
             number of adaptive subdivision passes. 0 => base mesh only.
-            Each pass halves cell size at boundaries where the (n_stable,
-            n_unstable) pair changes. Final virtual grid resolution is
+            Each pass halves cell size at boundaries where the stable count
+            changes. Final virtual grid resolution is
             ((num_x-1)*2**L + 1) by ((num_y-1)*2**L + 1).
-        max_stable : int
+        max_count : int, optional
             maximum expected number of stable equilibria. Pins the color
-            indexing so the same (s, u) pair maps to the same color across
-            calls. Counts above max_stable are clipped with a warning.
-        max_unstable : int
-            maximum expected number of unstable equilibria. Same role as
-            max_stable, for the other axis of the (s, u) grid.
+            scale so that count=N maps to the same color across multiple
+            calls (e.g. side-by-side subplots comparing models). If None,
+            auto-detected from the data. Values in the data exceeding
+            max_count are clipped with a warning.
         pool : multiprocessing.Pool, optional
             If provided, evaluate new points at each refinement level in
             parallel.
@@ -2325,8 +2307,6 @@ class NeuralBandModel:
             Otherwise, None.
         '''
         assert refinement_levels >= 0, "refinement_levels must be >= 0"
-        assert max_stable >= 0 and max_unstable >= 0, \
-            "max_stable and max_unstable must be >= 0"
 
         L = refinement_levels
         step0 = 2**L
@@ -2339,7 +2319,7 @@ class NeuralBandModel:
             y = ylim[0] + (ylim[1] - ylim[0])*J/(NJ - 1)
             return x, y
 
-        cache = {}  # (I, J) -> (n_stable, n_unstable) tuple
+        cache = {}  # (I, J) -> stable count
 
         def evaluate_points(keys):
             keys = [k for k in keys if k not in cache]
@@ -2349,12 +2329,12 @@ class NeuralBandModel:
                          for k in keys]
             if pool is None:
                 for args in args_list:
-                    key, n_s, n_u = self._count_stable_at(args)
-                    cache[key] = (n_s, n_u)
+                    key, count = self._count_stable_at(args)
+                    cache[key] = count
             else:
                 results = pool.map(self._count_stable_at, args_list)
-                for key, n_s, n_u in results:
-                    cache[key] = (n_s, n_u)
+                for key, count in results:
+                    cache[key] = count
 
         # 1. Evaluate base grid
         base_keys = [(i*step0, j*step0)
@@ -2392,42 +2372,24 @@ class NeuralBandModel:
                 cells.append((I, J+half, half))
                 cells.append((I+half, J+half, half))
 
-        # 4. Warn if any observed count exceeds the palette ranges.
-        observed_max_s = max(s for s, _ in cache.values())
-        observed_max_u = max(u for _, u in cache.values())
-        if observed_max_s > max_stable:
-            warnings.warn(
-                f"Data contains stable counts up to {observed_max_s} but "
-                f"max_stable={max_stable}; values will be clipped.")
-        if observed_max_u > max_unstable:
-            warnings.warn(
-                f"Data contains unstable counts up to {observed_max_u} but "
-                f"max_unstable={max_unstable}; values will be clipped.")
-
-        n_s_cats = max_stable + 1
-        n_u_cats = max_unstable + 1
-        n_cats = n_s_cats * n_u_cats
-
-        palette = _bifurcation_palette()
-        if n_cats > len(palette):
-            raise ValueError(
-                f"max_stable={max_stable}, max_unstable={max_unstable} "
-                f"requires {n_cats} colors but the fixed palette only has "
-                f"{len(palette)}. Reduce one of the max kwargs.")
-
-        def cat_index(n_s, n_u):
-            n_s = min(n_s, max_stable)
-            n_u = min(n_u, max_unstable)
-            return n_u * n_s_cats + n_s
-
-        # 5. Rasterize leaf cells into a category-index image. img[row=J,
-        #    col=I] -> cat at virtual pixel (I,J).
+        # 4. Rasterize leaf cells into an int image at virtual-pixel
+        #    resolution. img[row=J, col=I] -> count at virtual pixel (I,J).
+        data_max = max(cache.values())
+        if max_count is None:
+            effective_max = data_max
+        else:
+            effective_max = max_count
+            if data_max > effective_max:
+                warnings.warn(
+                    "Data contains stable-equilibrium counts up to "
+                    f"{data_max} but max_count={effective_max}; "
+                    "values above max_count will be clipped.")
         img = np.zeros((NJ - 1, NI - 1), dtype=int)
         for (I, J, s) in cells:
-            cLL = cat_index(*cache[(I, J)])
-            cLR = cat_index(*cache[(I+s, J)])
-            cUL = cat_index(*cache[(I, J+s)])
-            cUR = cat_index(*cache[(I+s, J+s)])
+            cLL = cache[(I, J)]
+            cLR = cache[(I+s, J)]
+            cUL = cache[(I, J+s)]
+            cUR = cache[(I+s, J+s)]
             if cLL == cLR == cUL == cUR:
                 img[J:J+s, I:I+s] = cLL
             elif s == 1:
@@ -2441,7 +2403,7 @@ class NeuralBandModel:
                 img[J+half:J+s, I:I+half] = cUL
                 img[J+half:J+s, I+half:I+s] = cUR
 
-        # 6. Plot
+        # 5. Plot
         if ax is None:
             local_plot = True
             if wb_plot:
@@ -2452,9 +2414,10 @@ class NeuralBandModel:
         else:
             local_plot = False
 
-        cmap = ListedColormap(palette[:n_cats])
-        norm = BoundaryNorm(boundaries=np.arange(-0.5, n_cats + 0.5),
-                            ncolors=n_cats)
+        cmap = plt.get_cmap('viridis', effective_max + 1)
+        norm = BoundaryNorm(boundaries=np.arange(-0.5, effective_max + 1.5),
+                            ncolors=effective_max + 1)
+        img = np.clip(img, 0, effective_max)
         ax.imshow(img, origin='lower',
                   extent=[xlim[0], xlim[1], ylim[0], ylim[1]],
                   aspect='equal', interpolation='nearest',
@@ -2462,15 +2425,13 @@ class NeuralBandModel:
 
         self.percep_model.targets.plot_targets_to_axis(ax)
 
-        # Attach labeled proxy artists for each (s, u) pair actually
-        # observed in the data. Sorted by stable then unstable for a
-        # readable legend.
-        observed_cats = sorted({cat_index(*v) for v in cache.values()})
-        for cat in observed_cats:
-            n_u, n_s = divmod(cat, n_s_cats)
+        # Attach labeled proxy artists so that a later ax.legend() or
+        # plt.legend() call picks up one entry per integer count. These are
+        # zero-data plots -- they render nothing, but the legend machinery
+        # sees them as labeled handles.
+        for n in range(effective_max + 1):
             ax.plot([], [], marker='s', markersize=10, linestyle='',
-                    color=cmap(norm(cat)),
-                    label=f'{n_s} stable, {n_u} unstable')
+                    color=cmap(norm(n)), label=f'{n}')
 
         if title is not None:
             ax.set_title(title)
@@ -2480,7 +2441,7 @@ class NeuralBandModel:
             ax.set_title('Neural band bifurcation diagram')
 
         if local_plot:
-            ax.legend(title='# equilibria', loc='center left',
+            ax.legend(title='# stable\nequilibria', loc='center left',
                       bbox_to_anchor=(1.02, 0.5), frameon=False)
             fig.tight_layout()
             plt.show()
