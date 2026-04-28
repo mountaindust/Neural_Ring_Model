@@ -12,7 +12,21 @@ from scipy.interpolate import RectBivariateSpline, CubicSpline
 from scipy.special import i0
 from scipy.stats import vonmises
 import matplotlib.pyplot as plt
-from matplotlib.colors import BoundaryNorm
+from matplotlib.colors import BoundaryNorm, ListedColormap
+
+
+def _bifurcation_palette():
+    '''Fixed palette for bifurcation-diagram (n_stable, n_unstable) categories.
+
+    Returns 60 distinct colors (tab20 + tab20b + tab20c). Indexing into this
+    by `cat = n_unstable * (max_stable + 1) + n_stable` guarantees the same
+    (n_stable, n_unstable) pair maps to the same color across calls when the
+    same `max_stable`/`max_unstable` are used.
+    '''
+    return (list(plt.cm.tab20.colors)
+            + list(plt.cm.tab20b.colors)
+            + list(plt.cm.tab20c.colors))
+
 
 def convert_angles(theta):
     '''Given a scalar or array of angles, convert to angles in
@@ -1688,7 +1702,8 @@ class NeuralBandModel:
         return np.array([dg.real, dg.imag])
 
 
-    def gamma_equilib(self, focal_angle=None, focal_loc=None):
+    def gamma_equilib(self, focal_angle=None, focal_loc=None,
+                      stability_criterion='coupled'):
         '''Attempt to find all zeros (equilibria) of dgamma/dt for a given focal
         location by using a multistart root finding algorithm on a mesh of
         initial angle values.
@@ -1709,7 +1724,7 @@ class NeuralBandModel:
         Returns a list of unique equilibrium gamma values found if focal_angle
         is supplied or None, otherwise returns a list of allocentric equilibrium
         angles found. Also returns a list of booleans indicating whether each
-        equilibrium is stable (True) or unstable (False) based on an analytical
+        equilibrium is stable (True) or unstable (False) based on a
         perturbation analysis.
 
         Parameters
@@ -1720,6 +1735,14 @@ class NeuralBandModel:
             - If True, find self-consistent equilibria across all headings.
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use self.percep_model.focal_loc.
+        stability_criterion : {'coupled', 'discrim_a'}
+            Which stability test to apply to each equilibrium.
+            - 'coupled' (default): full 3x3 numerical Jacobian of the coupled
+              (gamma_re, gamma_im, theta) system. Physically correct for
+              self-consistent equilibria where the heading dimension can flip
+              an otherwise gamma-stable equilibrium into a saddle.
+            - 'discrim_a': legacy 2x2 gamma-only discriminant (the original
+              `_discrim_A` test). Retained for comparison plots.
 
         Returns
         -------
@@ -1729,6 +1752,14 @@ class NeuralBandModel:
             for each equilibrium gamma value, whether it is stable (True) or
             unstable (False)
         '''
+        if stability_criterion == 'coupled':
+            stability_test = self._discrim_coupled
+        elif stability_criterion == 'discrim_a':
+            stability_test = self._discrim_A
+        else:
+            raise ValueError(
+                f"stability_criterion must be 'coupled' or 'discrim_a', "
+                f"got {stability_criterion!r}")
         if focal_angle is False:
             focal_angle = None
         if focal_angle is True:
@@ -1799,7 +1830,7 @@ class NeuralBandModel:
                 if not close_check:
                     final_angles.append(theta_eq)
                     gamma_eq = R_eq + 0j
-                    stability.append(self._discrim_A(
+                    stability.append(stability_test(
                         gamma_eq, theta_eq, focal_loc))
 
             return final_angles, stability
@@ -1824,7 +1855,7 @@ class NeuralBandModel:
                             break
                     if not close_check:
                         final_gammas.append(gamma_eq)
-                        stability.append(self._discrim_A(
+                        stability.append(stability_test(
                             gamma_eq, focal_angle, focal_loc))
             return final_gammas, stability
     
@@ -1939,6 +1970,38 @@ class NeuralBandModel:
         return self.K * R * np.sin(ego_angle)
 
 
+    def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
+                         h=1e-6, tol=1e-8):
+        '''Stability test using the full 3x3 coupled Jacobian of
+        (gamma_re, gamma_im, theta) where dtheta/dt = K*R*sin(ego_angle).
+
+        Built by central finite differences. Returns True iff every
+        eigenvalue has real part < -tol. This is the physically correct
+        criterion for self-consistent equilibria; `_discrim_A` only checks
+        the gamma subsystem at fixed heading and over-reports stability
+        wherever heading coupling contributes a positive eigenvalue.
+        '''
+        gr0 = float(gamma_star.real)
+        gi0 = float(gamma_star.imag)
+        th0 = float(focal_angle)
+
+        def coupled_rhs(gr, gi, th):
+            gamma = gr + 1j*gi
+            dg = self.dgamma_dt(gamma=gamma, focal_angle=th,
+                                focal_loc=focal_loc)
+            ego_angle, R = self.convert_gamma(gamma)
+            dth = self.K * R * np.sin(ego_angle)
+            return np.array([dg.real, dg.imag, dth])
+
+        J = np.zeros((3, 3))
+        for k, (dr, di, dt) in enumerate([(h, 0, 0), (0, h, 0), (0, 0, h)]):
+            f_plus = coupled_rhs(gr0+dr, gi0+di, th0+dt)
+            f_minus = coupled_rhs(gr0-dr, gi0-di, th0-dt)
+            J[:, k] = (f_plus - f_minus) / (2*h)
+        eigs = np.linalg.eigvals(J)
+        return bool(np.all(np.real(eigs) < -tol))
+
+
     def _discrim_A(self, gamma_star, focal_angle, focal_loc):
         '''Determines stability of equilibria based on perturbation analysis.
         Assumes that the focal_angle is the angle of gamma_star and calculates
@@ -1975,12 +2038,13 @@ class NeuralBandModel:
 
     def _process_point(self, args):
         '''Helper function for processing mesh points in plot_direction_mesh.
-        
+
         Parameters
         ----------
         args : tuple
-            (ii, jj, X, Y) where ii and jj are the mesh indices and X and Y 
-            are the mesh coordinate arrays.
+            (ii, jj, X, Y, stability_criterion) where ii and jj are the mesh
+            indices, X and Y are the mesh coordinate arrays, and
+            stability_criterion is forwarded to gamma_equilib.
 
         Returns
         -------
@@ -1996,18 +2060,21 @@ class NeuralBandModel:
             list indicating whether each equilibrium is stable (True) or unstable (False)
         '''
 
-        ii, jj, X, Y = args
+        ii, jj, X, Y, stability_criterion = args
         focal_loc = np.array([X[jj,ii], Y[jj,ii]])
 
-        final_angles, stability = self.gamma_equilib(focal_angle=True, focal_loc=focal_loc)
+        final_angles, stability = self.gamma_equilib(
+            focal_angle=True, focal_loc=focal_loc,
+            stability_criterion=stability_criterion)
 
         return ii, jj, final_angles, stability
     
 
-    def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            pool=None, ax=None, title=None, wb_plot=False):
-        '''Create a mesh of starting locations and, for each point in the mesh, 
-        find the equilibria of dgamma/dt and plot the corresponding consensus 
+    def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19,
+                            pool=None, ax=None, title=None, wb_plot=False,
+                            stability_criterion='coupled'):
+        '''Create a mesh of starting locations and, for each point in the mesh,
+        find the equilibria of dgamma/dt and plot the corresponding consensus
         directions.
 
         Set wb_plot to True if plotting in a Jupyter notebook
@@ -2028,6 +2095,11 @@ class NeuralBandModel:
             title for the quiver plot.
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
+        stability_criterion : {'coupled', 'discrim_a'}
+            Which stability test to apply (forwarded to gamma_equilib).
+            'coupled' (default) uses the full 3x3 (gamma_re, gamma_im, theta)
+            Jacobian; 'discrim_a' uses the legacy gamma-only test for
+            comparison plots.
 
         Returns
         -------
@@ -2039,16 +2111,18 @@ class NeuralBandModel:
         ymesh = np.linspace(ylim[0], ylim[1], num_y)
 
         X, Y = np.meshgrid(xmesh, ymesh)
-        
-        
+
+
         if pool is None:
             results = []
             for ii in range(num_x):
                 for jj in range(num_y):
                     print("Processing point ({},{})".format(ii,jj))
-                    results.append(self._process_point((ii,jj,X,Y)))
+                    results.append(self._process_point(
+                        (ii, jj, X, Y, stability_criterion)))
         else:
-            args_list = [(ii, jj, X, Y) for ii in range(num_x) for jj in range(num_y)]
+            args_list = [(ii, jj, X, Y, stability_criterion)
+                         for ii in range(num_x) for jj in range(num_y)]
             print("Processing points in parallel using pool...")
             results = pool.map(self._process_point, args_list)
 
@@ -2091,63 +2165,57 @@ class NeuralBandModel:
 
         # Plot targets
         self.percep_model.targets.plot_targets_to_axis(ax)
-        ##### Plot arrows, coloring multi-solution points differently #####
-        # Single solution points (blue if stable, cyan if unstable)
-        X_single_stable = X[(multi_sol==False) & stability_list[0]]
-        Y_single_stable = Y[(multi_sol==False) & stability_list[0]]
-        U_single_stable = U_list[0][(multi_sol==False) & stability_list[0]]
-        V_single_stable = V_list[0][(multi_sol==False) & stability_list[0]]
-        ax.quiver(X_single_stable, Y_single_stable, U_single_stable, V_single_stable,
-                angles='xy', color='blue', scale=30, width=0.004,
-                label='Single Solution (Stable)')
-        X_single_unstable = X[(multi_sol==False) & ~stability_list[0]]
-        Y_single_unstable = Y[(multi_sol==False) & ~stability_list[0]]
-        U_single_unstable = U_list[0][(multi_sol==False) & ~stability_list[0]]
-        V_single_unstable = V_list[0][(multi_sol==False) & ~stability_list[0]]
-        ax.quiver(X_single_unstable, Y_single_unstable, U_single_unstable, V_single_unstable,
-                angles='xy', color='cyan', scale=30, width=0.004,
-                label='Single Solution (Unstable)')
-        # ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
-        #             U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
-        #             angles='xy', color='blue', scale=30, width=0.004, 
-        #             label='Single Solution')
-        # Multi solution points (red if stable, black if unstable)
-        X_multi_stable = X[multi_sol & stability_list[0]]
-        Y_multi_stable = Y[multi_sol & stability_list[0]]
-        U_multi_stable = U_list[0][multi_sol & stability_list[0]]
-        V_multi_stable = V_list[0][multi_sol & stability_list[0]]
-        ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
-                angles='xy', color='black', scale=30, width=0.004,
-                label='Multiple Solutions (Stable)')
-        X_multi_unstable = X[multi_sol & ~stability_list[0]]
-        Y_multi_unstable = Y[multi_sol & ~stability_list[0]]
-        U_multi_unstable = U_list[0][multi_sol & ~stability_list[0]]
-        V_multi_unstable = V_list[0][multi_sol & ~stability_list[0]]
-        ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
-                angles='xy', color='red', scale=30, width=0.004,
-                label='Multiple Solutions (Unstable)')
-        # ax.quiver(X[multi_sol], Y[multi_sol], 
-        #             U_list[0][multi_sol], V_list[0][multi_sol], 
-        #             angles='xy', color='red', scale=30, width=0.004,
-        #             label='Multiple Solutions')
-        for n in range(1, len(U_list)):
-            # Continue with multi-solution points, coloring them red if stable and black if unstable
-            nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
-            X_multi_stable = X[nonzero_mask & stability_list[n]]
-            Y_multi_stable = Y[nonzero_mask & stability_list[n]]
-            U_multi_stable = U_list[n][nonzero_mask & stability_list[n]]
-            V_multi_stable = V_list[n][nonzero_mask & stability_list[n]]
+        if not U_list:
+            warnings.warn(
+                "plot_direction_mesh: no equilibria found at any mesh point; "
+                "rendering targets only.")
+        else:
+            ##### Plot arrows, coloring multi-solution points differently #####
+            # Single solution points (blue if stable, cyan if unstable)
+            X_single_stable = X[(multi_sol==False) & stability_list[0]]
+            Y_single_stable = Y[(multi_sol==False) & stability_list[0]]
+            U_single_stable = U_list[0][(multi_sol==False) & stability_list[0]]
+            V_single_stable = V_list[0][(multi_sol==False) & stability_list[0]]
+            ax.quiver(X_single_stable, Y_single_stable, U_single_stable, V_single_stable,
+                    angles='xy', color='blue', scale=30, width=0.004,
+                    label='Single Solution (Stable)')
+            X_single_unstable = X[(multi_sol==False) & ~stability_list[0]]
+            Y_single_unstable = Y[(multi_sol==False) & ~stability_list[0]]
+            U_single_unstable = U_list[0][(multi_sol==False) & ~stability_list[0]]
+            V_single_unstable = V_list[0][(multi_sol==False) & ~stability_list[0]]
+            ax.quiver(X_single_unstable, Y_single_unstable, U_single_unstable, V_single_unstable,
+                    angles='xy', color='cyan', scale=30, width=0.004,
+                    label='Single Solution (Unstable)')
+            # Multi solution points (red if stable, black if unstable)
+            X_multi_stable = X[multi_sol & stability_list[0]]
+            Y_multi_stable = Y[multi_sol & stability_list[0]]
+            U_multi_stable = U_list[0][multi_sol & stability_list[0]]
+            V_multi_stable = V_list[0][multi_sol & stability_list[0]]
             ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
-                    angles='xy', color='black', scale=30, width=0.004)
-            X_multi_unstable = X[nonzero_mask & ~stability_list[n]]
-            Y_multi_unstable = Y[nonzero_mask & ~stability_list[n]]
-            U_multi_unstable = U_list[n][nonzero_mask & ~stability_list[n]]
-            V_multi_unstable = V_list[n][nonzero_mask & ~stability_list[n]]
+                    angles='xy', color='black', scale=30, width=0.004,
+                    label='Multiple Solutions (Stable)')
+            X_multi_unstable = X[multi_sol & ~stability_list[0]]
+            Y_multi_unstable = Y[multi_sol & ~stability_list[0]]
+            U_multi_unstable = U_list[0][multi_sol & ~stability_list[0]]
+            V_multi_unstable = V_list[0][multi_sol & ~stability_list[0]]
             ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
-                    angles='xy', color='red', scale=30, width=0.004)
-            # ax.quiver(X[nonzero_mask], Y[nonzero_mask], 
-            #           U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
-            #           angles='xy', color='red', scale=30, width=0.004)
+                    angles='xy', color='red', scale=30, width=0.004,
+                    label='Multiple Solutions (Unstable)')
+            for n in range(1, len(U_list)):
+                # Continue with multi-solution points, coloring them red if stable and black if unstable
+                nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
+                X_multi_stable = X[nonzero_mask & stability_list[n]]
+                Y_multi_stable = Y[nonzero_mask & stability_list[n]]
+                U_multi_stable = U_list[n][nonzero_mask & stability_list[n]]
+                V_multi_stable = V_list[n][nonzero_mask & stability_list[n]]
+                ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
+                        angles='xy', color='black', scale=30, width=0.004)
+                X_multi_unstable = X[nonzero_mask & ~stability_list[n]]
+                Y_multi_unstable = Y[nonzero_mask & ~stability_list[n]]
+                U_multi_unstable = U_list[n][nonzero_mask & ~stability_list[n]]
+                V_multi_unstable = V_list[n][nonzero_mask & ~stability_list[n]]
+                ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
+                        angles='xy', color='red', scale=30, width=0.004)
         ax.set_aspect('equal')
         if title is not None:
             ax.set_title(title)
@@ -2162,38 +2230,55 @@ class NeuralBandModel:
 
     def _count_stable_at(self, args):
         '''Helper function for plot_bifurcation_diagram: evaluate the number
-        of stable self-consistent equilibria at a single (x,y) location.
+        of stable and unstable self-consistent equilibria at a single
+        (x,y) location.
 
         Parameters
         ----------
         args : tuple
-            (key, x, y), where key is an arbitrary hashable identifier (used
-            by the caller to reassemble results) and (x,y) is the focal
-            location in world coordinates.
+            (key, x, y, stability_criterion), where key is an arbitrary
+            hashable identifier (used by the caller to reassemble results),
+            (x,y) is the focal location in world coordinates, and
+            stability_criterion is forwarded to gamma_equilib.
 
         Returns
         -------
         key : hashable
             echoed back from the input for lookup
-        count : int
+        n_stable : int
             number of stable self-consistent equilibria at (x,y)
+        n_unstable : int
+            number of unstable self-consistent equilibria at (x,y)
         '''
-        key, x, y = args
+        key, x, y, stability_criterion = args
         focal_loc = np.array([x, y])
-        _, stability = self.gamma_equilib(focal_angle=True, focal_loc=focal_loc)
-        return key, int(sum(stability))
+        _, stability = self.gamma_equilib(
+            focal_angle=True, focal_loc=focal_loc,
+            stability_criterion=stability_criterion)
+        n_stable = int(sum(stability))
+        n_unstable = len(stability) - n_stable
+        return key, n_stable, n_unstable
 
 
     def plot_bifurcation_diagram(self, xlim=(0,6), num_x=29, ylim=(-3.5,3.5),
-                                 num_y=29, refinement_levels=3, max_count=None,
-                                 pool=None, ax=None, title=None, wb_plot=False):
-        '''Plot a 2D colormap showing the number of stable self-consistent
-        equilibria as a function of observer (x,y) location.
+                                 num_y=29, refinement_levels=3,
+                                 max_stable=4, max_unstable=4,
+                                 pool=None, ax=None, title=None, wb_plot=False,
+                                 stability_criterion='coupled'):
+        '''Plot a 2D colormap showing the number of stable and unstable
+        self-consistent equilibria as a function of observer (x,y) location.
+
+        Each pixel is colored by its (n_stable, n_unstable) pair, drawn from
+        a fixed palette indexed by ``cat = n_unstable * (max_stable + 1) +
+        n_stable``. The same (n_stable, n_unstable) pair maps to the same
+        color across calls when the same ``max_stable``/``max_unstable`` are
+        passed -- so panels passed an ``ax`` will share colors.
 
         Starts from a coarse ``num_x`` by ``num_y`` grid and adaptively
-        subdivides cells whose four corners disagree on the number of stable
-        equilibria, up to ``refinement_levels`` times. Evaluated points are
-        cached so that corners shared between cells are not recomputed.
+        subdivides cells whose four corners disagree on the (n_stable,
+        n_unstable) pair, up to ``refinement_levels`` times. Evaluated
+        points are cached so that corners shared between cells are not
+        recomputed.
 
         Parameters
         ----------
@@ -2207,15 +2292,16 @@ class NeuralBandModel:
             number of steps in y direction for the base mesh
         refinement_levels : int
             number of adaptive subdivision passes. 0 => base mesh only.
-            Each pass halves cell size at boundaries where the stable count
-            changes. Final virtual grid resolution is
+            Each pass halves cell size at boundaries where the (n_stable,
+            n_unstable) pair changes. Final virtual grid resolution is
             ((num_x-1)*2**L + 1) by ((num_y-1)*2**L + 1).
-        max_count : int, optional
+        max_stable : int
             maximum expected number of stable equilibria. Pins the color
-            scale so that count=N maps to the same color across multiple
-            calls (e.g. side-by-side subplots comparing models). If None,
-            auto-detected from the data. Values in the data exceeding
-            max_count are clipped with a warning.
+            indexing so the same (s, u) pair maps to the same color across
+            calls. Counts above max_stable are clipped with a warning.
+        max_unstable : int
+            maximum expected number of unstable equilibria. Same role as
+            max_stable, for the other axis of the (s, u) grid.
         pool : multiprocessing.Pool, optional
             If provided, evaluate new points at each refinement level in
             parallel.
@@ -2225,6 +2311,13 @@ class NeuralBandModel:
             title for the plot
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
+        stability_criterion : {'coupled', 'discrim_a'}
+            Which stability test to apply when counting stable equilibria.
+            'coupled' (default) uses the full 3x3 coupled Jacobian and is the
+            physically correct criterion. 'discrim_a' uses the legacy
+            gamma-only test and over-reports stability where heading coupling
+            contributes a positive eigenvalue; intended for side-by-side
+            comparison plots.
 
         Returns
         -------
@@ -2232,6 +2325,8 @@ class NeuralBandModel:
             Otherwise, None.
         '''
         assert refinement_levels >= 0, "refinement_levels must be >= 0"
+        assert max_stable >= 0 and max_unstable >= 0, \
+            "max_stable and max_unstable must be >= 0"
 
         L = refinement_levels
         step0 = 2**L
@@ -2244,21 +2339,22 @@ class NeuralBandModel:
             y = ylim[0] + (ylim[1] - ylim[0])*J/(NJ - 1)
             return x, y
 
-        cache = {}  # (I, J) -> stable count
+        cache = {}  # (I, J) -> (n_stable, n_unstable) tuple
 
         def evaluate_points(keys):
             keys = [k for k in keys if k not in cache]
             if not keys:
                 return
-            args_list = [(k, *idx_to_xy(*k)) for k in keys]
+            args_list = [(k, *idx_to_xy(*k), stability_criterion)
+                         for k in keys]
             if pool is None:
                 for args in args_list:
-                    key, count = self._count_stable_at(args)
-                    cache[key] = count
+                    key, n_s, n_u = self._count_stable_at(args)
+                    cache[key] = (n_s, n_u)
             else:
                 results = pool.map(self._count_stable_at, args_list)
-                for key, count in results:
-                    cache[key] = count
+                for key, n_s, n_u in results:
+                    cache[key] = (n_s, n_u)
 
         # 1. Evaluate base grid
         base_keys = [(i*step0, j*step0)
@@ -2296,24 +2392,42 @@ class NeuralBandModel:
                 cells.append((I, J+half, half))
                 cells.append((I+half, J+half, half))
 
-        # 4. Rasterize leaf cells into an int image at virtual-pixel
-        #    resolution. img[row=J, col=I] -> count at virtual pixel (I,J).
-        data_max = max(cache.values())
-        if max_count is None:
-            effective_max = data_max
-        else:
-            effective_max = max_count
-            if data_max > effective_max:
-                warnings.warn(
-                    "Data contains stable-equilibrium counts up to "
-                    f"{data_max} but max_count={effective_max}; "
-                    "values above max_count will be clipped.")
+        # 4. Warn if any observed count exceeds the palette ranges.
+        observed_max_s = max(s for s, _ in cache.values())
+        observed_max_u = max(u for _, u in cache.values())
+        if observed_max_s > max_stable:
+            warnings.warn(
+                f"Data contains stable counts up to {observed_max_s} but "
+                f"max_stable={max_stable}; values will be clipped.")
+        if observed_max_u > max_unstable:
+            warnings.warn(
+                f"Data contains unstable counts up to {observed_max_u} but "
+                f"max_unstable={max_unstable}; values will be clipped.")
+
+        n_s_cats = max_stable + 1
+        n_u_cats = max_unstable + 1
+        n_cats = n_s_cats * n_u_cats
+
+        palette = _bifurcation_palette()
+        if n_cats > len(palette):
+            raise ValueError(
+                f"max_stable={max_stable}, max_unstable={max_unstable} "
+                f"requires {n_cats} colors but the fixed palette only has "
+                f"{len(palette)}. Reduce one of the max kwargs.")
+
+        def cat_index(n_s, n_u):
+            n_s = min(n_s, max_stable)
+            n_u = min(n_u, max_unstable)
+            return n_u * n_s_cats + n_s
+
+        # 5. Rasterize leaf cells into a category-index image. img[row=J,
+        #    col=I] -> cat at virtual pixel (I,J).
         img = np.zeros((NJ - 1, NI - 1), dtype=int)
         for (I, J, s) in cells:
-            cLL = cache[(I, J)]
-            cLR = cache[(I+s, J)]
-            cUL = cache[(I, J+s)]
-            cUR = cache[(I+s, J+s)]
+            cLL = cat_index(*cache[(I, J)])
+            cLR = cat_index(*cache[(I+s, J)])
+            cUL = cat_index(*cache[(I, J+s)])
+            cUR = cat_index(*cache[(I+s, J+s)])
             if cLL == cLR == cUL == cUR:
                 img[J:J+s, I:I+s] = cLL
             elif s == 1:
@@ -2327,7 +2441,7 @@ class NeuralBandModel:
                 img[J+half:J+s, I:I+half] = cUL
                 img[J+half:J+s, I+half:I+s] = cUR
 
-        # 5. Plot
+        # 6. Plot
         if ax is None:
             local_plot = True
             if wb_plot:
@@ -2338,10 +2452,9 @@ class NeuralBandModel:
         else:
             local_plot = False
 
-        cmap = plt.get_cmap('viridis', effective_max + 1)
-        norm = BoundaryNorm(boundaries=np.arange(-0.5, effective_max + 1.5),
-                            ncolors=effective_max + 1)
-        img = np.clip(img, 0, effective_max)
+        cmap = ListedColormap(palette[:n_cats])
+        norm = BoundaryNorm(boundaries=np.arange(-0.5, n_cats + 0.5),
+                            ncolors=n_cats)
         ax.imshow(img, origin='lower',
                   extent=[xlim[0], xlim[1], ylim[0], ylim[1]],
                   aspect='equal', interpolation='nearest',
@@ -2349,21 +2462,25 @@ class NeuralBandModel:
 
         self.percep_model.targets.plot_targets_to_axis(ax)
 
-        # Attach labeled proxy artists so that a later ax.legend() or
-        # plt.legend() call picks up one entry per integer count. These are
-        # zero-data plots -- they render nothing, but the legend machinery
-        # sees them as labeled handles.
-        for n in range(effective_max + 1):
+        # Attach labeled proxy artists for each (s, u) pair actually
+        # observed in the data. Sorted by stable then unstable for a
+        # readable legend.
+        observed_cats = sorted({cat_index(*v) for v in cache.values()})
+        for cat in observed_cats:
+            n_u, n_s = divmod(cat, n_s_cats)
             ax.plot([], [], marker='s', markersize=10, linestyle='',
-                    color=cmap(norm(n)), label=f'{n}')
+                    color=cmap(norm(cat)),
+                    label=f'{n_s} stable, {n_u} unstable')
 
         if title is not None:
             ax.set_title(title)
+        elif stability_criterion == 'discrim_a':
+            ax.set_title('Neural band bifurcation diagram (discrim_A)')
         else:
             ax.set_title('Neural band bifurcation diagram')
 
         if local_plot:
-            ax.legend(title='# stable\nequilibria', loc='center left',
+            ax.legend(title='# equilibria', loc='center left',
                       bbox_to_anchor=(1.02, 0.5), frameon=False)
             fig.tight_layout()
             plt.show()
@@ -2928,10 +3045,43 @@ class IsingExtModel:
         return ii, jj, final_gammas
     
 
+    def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
+                         h=1e-6, tol=1e-8):
+        '''Stability test using the full 3x3 coupled Jacobian of
+        (gamma_re, gamma_im, theta) where dtheta/dt = K*|gamma|*sin(angle(gamma)-theta).
+
+        Built by central finite differences. Returns True iff every
+        eigenvalue has real part < -tol. This is the physically correct
+        criterion for self-consistent equilibria; `_discrim_A_nu` only
+        checks the gamma subsystem at fixed heading and over-reports
+        stability wherever heading coupling contributes a positive
+        eigenvalue.
+        '''
+        gr0 = float(gamma_star.real)
+        gi0 = float(gamma_star.imag)
+        th0 = float(focal_angle)
+
+        def coupled_rhs(gr, gi, th):
+            gamma = gr + 1j*gi
+            dg = self.dgamma_dt(gamma=gamma, focal_angle=th,
+                                focal_loc=focal_loc)
+            R = np.abs(gamma)
+            dth = self.K * R * np.sin(np.angle(gamma) - th)
+            return np.array([dg.real, dg.imag, dth])
+
+        J = np.zeros((3, 3))
+        for k, (dr, di, dt) in enumerate([(h, 0, 0), (0, h, 0), (0, 0, h)]):
+            f_plus = coupled_rhs(gr0+dr, gi0+di, th0+dt)
+            f_minus = coupled_rhs(gr0-dr, gi0-di, th0-dt)
+            J[:, k] = (f_plus - f_minus) / (2*h)
+        eigs = np.linalg.eigvals(J)
+        return bool(np.all(np.real(eigs) < -tol))
+
+
     def _discrim_A_nu(self, gamma_star, focal_loc):
         '''Determines stability of equilibria based on perturbation analysis.
-        Assumes that the focal_angle is the angle of gamma_star and calculates 
-        the A value of the linear coefficient. If A < 1, the equilibrium is stable, 
+        Assumes that the focal_angle is the angle of gamma_star and calculates
+        the A value of the linear coefficient. If A < 1, the equilibrium is stable,
         if A > 1, the equilibrium is unstable.
 
         This is based on a cosine kernel with nu exponent.
@@ -2968,10 +3118,11 @@ class IsingExtModel:
         return A < 1
     
 
-    def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19, 
-                            pool=None, ax=None, wb_plot=False):
-        '''Create a mesh of starting locations and, for each point in the mesh, 
-        find the equilibria of dgamma/dt and plot the corresponding consensus 
+    def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19,
+                            pool=None, ax=None, wb_plot=False,
+                            stability_criterion='coupled'):
+        '''Create a mesh of starting locations and, for each point in the mesh,
+        find the equilibria of dgamma/dt and plot the corresponding consensus
         directions.
 
         Set wb_plot to True if plotting in a Jupyter notebook
@@ -2990,6 +3141,11 @@ class IsingExtModel:
             If provided, plot on this axis instead of creating a new figure and axis.
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
+        stability_criterion : {'coupled', 'discrim_a'}
+            Which stability test to apply to each equilibrium.
+            'coupled' (default) uses the full 3x3 (gamma_re, gamma_im, theta)
+            Jacobian; 'discrim_a' uses the legacy gamma-only `_discrim_A_nu`
+            test for comparison plots.
 
         Returns
         -------
@@ -3046,7 +3202,16 @@ class IsingExtModel:
                 U_list[n][jj,ii] = np.cos(theta)
                 V_list[n][jj,ii] = np.sin(theta)
                 focal_loc = np.array([X[jj,ii], Y[jj,ii]])
-                stability_list[n][jj,ii] = self._discrim_A_nu(gamma, focal_loc)
+                if stability_criterion == 'coupled':
+                    stability_list[n][jj,ii] = self._discrim_coupled(
+                        gamma, np.angle(gamma), focal_loc)
+                elif stability_criterion == 'discrim_a':
+                    stability_list[n][jj,ii] = self._discrim_A_nu(
+                        gamma, focal_loc)
+                else:
+                    raise ValueError(
+                        f"stability_criterion must be 'coupled' or "
+                        f"'discrim_a', got {stability_criterion!r}")
             if len(final_gammas) > 1:
                 multi_sol[jj,ii] = True
 
@@ -3055,63 +3220,57 @@ class IsingExtModel:
 
         # Plot targets
         self.percep_model.targets.plot_targets_to_axis(ax)
-        ##### Plot arrows, coloring multi-solution points differently #####
-        # Single solution points (blue if stable, cyan if unstable)
-        X_single_stable = X[(multi_sol==False) & stability_list[0]]
-        Y_single_stable = Y[(multi_sol==False) & stability_list[0]]
-        U_single_stable = U_list[0][(multi_sol==False) & stability_list[0]]
-        V_single_stable = V_list[0][(multi_sol==False) & stability_list[0]]
-        ax.quiver(X_single_stable, Y_single_stable, U_single_stable, V_single_stable,
-                angles='xy', color='blue', scale=30, width=0.004,
-                label='Single Solution (Stable)')
-        X_single_unstable = X[(multi_sol==False) & ~stability_list[0]]
-        Y_single_unstable = Y[(multi_sol==False) & ~stability_list[0]]
-        U_single_unstable = U_list[0][(multi_sol==False) & ~stability_list[0]]
-        V_single_unstable = V_list[0][(multi_sol==False) & ~stability_list[0]]
-        ax.quiver(X_single_unstable, Y_single_unstable, U_single_unstable, V_single_unstable,
-                angles='xy', color='cyan', scale=30, width=0.004,
-                label='Single Solution (Unstable)')
-        # ax.quiver(X[multi_sol==False], Y[multi_sol==False], 
-        #             U_list[0][multi_sol==False], V_list[0][multi_sol==False], 
-        #             angles='xy', color='blue', scale=30, width=0.004, 
-        #             label='Single Solution')
-        # Multi solution points (red if stable, black if unstable)
-        X_multi_stable = X[multi_sol & stability_list[0]]
-        Y_multi_stable = Y[multi_sol & stability_list[0]]
-        U_multi_stable = U_list[0][multi_sol & stability_list[0]]
-        V_multi_stable = V_list[0][multi_sol & stability_list[0]]
-        ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
-                angles='xy', color='black', scale=30, width=0.004,
-                label='Multiple Solutions (Stable)')
-        X_multi_unstable = X[multi_sol & ~stability_list[0]]
-        Y_multi_unstable = Y[multi_sol & ~stability_list[0]]
-        U_multi_unstable = U_list[0][multi_sol & ~stability_list[0]]
-        V_multi_unstable = V_list[0][multi_sol & ~stability_list[0]]
-        ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
-                angles='xy', color='red', scale=30, width=0.004,
-                label='Multiple Solutions (Unstable)')
-        # ax.quiver(X[multi_sol], Y[multi_sol], 
-        #             U_list[0][multi_sol], V_list[0][multi_sol], 
-        #             angles='xy', color='red', scale=30, width=0.004,
-        #             label='Multiple Solutions')
-        for n in range(1, len(U_list)):
-            # Continue with multi-solution points, coloring them red if stable and black if unstable
-            nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
-            X_multi_stable = X[nonzero_mask & stability_list[n]]
-            Y_multi_stable = Y[nonzero_mask & stability_list[n]]
-            U_multi_stable = U_list[n][nonzero_mask & stability_list[n]]
-            V_multi_stable = V_list[n][nonzero_mask & stability_list[n]]
+        if not U_list:
+            warnings.warn(
+                "plot_direction_mesh: no equilibria found at any mesh point; "
+                "rendering targets only.")
+        else:
+            ##### Plot arrows, coloring multi-solution points differently #####
+            # Single solution points (blue if stable, cyan if unstable)
+            X_single_stable = X[(multi_sol==False) & stability_list[0]]
+            Y_single_stable = Y[(multi_sol==False) & stability_list[0]]
+            U_single_stable = U_list[0][(multi_sol==False) & stability_list[0]]
+            V_single_stable = V_list[0][(multi_sol==False) & stability_list[0]]
+            ax.quiver(X_single_stable, Y_single_stable, U_single_stable, V_single_stable,
+                    angles='xy', color='blue', scale=30, width=0.004,
+                    label='Single Solution (Stable)')
+            X_single_unstable = X[(multi_sol==False) & ~stability_list[0]]
+            Y_single_unstable = Y[(multi_sol==False) & ~stability_list[0]]
+            U_single_unstable = U_list[0][(multi_sol==False) & ~stability_list[0]]
+            V_single_unstable = V_list[0][(multi_sol==False) & ~stability_list[0]]
+            ax.quiver(X_single_unstable, Y_single_unstable, U_single_unstable, V_single_unstable,
+                    angles='xy', color='cyan', scale=30, width=0.004,
+                    label='Single Solution (Unstable)')
+            # Multi solution points (red if stable, black if unstable)
+            X_multi_stable = X[multi_sol & stability_list[0]]
+            Y_multi_stable = Y[multi_sol & stability_list[0]]
+            U_multi_stable = U_list[0][multi_sol & stability_list[0]]
+            V_multi_stable = V_list[0][multi_sol & stability_list[0]]
             ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
-                    angles='xy', color='black', scale=30, width=0.004)
-            X_multi_unstable = X[nonzero_mask & ~stability_list[n]]
-            Y_multi_unstable = Y[nonzero_mask & ~stability_list[n]]
-            U_multi_unstable = U_list[n][nonzero_mask & ~stability_list[n]]
-            V_multi_unstable = V_list[n][nonzero_mask & ~stability_list[n]]
+                    angles='xy', color='black', scale=30, width=0.004,
+                    label='Multiple Solutions (Stable)')
+            X_multi_unstable = X[multi_sol & ~stability_list[0]]
+            Y_multi_unstable = Y[multi_sol & ~stability_list[0]]
+            U_multi_unstable = U_list[0][multi_sol & ~stability_list[0]]
+            V_multi_unstable = V_list[0][multi_sol & ~stability_list[0]]
             ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
-                    angles='xy', color='red', scale=30, width=0.004)
-            # ax.quiver(X[nonzero_mask], Y[nonzero_mask], 
-            #           U_list[n][nonzero_mask], V_list[n][nonzero_mask], 
-            #           angles='xy', color='red', scale=30, width=0.004)
+                    angles='xy', color='red', scale=30, width=0.004,
+                    label='Multiple Solutions (Unstable)')
+            for n in range(1, len(U_list)):
+                # Continue with multi-solution points, coloring them red if stable and black if unstable
+                nonzero_mask = (U_list[n]!=0) | (V_list[n]!=0)
+                X_multi_stable = X[nonzero_mask & stability_list[n]]
+                Y_multi_stable = Y[nonzero_mask & stability_list[n]]
+                U_multi_stable = U_list[n][nonzero_mask & stability_list[n]]
+                V_multi_stable = V_list[n][nonzero_mask & stability_list[n]]
+                ax.quiver(X_multi_stable, Y_multi_stable, U_multi_stable, V_multi_stable,
+                        angles='xy', color='black', scale=30, width=0.004)
+                X_multi_unstable = X[nonzero_mask & ~stability_list[n]]
+                Y_multi_unstable = Y[nonzero_mask & ~stability_list[n]]
+                U_multi_unstable = U_list[n][nonzero_mask & ~stability_list[n]]
+                V_multi_unstable = V_list[n][nonzero_mask & ~stability_list[n]]
+                ax.quiver(X_multi_unstable, Y_multi_unstable, U_multi_unstable, V_multi_unstable,
+                        angles='xy', color='red', scale=30, width=0.004)
         ax.set_aspect('equal')
         ax.set_title('Equilibrium plot')
         if local_plot:
