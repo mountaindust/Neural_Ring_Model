@@ -40,8 +40,8 @@ BOUNDARY_DILATION = 1
 MAX_COUNT = 3   # pin colour scale; >=3 stable equilibria not expected here
 
 # Uniform fine grid for the difference panel.
-DIFF_NX = 121 #241
-DIFF_NY = 121#241
+DIFF_NX = 61 #241
+DIFF_NY = 61 #241
 
 N_WORKERS = 10
 OUTPUT_NAME = "bifurcation_compare_discrim_vs_coupled.png"
@@ -84,7 +84,7 @@ def compute_diff_grid(nbm, pool):
 def main():
     nbm = build_model()
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 6))
+    fig, axes = plt.subplots(1, 3, figsize=(15, 8))
     ax_disc, ax_coup, ax_diff = axes
 
     with Pool(N_WORKERS) as pool:
@@ -99,7 +99,7 @@ def main():
             pool=pool,
             ax=ax_disc,
             stability_criterion='discrim_a',
-            title=r'(a) gamma-only $\mathrm{discrim}_A$ test')
+            title=r'(a) gamma-only discriminant')
 
         print("Panel 2: coupled Jacobian bifurcation diagram (adaptive)...")
         nbm.plot_bifurcation_diagram(
@@ -130,7 +130,7 @@ def main():
     cax = fig.add_axes([0.355, 0.08, 0.30, 0.025])  # below panels (a),(b)
     cb = fig.colorbar(sm_count, cax=cax, orientation='horizontal',
                       ticks=np.arange(0, MAX_COUNT + 1))
-    cb.set_label('# stable self-consistent equilibria')
+    cb.set_label('# stable self-consistent equilibria', fontsize=12)
 
     # Difference panel.
     cmax = max(1, int(np.abs(diff).max()))
@@ -140,16 +140,18 @@ def main():
         aspect='equal', interpolation='nearest',
         cmap='RdBu_r', vmin=-cmax, vmax=cmax)
     nbm.percep_model.targets.plot_targets_to_axis(ax_diff)
-    ax_diff.set_title('(c) (a) - (b): legacy overcount')
+    ax_diff.set_title('(c) a - b overcount')
     cb_diff = fig.colorbar(im_diff, ax=ax_diff,
                            ticks=np.arange(-cmax, cmax + 1),
                            fraction=0.046, pad=0.04)
-    cb_diff.set_label('count difference')
+    cb_diff.set_label('count difference', fontsize=12)
 
     # Common axis cosmetics.
     for ax, label in zip(axes, ['(a)', '(b)', '(c)']):
-        ax.set_xlabel('focal x')
-        ax.set_ylabel('focal y')
+        if label == '(b)':
+            ax.set_xlabel('x obs. coordinate', fontsize=12)
+        if label == '(a)':
+            ax.set_ylabel('y obs. coordinate', fontsize=12)
         ax.set_xlim(XLIM)
         ax.set_ylim(YLIM)
 
@@ -157,7 +159,7 @@ def main():
                  'coupled 3D Jacobian\n'
                  r'(von Mises, $k=0.55$, two circle targets at '
                  r'$(4.33, \pm 2.5)$)',
-                 fontsize=13)
+                 fontsize=13, y=0.92)
 
     fig.tight_layout(rect=[0, 0.10, 1, 0.95])
     fig.subplots_adjust(wspace=0.12)
