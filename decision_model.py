@@ -2253,6 +2253,7 @@ class NeuralBandModel:
 
     def plot_bifurcation_diagram(self, xlim=(0,6), num_x=29, ylim=(-3.5,3.5),
                                  num_y=29, refinement_levels=3, max_count=None,
+                                 boundary_dilation=1,
                                  pool=None, ax=None, title=None, wb_plot=False,
                                  stability_criterion='coupled'):
         '''Plot a 2D colormap showing the number of stable self-consistent
@@ -2284,6 +2285,15 @@ class NeuralBandModel:
             calls (e.g. side-by-side subplots comparing models). If None,
             auto-detected from the data. Values in the data exceeding
             max_count are clipped with a warning.
+        boundary_dilation : int
+            At each refinement pass, also refine cells that share a corner
+            with a cell whose own corners disagree, ``boundary_dilation``
+            steps outward. Default 1 widens the refined band by one cell
+            per side, smoothing stair-step artifacts where a fine-grained
+            transition meets a coarse settled neighbour. 0 reproduces the
+            legacy strict-corner-disagreement behaviour. Cost roughly
+            doubles per dilation step at the base pass; later passes are
+            largely unaffected.
         pool : multiprocessing.Pool, optional
             If provided, evaluate new points at each refinement level in
             parallel.
@@ -2307,6 +2317,7 @@ class NeuralBandModel:
             Otherwise, None.
         '''
         assert refinement_levels >= 0, "refinement_levels must be >= 0"
+        assert boundary_dilation >= 0, "boundary_dilation must be >= 0"
 
         L = refinement_levels
         step0 = 2**L
@@ -2347,25 +2358,61 @@ class NeuralBandModel:
 
         # 3. Refinement loop
         for _ in range(L):
-            settled = []
+            # Pass A: classify each cell purely by its own corner agreement.
             to_refine = []
-            new_points = set()
-            for (I, J, s) in cells:
+            settled = []
+            for cell in cells:
+                I, J, s = cell
                 corner_counts = {cache[(I, J)], cache[(I+s, J)],
                                  cache[(I, J+s)], cache[(I+s, J+s)]}
                 if len(corner_counts) == 1:
-                    settled.append((I, J, s))
+                    settled.append(cell)
                 else:
-                    to_refine.append((I, J, s))
-                    half = s // 2
-                    for m in [(I+half, J), (I, J+half),
-                              (I+s, J+half), (I+half, J+s),
-                              (I+half, J+half)]:
-                        if m not in cache:
-                            new_points.add(m)
+                    to_refine.append(cell)
+
+            # Pass B: dilate the refinement set so that quiet cells touching
+            # a disagreement cell (sharing any corner index) get promoted
+            # too. Each round expands the refined band by one cell. Corner
+            # indices live on the same virtual grid for all cell sizes, so
+            # this naturally couples mixed-grain neighbours that share an
+            # edge or corner.
+            for _round in range(boundary_dilation):
+                if not to_refine:
+                    break
+                boundary_corners = set()
+                for I, J, s in to_refine:
+                    boundary_corners.update(
+                        [(I, J), (I+s, J), (I, J+s), (I+s, J+s)])
+                promoted = []
+                kept_settled = []
+                for cell in settled:
+                    I, J, s = cell
+                    cell_corners = {(I, J), (I+s, J),
+                                    (I, J+s), (I+s, J+s)}
+                    if cell_corners & boundary_corners:
+                        promoted.append(cell)
+                    else:
+                        kept_settled.append(cell)
+                if not promoted:
+                    break
+                to_refine.extend(promoted)
+                settled = kept_settled
+
+            # Pass C: schedule midpoint evaluations for every cell that
+            # will be refined, then evaluate as a single batch (one pool
+            # round-trip per refinement pass).
+            new_points = set()
+            for I, J, s in to_refine:
+                half = s // 2
+                for m in [(I+half, J), (I, J+half),
+                          (I+s, J+half), (I+half, J+s),
+                          (I+half, J+half)]:
+                    if m not in cache:
+                        new_points.add(m)
             evaluate_points(new_points)
+
             cells = settled
-            for (I, J, s) in to_refine:
+            for I, J, s in to_refine:
                 half = s // 2
                 cells.append((I, J, half))
                 cells.append((I+half, J, half))
