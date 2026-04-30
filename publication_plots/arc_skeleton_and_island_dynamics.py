@@ -4,21 +4,28 @@ with long-time dynamics inside the 0-stable island.
 
 Layout (von Mises, k=0.55, two circle targets at (4.33, +/- 2.5)):
 
-  (a) upper-left   : # self-consistent equilibria over the upper-arc window,
-                     with the Hopf curve overlaid in magenta. Higher-resolved
-                     re-make of the LEFT panel of
-                     VM_bifurcations/diagnostic_arc_skeleton.png. Colour
-                     scheme follows the bifurcation_compare plots (discrete
-                     viridis, BoundaryNorm). Legend lives in the middle-right
-                     of the panel.
+  (a) upper-left   : # stable self-consistent equilibria over the upper-arc
+                     window. Adapted from the LEFT panel of
+                     VM_bifurcations/diagnostic_arc_skeleton.png; the legacy
+                     panel showed total equilibria with a Hopf-curve overlay,
+                     but at high resolution that pipeline produced speckles
+                     and a noisy Hopf contour. Switching to the stable-count
+                     map (computed via NeuralBandModel._count_stable_at, the
+                     same maintained API used by bifurcation_compare) cleans
+                     the picture and makes the 0-stable arc visible directly
+                     as a dark band, removing the need for an explicit Hopf
+                     overlay. Colour scheme follows the bifurcation_compare
+                     plots. The (2.10, 2.45) island sample point is marked
+                     with a red X. Legend lives in the middle-right.
   (b) upper-right  : heading theta(t), 0 <= t <= 2000.
                      (= upper-left of diagnostic_island_long_dynamics.png,
                       truncated.)
   (c) lower-left   : |gamma|(t), 0 <= t <= 2000.
                      (= upper-right of diagnostic_island_long_dynamics.png,
                       truncated.)
-  (d) lower-right  : ego_angle(t), full integration window.
-                     (= lower-left of diagnostic_island_long_dynamics.png.)
+  (d) lower-right  : phase portrait (theta, ego_angle) for t > 1000, with
+                     the unstable equilibrium marked.
+                     (= lower-right of diagnostic_island_long_dynamics.png.)
 
 The arc-skeleton grid and the long-time integration are both cached to
 .npy/.npz files in this directory so layout iteration is cheap; delete the
@@ -35,7 +42,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
 from matplotlib.lines import Line2D
-from scipy.optimize import brentq, root
 from scipy.integrate import solve_ivp
 from multiprocessing import Pool
 
@@ -69,49 +75,13 @@ N_WORKERS = 10
 
 OUT_NAME = "arc_skeleton_and_island_dynamics.png"
 HERE = os.path.dirname(os.path.abspath(__file__))
-ARC_CACHE = os.path.join(HERE, "_cache_arc_skeleton.npz")
+# Cache filename includes "stable" so old grids (which stored grid_hopf and
+# total counts) are not picked up after the schema change.
+ARC_CACHE = os.path.join(HERE, "_cache_arc_skeleton_stable.npz")
 ISLAND_CACHE = os.path.join(HERE, "_cache_island_traj.npz")
 
 
-# =========================================================================
-# Arc-skeleton helpers (module-level so they pickle for multiprocessing)
-# =========================================================================
-def find_eqs(focal_loc, R_probe=0.5):
-    theta = np.linspace(-np.pi, np.pi, 2001)
-    im = np.array([nbm.dgamma_dt(gamma=R_probe + 0j, focal_angle=t,
-                                 focal_loc=focal_loc).imag for t in theta])
-    candidates = []
-    for i in range(len(theta) - 1):
-        if im[i] * im[i + 1] < 0:
-            try:
-                tc = brentq(lambda t: nbm.dgamma_dt(
-                    gamma=R_probe + 0j, focal_angle=t,
-                    focal_loc=focal_loc).imag, theta[i], theta[i + 1])
-                candidates.append(tc)
-            except ValueError:
-                pass
-    for extra in (0.0, np.pi, -np.pi):
-        candidates.append(extra)
-    eqs = []
-    for tc in candidates:
-        sol = root(nbm._self_consistent_eq, [tc, R_probe],
-                   args=(focal_loc,), method='hybr', tol=1e-12)
-        if not sol.success:
-            continue
-        teq = model.convert_angles(sol.x[0])
-        Req = sol.x[1]
-        if Req < 0.01 or Req > 1.0:
-            continue
-        residual = nbm.dgamma_dt(gamma=Req + 0j, focal_angle=teq,
-                                 focal_loc=focal_loc)
-        if abs(residual) > 1e-7:
-            continue
-        if any(abs(model.convert_angles(teq - e[0])) < 1e-3 for e in eqs):
-            continue
-        eqs.append((teq, Req))
-    return eqs
-
-
+# Coupled (gamma_re, gamma_im, theta) RHS used by the island integration.
 def coupled_rhs(y, focal_loc):
     gr, gi, th = y
     gamma = gr + 1j * gi
@@ -120,71 +90,40 @@ def coupled_rhs(y, focal_loc):
     return np.array([dg.real, dg.imag, K * R * np.sin(ego)])
 
 
-def coupled_eigs(focal_loc, theta_eq, R_eq, h=1e-6):
-    y0 = np.array([R_eq, 0.0, theta_eq])
-    J = np.zeros((3, 3))
-    for k in range(3):
-        yp = y0.copy(); yp[k] += h
-        ym = y0.copy(); ym[k] -= h
-        J[:, k] = (coupled_rhs(yp, focal_loc) -
-                   coupled_rhs(ym, focal_loc)) / (2 * h)
-    return np.linalg.eigvals(J)
-
-
-def cell_summary(args):
-    """Return (key, n_total, hopf_indicator). hopf_indicator = max real part
-    of complex eigenvalues across all equilibria at this cell, NaN if no
-    complex eigenvalues exist."""
-    key, x, y = args
-    fl = np.array([x, y])
-    eqs = find_eqs(fl)
-    n_total = len(eqs)
-    hopf_re = -np.inf
-    for (teq, Req) in eqs:
-        eigs = coupled_eigs(fl, teq, Req)
-        complex_mask = np.abs(np.imag(eigs)) > 1e-6
-        if complex_mask.any():
-            cre = float(np.max(np.real(eigs[complex_mask])))
-            if cre > hopf_re:
-                hopf_re = cre
-    if not np.isfinite(hopf_re):
-        hopf_re = np.nan
-    return key, n_total, hopf_re
-
-
 # =========================================================================
 # Compute / cache the arc-skeleton grid
 # =========================================================================
 def compute_arc_grid(regenerate=False):
+    """Evaluate # stable self-consistent equilibria on a uniform grid via
+    NeuralBandModel._count_stable_at (the same routine the bifurcation
+    plots use). Returns grid_n with shape (ARC_NY, ARC_NX)."""
     if (not regenerate) and os.path.exists(ARC_CACHE):
         d = np.load(ARC_CACHE)
         if (d['nx'] == ARC_NX and d['ny'] == ARC_NY
                 and tuple(d['xlim']) == ARC_XLIM
                 and tuple(d['ylim']) == ARC_YLIM):
             print(f"Loaded arc-skeleton grid from {ARC_CACHE}")
-            return d['xs'], d['ys'], d['grid_n'], d['grid_hopf']
+            return d['grid_n']
         print("Cache parameters mismatch; recomputing arc-skeleton grid.")
 
     xs = np.linspace(ARC_XLIM[0], ARC_XLIM[1], ARC_NX)
     ys = np.linspace(ARC_YLIM[0], ARC_YLIM[1], ARC_NY)
-    args_list = [((j, i), xs[i], ys[j])
+    args_list = [((j, i), xs[i], ys[j], 'coupled')
                  for j in range(ARC_NY) for i in range(ARC_NX)]
     print(f"Scanning arc-skeleton grid: {ARC_NX}x{ARC_NY} = "
-          f"{ARC_NX * ARC_NY} cells...")
+          f"{ARC_NX * ARC_NY} cells (# stable equilibria, coupled)...")
     with Pool(N_WORKERS) as pool:
-        results = pool.map(cell_summary, args_list)
+        results = pool.map(nbm._count_stable_at, args_list)
 
     grid_n = np.zeros((ARC_NY, ARC_NX), dtype=int)
-    grid_hopf = np.full((ARC_NY, ARC_NX), np.nan)
-    for (j, i), n, h in results:
-        grid_n[j, i] = n
-        grid_hopf[j, i] = h
+    for (j, i), c in results:
+        grid_n[j, i] = c
 
-    np.savez(ARC_CACHE, xs=xs, ys=ys, grid_n=grid_n, grid_hopf=grid_hopf,
+    np.savez(ARC_CACHE, grid_n=grid_n,
              nx=ARC_NX, ny=ARC_NY, xlim=np.array(ARC_XLIM),
              ylim=np.array(ARC_YLIM))
     print(f"Saved arc-skeleton grid to {ARC_CACHE}")
-    return xs, ys, grid_n, grid_hopf
+    return grid_n
 
 
 # =========================================================================
@@ -219,7 +158,7 @@ def compute_island_trajectory(regenerate=False):
 # Plot
 # =========================================================================
 def main(regenerate=False):
-    xs, ys, grid_n, grid_hopf = compute_arc_grid(regenerate=regenerate)
+    grid_n = compute_arc_grid(regenerate=regenerate)
     t, gr, gi, th = compute_island_trajectory(regenerate=regenerate)
     gamma = gr + 1j * gi
     R_arr = np.abs(gamma)
@@ -232,57 +171,64 @@ def main(regenerate=False):
                           ncolors=nmax + 1)
 
     fig, axes = plt.subplots(2, 2, figsize=(13, 10))
-    ax_arc, ax_th, ax_R, ax_ego = (axes[0, 0], axes[0, 1],
-                                    axes[1, 0], axes[1, 1])
+    ax_arc, ax_th, ax_R, ax_phase = (axes[0, 0], axes[0, 1],
+                                      axes[1, 0], axes[1, 1])
 
-    # ---- (a) arc skeleton ----
+    # ---- (a) arc skeleton: # stable self-consistent equilibria ----
     ax_arc.imshow(grid_n, origin='lower',
                   extent=[ARC_XLIM[0], ARC_XLIM[1],
                           ARC_YLIM[0], ARC_YLIM[1]],
                   aspect='equal', interpolation='nearest',
                   cmap=cmap_n, norm=norm_n)
-    cs = ax_arc.contour(xs, ys, grid_hopf, levels=[0.0],
-                        colors='magenta', linewidths=2)
     targets.plot_targets_to_axis(ax_arc)
+    # Mark the island sample point used for panels (b)-(d).
+    ax_arc.plot([ISLAND_FOCAL_LOC[0]], [ISLAND_FOCAL_LOC[1]],
+                marker='x', color='red', markersize=12,
+                markeredgewidth=2.5, linestyle='')
     ax_arc.set_xlim(ARC_XLIM)
     ax_arc.set_ylim(ARC_YLIM)
-    ax_arc.set_xlabel('focal x')
-    ax_arc.set_ylabel('focal y')
-    ax_arc.set_title('(a) # self-consistent equilibria, with Hopf curve')
+    ax_arc.set_xlabel('observer x-coordinate', fontsize=12)
+    ax_arc.set_ylabel('observer y-coordinate', fontsize=12)
+    ax_arc.set_title('(a) # stable self-consistent equilibria')
 
-    # Legend: integer-count swatches + Hopf curve handle, mid-right.
+    # Legend: integer-count swatches + island-sample marker, mid-right.
     legend_handles = [Line2D([], [], marker='s', linestyle='',
                              markersize=11, color=cmap_n(norm_n(n)),
                              label=str(n))
                       for n in range(nmax + 1)]
-    legend_handles.append(Line2D([], [], color='magenta', linewidth=2,
-                                  label='Hopf curve'))
+    legend_handles.append(Line2D([], [], marker='x', linestyle='',
+                                  color='red', markersize=10,
+                                  markeredgewidth=2.5,
+                                  label='island sample'))
     ax_arc.legend(handles=legend_handles,
-                  title='# equilibria',
-                  loc='center right', frameon=True, framealpha=0.92,
+                  title='# stable\nequilibria',
+                  loc='upper right', frameon=True, framealpha=0.92,
                   fontsize=9, title_fontsize=9)
 
     # ---- (b) heading vs time, t <= 2000 ----
     mask_trunc = t <= ISLAND_T_TRUNC
     ax_th.plot(t[mask_trunc], th_wrapped[mask_trunc], lw=0.5)
-    ax_th.set_xlabel('t')
-    ax_th.set_ylabel(r'$\theta$ (heading)')
+    ax_th.set_xlabel('t', fontsize=12)
+    ax_th.set_ylabel(r'$\theta$ (heading)', fontsize=12)
     ax_th.set_title(r'(b) heading $\theta(t)$, $t \leq 2000$')
     ax_th.set_xlim(0, ISLAND_T_TRUNC)
 
     # ---- (c) |gamma| vs time, t <= 2000 ----
     ax_R.plot(t[mask_trunc], R_arr[mask_trunc], lw=0.5)
-    ax_R.set_xlabel('t')
-    ax_R.set_ylabel(r'$|\gamma|$')
+    ax_R.set_xlabel('t', fontsize=12)
+    ax_R.set_ylabel(r'$|\gamma|$', fontsize=12)
     ax_R.set_title(r'(c) $|\gamma|(t)$, $t \leq 2000$')
     ax_R.set_xlim(0, ISLAND_T_TRUNC)
 
-    # ---- (d) ego_angle vs time, full integration ----
-    ax_ego.plot(t, ego_arr, lw=0.5)
-    ax_ego.set_xlabel('t')
-    ax_ego.set_ylabel('ego angle')
-    ax_ego.set_title(r'(d) ego angle $(t)$, full integration')
-    ax_ego.set_xlim(0, ISLAND_T_FINAL)
+    # ---- (d) phase portrait (theta, ego_angle) for t > 1000 ----
+    late_mask = t > 1000
+    ax_phase.plot(th_wrapped[late_mask], ego_arr[late_mask], lw=0.5)
+    ax_phase.plot([ISLAND_THETA_EQ], [0], 'rx', markersize=12,
+                  label=fr'unstable eq ($\theta={ISLAND_THETA_EQ:.3f}$)')
+    ax_phase.set_xlabel(r'$\theta$', fontsize=12)
+    ax_phase.set_ylabel('ego angle', fontsize=12)
+    ax_phase.set_title(r'(d) phase portrait, $t > 1000$')
+    ax_phase.legend(loc='upper left', fontsize=9)
 
     fig.suptitle('Upper 0-stable arc and limit-cycle dynamics inside the '
                  'island\n'
@@ -290,7 +236,7 @@ def main(regenerate=False):
                  r'$(4.33, \pm 2.5)$; island sample at '
                  fr'$(x,y)=({ISLAND_FOCAL_LOC[0]:.2f},'
                  fr'{ISLAND_FOCAL_LOC[1]:.2f})$)',
-                 fontsize=13, y=0.985)
+                 fontsize=14, y=0.985)
 
     fig.subplots_adjust(left=0.07, right=0.97, top=0.90, bottom=0.07,
                         wspace=0.22, hspace=0.28)
