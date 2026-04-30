@@ -1374,18 +1374,24 @@ class PerceptionModel:
 
 
     def plot_neural_weight(self, polar=False, ax=None, wb_plot=False):
-        '''Plot the neural weighting function on [-pi, pi], with the max weight 
-        normalized to 1.
+        '''Plot the neural weighting function on [-pi, pi], with the max weight
+        normalized to 1. For non-polar plots, also overlays the physical-to-
+        neural angle mapping (theta -> hat{theta}) on a twin y-axis (radians),
+        using a dashed line in the same color as the corresponding weight
+        curve.
 
         Parameters
         ----------
         polar : bool, optional
-            If True, use a polar plot. Default False (linear plot).
+            If True, use a polar plot. Default False (linear plot). The angle
+            mapping overlay is only drawn for non-polar plots.
         ax : matplotlib axis, optional
             If provided, the curve is added to this axis (no figure created,
             no plt.show). For polar=True, the axis must have been created
             with projection='polar'. If None, a new figure and axis are
-            created and plt.show() is called.
+            created and plt.show() is called. When plotting multiple models
+            on the same non-polar axis, a single twin axis is reused so all
+            angle-mapping curves share one right-hand y-axis.
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
 
@@ -1412,7 +1418,8 @@ class PerceptionModel:
         else:
             local_plot = False
 
-        ax.plot(theta, weights, label=self.neural_weight)
+        weight_label = f'{self.neural_weight} weight'
+        weight_line, = ax.plot(theta, weights, label=weight_label)
 
         if polar:
             # Match the tick scheme used in plot_blocked_signals, but with
@@ -1422,21 +1429,50 @@ class PerceptionModel:
                       r'$\frac{3\pi}{4}$', r'$\pm\pi$', r'$-\frac{3\pi}{4}$',
                       r'$-\frac{\pi}{2}$', r'$-\frac{\pi}{4}$']
             ax.set_thetagrids(angles_deg, labels)
-        else:
-            tick_locs = np.array([-np.pi, -3*np.pi/4, -np.pi/2, -np.pi/4, 0,
-                                  np.pi/4, np.pi/2, 3*np.pi/4, np.pi])
-            tick_labels = [r'$-\pi$', r'$-\frac{3\pi}{4}$', r'$-\frac{\pi}{2}$',
-                           r'$-\frac{\pi}{4}$', r'$0$', r'$\frac{\pi}{4}$',
-                           r'$\frac{\pi}{2}$', r'$\frac{3\pi}{4}$', r'$\pi$']
-            ax.set_xticks(tick_locs)
-            ax.set_xticklabels(tick_labels)
-            ax.set_xlabel(r'$\theta$')
-            ax.set_ylabel('Neural weight')
-            ax.set_xlim(-np.pi, np.pi)
+            if local_plot:
+                ax.set_title('Neural Weighting Function')
+                ax.legend()
+                plt.show()
+            else:
+                return ax
+            return
+
+        tick_locs = np.array([-np.pi, -3*np.pi/4, -np.pi/2, -np.pi/4, 0,
+                              np.pi/4, np.pi/2, 3*np.pi/4, np.pi])
+        tick_labels = [r'$-\pi$', r'$-\frac{3\pi}{4}$', r'$-\frac{\pi}{2}$',
+                       r'$-\frac{\pi}{4}$', r'$0$', r'$\frac{\pi}{4}$',
+                       r'$\frac{\pi}{2}$', r'$\frac{3\pi}{4}$', r'$\pi$']
+        ax.set_xticks(tick_locs)
+        ax.set_xticklabels(tick_labels)
+        ax.set_xlabel(r'$\theta$')
+        ax.set_ylabel('Neural weight')
+        ax.set_xlim(-np.pi, np.pi)
+
+        # Reuse a previously-attached twin so multiple models share one
+        # right-hand axis when plotted on the same ax.
+        ax2 = getattr(ax, '_neural_angle_twin', None)
+        if ax2 is None:
+            ax2 = ax.twinx()
+            ax._neural_angle_twin = ax2
+            ax2.set_ylabel(r'$\hat{\theta}$')
+            ax2.set_yticks(tick_locs)
+            ax2.set_yticklabels(tick_labels)
+            ax2.set_ylim(-np.pi, np.pi)
+
+        neural_theta = self.get_neural_angle(theta)
+        angle_label = f'{self.neural_weight} angle map'
+        ax2.plot(theta, neural_theta, color=weight_line.get_color(),
+                 linestyle='--', label=angle_label)
+
+        # Build a combined legend so callers do not need to know about the
+        # twin axis. Calling this each time means the legend stays in sync
+        # as additional models are added to the same ax.
+        h1, l1 = ax.get_legend_handles_labels()
+        h2, l2 = ax2.get_legend_handles_labels()
+        ax.legend(h1 + h2, l1 + l2, loc='upper left')
 
         if local_plot:
             ax.set_title('Neural Weighting Function')
-            ax.legend()
             plt.show()
         else:
             return ax
