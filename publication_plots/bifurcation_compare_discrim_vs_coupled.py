@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from multiprocessing import Pool
 
 import decision_model as model
@@ -33,15 +34,15 @@ XLIM = (0.0, 6.0)
 YLIM = (-3.5, 3.5)
 
 # Plot-bifurcation-diagram settings for panels 1 and 2 (adaptive).
-NUM_X = 31 #61
-NUM_Y = 31 #61
-REFINEMENT_LEVELS = 2 #4
+NUM_X = 61
+NUM_Y = 61
+REFINEMENT_LEVELS = 4
 BOUNDARY_DILATION = 1
 MAX_COUNT = 3   # pin colour scale; >=3 stable equilibria not expected here
 
 # Uniform fine grid for the difference panel.
-DIFF_NX = 61 #241
-DIFF_NY = 61 #241
+DIFF_NX = 241
+DIFF_NY = 241
 
 N_WORKERS = 10
 OUTPUT_NAME = "bifurcation_compare_discrim_vs_coupled.png"
@@ -84,7 +85,7 @@ def compute_diff_grid(nbm, pool):
 def main():
     nbm = build_model()
 
-    fig, axes = plt.subplots(1, 3, figsize=(15, 8))
+    fig, axes = plt.subplots(1, 3, figsize=(12, 6.5))
     ax_disc, ax_coup, ax_diff = axes
 
     with Pool(N_WORKERS) as pool:
@@ -127,7 +128,7 @@ def main():
     sm_count = plt.cm.ScalarMappable(cmap=cmap_count, norm=norm_count)
     sm_count.set_array([])
 
-    cax = fig.add_axes([0.355, 0.08, 0.30, 0.025])  # below panels (a),(b)
+    cax = fig.add_axes([0.35, 0.08, 0.28, 0.025])  # below panels (a),(b)
     cb = fig.colorbar(sm_count, cax=cax, orientation='horizontal',
                       ticks=np.arange(0, MAX_COUNT + 1))
     cb.set_label('# stable self-consistent equilibria', fontsize=12)
@@ -141,17 +142,28 @@ def main():
         cmap='RdBu_r', vmin=-cmax, vmax=cmax)
     nbm.percep_model.targets.plot_targets_to_axis(ax_diff)
     ax_diff.set_title('(c) a - b overcount')
-    cb_diff = fig.colorbar(im_diff, ax=ax_diff,
-                           ticks=np.arange(-cmax, cmax + 1),
-                           fraction=0.046, pad=0.04)
+
+    # Allocate matching right-side cax slots on all three panels so that
+    # aspect='equal' resolves to the same axes height. Panels (a) and (b)
+    # get hidden spacer axes; panel (c) gets the visible diff colorbar.
+    cax_size = "4%"
+    cax_pad = 0.08
+    for ax in (ax_disc, ax_coup):
+        spacer = make_axes_locatable(ax).append_axes(
+            "right", size=cax_size, pad=cax_pad)
+        spacer.axis('off')
+    cax_diff = make_axes_locatable(ax_diff).append_axes(
+        "right", size=cax_size, pad=cax_pad)
+    cb_diff = fig.colorbar(im_diff, cax=cax_diff,
+                           ticks=np.arange(-cmax, cmax + 1))
     cb_diff.set_label('count difference', fontsize=12)
 
     # Common axis cosmetics.
     for ax, label in zip(axes, ['(a)', '(b)', '(c)']):
         if label == '(b)':
-            ax.set_xlabel('x obs. coordinate', fontsize=12)
+            ax.set_xlabel('observer x-coordinate', fontsize=12)
         if label == '(a)':
-            ax.set_ylabel('y obs. coordinate', fontsize=12)
+            ax.set_ylabel('observer y-coordinate', fontsize=12)
         ax.set_xlim(XLIM)
         ax.set_ylim(YLIM)
 
@@ -159,7 +171,7 @@ def main():
                  'coupled 3D Jacobian\n'
                  r'(von Mises, $k=0.55$, two circle targets at '
                  r'$(4.33, \pm 2.5)$)',
-                 fontsize=13, y=0.92)
+                 fontsize=13, y=0.88)
 
     fig.tight_layout(rect=[0, 0.10, 1, 0.95])
     fig.subplots_adjust(wspace=0.12)
