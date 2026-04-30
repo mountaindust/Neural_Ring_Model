@@ -1478,28 +1478,49 @@ class PerceptionModel:
             return ax
 
 
-    def plot_blocked_signals(self, wb_plot=False):
-        '''Plots visible targets, their angular direction from the observer, 
-        their associated neural angles, and also the signal distribution from 
-        the point of view of the observer normalized so that the maximum signal 
+    def plot_blocked_signals(self, wb_plot=False, ax=None):
+        '''Plots visible targets, their angular direction from the observer,
+        their associated neural angles, and also the signal distribution from
+        the point of view of the observer normalized so that the maximum signal
         strength is 1.
 
         Use as a test for _get_target_signals and get_neural_angle.
-        
+
         Set wb_plot to True if plotting in a Jupyber notebook
+
+        Parameters
+        ----------
+        wb_plot : bool
+            whether or not plotting in a Jupyter notebook
+        ax : matplotlib axis, optional
+            If provided, only the target-geometry panel (targets plus the
+            black perception lines and red dashed neural-direction lines)
+            is drawn onto this axis; the polar perception-signal panel is
+            skipped and no figure is created or shown. If None (default),
+            a new figure is created with both the target-geometry and the
+            polar perception-signal subplots, and plt.show() is called.
+
+        Returns
+        -------
+        ax : matplotlib axis, if ax was provided as an argument.
+            Otherwise, None.
         '''
 
         vis_angles, signals = self._get_target_signals(mesh_signal=True)
         neur_angles = self.get_neural_angle(vis_angles)
 
-        if wb_plot:
-            plt.figure(figsize=(8,5))
+        if ax is None:
+            local_plot = True
+            if wb_plot:
+                plt.figure(figsize=(8,5))
+            else:
+                plt.figure(figsize=(12,6))
+            ax1 = plt.subplot(121)
         else:
-            plt.figure(figsize=(12,6))
+            local_plot = False
+            ax1 = ax
 
         ###### Target Geometry Plot ######
-        ax1 = plt.subplot(121)
-
         # First, plot the targets themselves
         self.targets.plot_targets_to_axis(ax1)
 
@@ -1515,10 +1536,13 @@ class PerceptionModel:
             y_neur = (self.focal_loc[1],self.focal_loc[1] + r*np.sin(neur_angles_allo[n]))
             ax1.plot(x_neur, y_neur, 'r--', alpha=0.5)
         ax1.arrow(self.focal_loc[0],self.focal_loc[1],
-                  0.5*np.cos(self.focal_angle),0.5*np.sin(self.focal_angle), 
+                  0.5*np.cos(self.focal_angle),0.5*np.sin(self.focal_angle),
                 width=0.1, head_length=0.25)
         ax1.set_aspect('equal')
         ax1.set_title('Target Geometry and\n Neural Directions')
+
+        if not local_plot:
+            return ax1
 
         ###### Perception Signal Plot ######
         ax2 = plt.subplot(122, projection='polar')
