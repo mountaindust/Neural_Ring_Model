@@ -8,6 +8,7 @@ _integrate_neural_weight and the a/b/k property-setter rebuild path.
 
 import numpy as np
 from scipy.stats import vonmises
+from scipy.stats import beta as beta_dist
 from decision_model import PerceptionModel as PM, Targets
 
 pi = np.pi
@@ -217,6 +218,89 @@ g_neg = pm_vm._neural_angle_vonmises(-theta_sym)
 check_array("vonmises antisymmetry G(-x) = -G(x)", g_neg, -g_pos, tol=1e-12)
 
 # ========================================================
+print("\n=== Symmetric Beta roundtrip ===")
+# ========================================================
+
+# symmetric_beta uses scipy.stats.beta.cdf / .ppf directly (no spline cache),
+# so the only error source is scipy's internal accuracy. Tight tolerance.
+pm_sb = PM(neural_weight='symmetric_beta', neural_angle='integral')
+alpha_val = pm_sb.alpha
+b_sb = pm_sb.b
+
+# Stay inside the well-conditioned interior. Near +/-b, scipy.beta.cdf
+# saturates to 0.0/1.0 in floating point (for alpha = 5, this happens
+# within ~1e-3 of the boundary), losing the information needed to roundtrip
+# back exactly. This is intrinsic to the floating-point cdf, not a wrapper bug.
+theta_rt = rng.uniform(-0.95*b_sb, 0.95*b_sb, size=5000)
+y_rt = pm_sb._neural_angle_symmetric_beta(theta_rt)
+theta_back = pm_sb._neural_angle_symmetric_beta_inverse(y_rt)
+check_array("symmetric_beta roundtrip theta -> y -> theta", theta_back,
+            theta_rt, tol=1e-11)
+
+y_dir = rng.uniform(-pi + 1e-3, pi - 1e-3, size=5000)
+theta_mid = pm_sb._neural_angle_symmetric_beta_inverse(y_dir)
+y_back = pm_sb._neural_angle_symmetric_beta(theta_mid)
+check_array("symmetric_beta roundtrip y -> theta -> y", y_back, y_dir,
+            tol=1e-11)
+
+# ========================================================
+print("\n=== Symmetric Beta symmetry and endpoints ===")
+# ========================================================
+
+check_scalar("symmetric_beta G(0) == 0",
+             pm_sb._neural_angle_symmetric_beta(0.0), 0.0, tol=0.0)
+check_scalar("symmetric_beta G(b) == pi",
+             pm_sb._neural_angle_symmetric_beta(b_sb), pi, tol=0.0)
+check_scalar("symmetric_beta G(-b) == -pi",
+             pm_sb._neural_angle_symmetric_beta(-b_sb), -pi, tol=0.0)
+check_scalar("symmetric_beta G(1.5*b) saturates to pi",
+             pm_sb._neural_angle_symmetric_beta(1.5*b_sb), pi, tol=0.0)
+check_scalar("symmetric_beta G(-1.5*b) saturates to -pi",
+             pm_sb._neural_angle_symmetric_beta(-1.5*b_sb), -pi, tol=0.0)
+check_scalar("symmetric_beta Ginv(pi) == b",
+             pm_sb._neural_angle_symmetric_beta_inverse(pi), b_sb, tol=0.0)
+check_scalar("symmetric_beta Ginv(-pi) == -b",
+             pm_sb._neural_angle_symmetric_beta_inverse(-pi), -b_sb, tol=0.0)
+
+theta_sym = rng.uniform(-b_sb, b_sb, size=500)
+g_pos = pm_sb._neural_angle_symmetric_beta(theta_sym)
+g_neg = pm_sb._neural_angle_symmetric_beta(-theta_sym)
+check_array("symmetric_beta antisymmetry G(-x) = -G(x)", g_neg, -g_pos,
+            tol=1e-12)
+
+# ========================================================
+print("\n=== Symmetric Beta validation ===")
+# ========================================================
+
+# alpha < 1 must raise; alpha = 1 must NOT raise; b <= 0 must raise.
+try:
+    PM._symmetric_beta(0.0, alpha=0.5, b=pi)
+except ValueError:
+    passed += 1
+    print("  ok symmetric_beta rejects alpha=0.5")
+else:
+    failed += 1
+    print("FAIL symmetric_beta should reject alpha=0.5")
+
+try:
+    PM._symmetric_beta(0.0, alpha=1.0, b=pi)
+except ValueError:
+    failed += 1
+    print("FAIL symmetric_beta should accept alpha=1.0")
+else:
+    passed += 1
+    print("  ok symmetric_beta accepts alpha=1.0")
+
+try:
+    PM._symmetric_beta(0.0, alpha=2.0, b=0.0)
+except ValueError:
+    passed += 1
+    print("  ok symmetric_beta rejects b=0.0")
+else:
+    failed += 1
+    print("FAIL symmetric_beta should reject b=0.0")
+
+# ========================================================
 print("\n=== _integrate_neural_weight invariance (cutoff) ===")
 # ========================================================
 
@@ -263,6 +347,23 @@ check_array("e2e vonmises: rho matches reference path", rho_spline_vm,
             rho_ref_vm, tol=1e-10)
 
 # ========================================================
+print("\n=== _get_target_signals dispatch (symmetric_beta) ===")
+# ========================================================
+
+# symmetric_beta has no slow-vs-fast path split (no spline cache), so we
+# only need to verify that the dispatch in _integrate_neural_weight reaches
+# the symmetric_beta branch and produces a normalized rho of the right shape.
+pm_e2e_sb = PM(targets=tgts, focal_loc=(5.0, 10.0), focal_angle=0.1,
+               neural_weight='symmetric_beta', neural_angle='integral')
+c_sb, rho_sb = pm_e2e_sb._get_target_signals()
+check_scalar("e2e symmetric_beta: rho.sum() == 1", float(rho_sb.sum()), 1.0,
+             tol=1e-12)
+check_scalar("e2e symmetric_beta: rho length matches target count",
+             len(rho_sb), tgts.locs.shape[0], tol=0.0)
+check_scalar("e2e symmetric_beta: c_angles length matches target count",
+             len(c_sb), tgts.locs.shape[0], tol=0.0)
+
+# ========================================================
 print("\n=== Parameter sweep (cutoff) ===")
 # ========================================================
 
@@ -289,6 +390,25 @@ for k_test in [0.5, 1.0, 3.0, 5.0, 10.0]:
     sp = pm_sweep._neural_angle_vonmises(theta_sweep)
     rf = PM._vonmises_integral(theta_sweep, k_test)
     check_array(f"vonmises sweep k={k_test}", sp, rf, tol=1e-10)
+
+# ========================================================
+print("\n=== Parameter sweep (symmetric_beta) ===")
+# ========================================================
+
+# Single regime: direct scipy evaluation is machine-precision for any alpha,
+# including the formerly marginal regime 1 < alpha < 3 where a cubic-spline
+# cache could not resolve the limited boundary smoothness.
+for alpha_test, b_test in [(1.0, pi), (1.25, pi), (1.5, pi), (1.75, pi),
+                           (2.0, pi), (3.0, pi), (5.0, pi), (10.0, pi),
+                           (3.0, 0.8*pi), (5.0, 0.5*pi)]:
+    pm_sweep = PM(neural_weight='symmetric_beta', neural_angle='integral')
+    pm_sweep.alpha = alpha_test
+    pm_sweep.b = b_test
+    theta_sweep = rng.uniform(-b_test, b_test, size=500)
+    sp = pm_sweep._neural_angle_symmetric_beta(theta_sweep)
+    rf = PM._symmetric_beta_integral(theta_sweep, alpha_test, b_test)
+    check_array(f"symmetric_beta sweep alpha={alpha_test:.3f}, b={b_test:.3f}",
+                sp, rf, tol=1e-12)
 
 # ========================================================
 print("\n=== Property-setter rebuild ===")
@@ -324,6 +444,23 @@ check_scalar(
     tol=1e-10,
 )
 
+pm_rb_sb = PM(neural_weight='symmetric_beta', neural_angle='integral')
+pm_rb_sb.alpha = 3.0
+check_scalar(
+    "symmetric_beta alpha-setter accuracy",
+    pm_rb_sb._neural_angle_symmetric_beta(0.7),
+    float(PM._symmetric_beta_integral(0.7, 3.0, pm_rb_sb.b)),
+    tol=0.0,
+)
+
+pm_rb_sb.b = 0.7*pi
+check_scalar(
+    "symmetric_beta b-setter accuracy",
+    pm_rb_sb._neural_angle_symmetric_beta(0.4),
+    float(PM._symmetric_beta_integral(0.4, pm_rb_sb.alpha, 0.7*pi)),
+    tol=0.0,
+)
+
 # Single build during __init__: patch the counter and confirm exactly one call.
 build_count = {'n': 0}
 orig_build = PM._build_integral_splines
@@ -344,6 +481,11 @@ try:
     build_count['n'] = 0
     _ = PM(neural_weight='vonmises', neural_angle='integral')
     check_scalar("vonmises __init__ builds splines exactly once",
+                 build_count['n'], 1, tol=0.0)
+
+    build_count['n'] = 0
+    _ = PM(neural_weight='symmetric_beta', neural_angle='integral')
+    check_scalar("symmetric_beta __init__ builds splines exactly once",
                  build_count['n'], 1, tol=0.0)
 
     build_count['n'] = 0

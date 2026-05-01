@@ -11,6 +11,7 @@ from scipy.optimize import root, brentq
 from scipy.interpolate import RectBivariateSpline, CubicSpline
 from scipy.special import i0
 from scipy.stats import vonmises
+from scipy.stats import beta as beta_dist
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
 
@@ -431,7 +432,7 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        neural_weight : {'cutoff', 'vonmises', 'tanh_plus', None} (default = 'cutoff')
+        neural_weight : {'cutoff', 'vonmises', 'symmetric_beta', 'tanh_plus', None} (default = 'cutoff')
             Weighting function for the neural band.
                 - 'cutoff' : a smooth cutoff function that is 1 in front and
                              0 in back, with a smooth transition in between.
@@ -442,6 +443,11 @@ class PerceptionModel:
                              The single parameter k controls the width: larger k
                              gives a narrower peak (stronger front bias). See
                              _vonmises for details.
+                - 'symmetric_beta' : a symmetric Beta(alpha, alpha) pdf rescaled
+                             to the support [-b, b]. Parameters alpha (>= 1) and
+                             b (> 0); alpha = 1 is uniform on [-b, b], larger
+                             alpha gives a narrower peak. See _symmetric_beta
+                             for details.
                 - None : no weighting, i.e. flat. All angles are weighted equally.
         neural_angle : {'integral', 'power', None} (default = 'integral')
             This defines a mapping between perceived center of each target and
@@ -495,6 +501,7 @@ class PerceptionModel:
         self._a = None
         self._b = None
         self._k = None
+        self._alpha = None
         if neural_weight == 'cutoff':
             # = 1 when |theta|<self.a, = 0 when |theta|>self.b, smooth in between
             self._a = np.pi/3
@@ -502,6 +509,10 @@ class PerceptionModel:
         elif neural_weight == 'vonmises':
             # f(theta) = exp(k*cos(theta))/(2*pi*I0(k)); larger k = narrower peak.
             self._k = 1.0
+        elif neural_weight == 'symmetric_beta':
+            # Beta(alpha, alpha) rescaled to [-b, b]; larger alpha = narrower peak.
+            self._alpha = 5.0
+            self._b = np.pi
         # elif neural_weight == 'tanh_plus':
         #     self._a = 2
         #     self._b = 2*np.pi/3
@@ -556,6 +567,15 @@ class PerceptionModel:
         self._k = value
         self._build_integral_splines()
 
+    @property
+    def alpha(self):
+        return self._alpha
+
+    @alpha.setter
+    def alpha(self, value):
+        self._alpha = value
+        self._build_integral_splines()
+
     def _build_integral_splines(self):
         """Precompute spline lookups for the 'integral' neural-angle transform.
 
@@ -573,6 +593,8 @@ class PerceptionModel:
         self._cutoff_inverse_spline = None
         self._vonmises_forward_spline = None
         self._vonmises_inverse_spline = None
+        # symmetric_beta uses scipy.stats.beta.cdf directly (machine
+        # precision for any alpha; no spline cache).
 
         # Splines are used both by the 'integral' neural-angle transformation
         # (forward + inverse) and by _integrate_neural_weight (forward only,
@@ -636,7 +658,6 @@ class PerceptionModel:
                 theta_nodes, y_nodes, bc_type='natural')
             self._vonmises_inverse_spline = CubicSpline(
                 y_nodes, theta_nodes, bc_type='natural')
-
     def _neural_angle_cutoff(self, theta):
         """Spline evaluation of F(theta; a, b) for the smooth-cutoff weight.
 
@@ -685,7 +706,26 @@ class PerceptionModel:
         result = np.where(y_arr == np.pi, np.pi, result)
         result = np.where(y_arr == -np.pi, -np.pi, result)
         return float(result) if scalar else result
-    
+
+    def _neural_angle_symmetric_beta(self, theta):
+        """Direct evaluation of G(theta; alpha, b) for the symmetric Beta weight.
+
+        Calls scipy.stats.beta.cdf via _symmetric_beta_integral. Machine-precision
+        accurate for any alpha >= 1; saturates to +-pi outside [-b, b] (scipy's
+        cdf is exactly 0 below -b and 1 above b, which carries through). No
+        spline cache: for symmetric Beta with low alpha (1 < alpha < 3), the
+        cdf is only C^(alpha-1) at +-b, and a global cubic spline cannot
+        resolve that. Direct scipy is ~10x slower than a spline lookup but
+        machine-precision everywhere.
+        """
+        return PerceptionModel._symmetric_beta_integral(
+            theta, self._alpha, self._b)
+
+    def _neural_angle_symmetric_beta_inverse(self, y):
+        """Direct evaluation of G^{-1}(y; alpha, b) for the symmetric Beta weight."""
+        return PerceptionModel._symmetric_beta_int_inverse(
+            y, self._alpha, self._b)
+
     @staticmethod
     def _smooth_cutoff(x, a, b):
         """
@@ -923,6 +963,101 @@ class PerceptionModel:
         result = np.where(y == -np.pi, -np.pi, result)
         return result.item() if scalar_input else result
 
+    @staticmethod
+    def _symmetric_beta(theta, alpha, b):
+        """A symmetric Beta(alpha, alpha) pdf rescaled to [-b, b].
+
+        With u = (theta + b)/(2b), the pdf is
+            f(theta) = (1/(2b)) * u^(alpha-1) * (1-u)^(alpha-1) / B(alpha, alpha)
+        on [-b, b], and zero outside. Symmetric about 0; alpha = 1 gives the
+        uniform pdf 1/(2b); larger alpha gives a narrower peak at 0.
+
+        Parameters
+        ----------
+        theta : float or array_like
+            Angle(s) in radians.
+        alpha : float
+            Beta shape parameter (alpha = beta); must satisfy alpha >= 1.
+        b : float
+            Half-width of the support; must be positive.
+
+        Returns
+        -------
+        float or ndarray : The value(s) of the pdf at the given theta.
+        """
+        if alpha < 1:
+            raise ValueError(f"Parameter alpha must satisfy alpha >= 1 (alpha={alpha}).")
+        if b <= 0:
+            raise ValueError(f"Parameter b must be positive (b={b}).")
+        theta = np.asarray(theta, dtype=float)
+        scalar_input = theta.ndim == 0
+        result = beta_dist.pdf(theta, alpha, alpha, loc=-b, scale=2*b)
+        return result.item() if scalar_input else result
+
+    @staticmethod
+    def _symmetric_beta_integral(theta, alpha, b):
+        """
+        Compute G(theta; alpha, b) = 2*pi * (cdf(theta) - 0.5), where cdf is
+        the Beta(alpha, alpha) cdf rescaled to [-b, b]. Maps [-pi, pi] to
+        [-pi, pi] with G(0) = 0, G(b) = pi, G(-b) = -pi, saturating to +/- pi
+        outside [-b, b].
+
+        Parameters
+        ----------
+        theta : float or array_like
+            Upper limit(s) of integration.
+        alpha : float
+            Beta shape parameter (alpha = beta); must satisfy alpha >= 1.
+        b : float
+            Half-width of the support; must be positive.
+
+        Returns
+        -------
+        float or ndarray : The value(s) of G(theta; alpha, b).
+        """
+        if alpha < 1:
+            raise ValueError(f"Parameter alpha must satisfy alpha >= 1 (alpha={alpha}).")
+        if b <= 0:
+            raise ValueError(f"Parameter b must be positive (b={b}).")
+        theta = np.asarray(theta, dtype=float)
+        scalar_input = theta.ndim == 0
+        result = 2*np.pi*(beta_dist.cdf(theta, alpha, alpha, loc=-b, scale=2*b) - 0.5)
+        return result.item() if scalar_input else result
+
+    @staticmethod
+    def _symmetric_beta_int_inverse(y, alpha, b):
+        """
+        Compute G^{-1}(y; alpha, b): the value of theta such that
+        G(theta; alpha, b) = y, for y in [-pi, pi]. Pins y = +-pi to +-b
+        (saturation convention).
+
+        Parameters
+        ----------
+        y : float or array_like
+            Target value(s); each must satisfy -pi <= y <= pi.
+        alpha : float
+            Beta shape parameter (alpha = beta); must satisfy alpha >= 1.
+        b : float
+            Half-width of the support; must be positive.
+
+        Returns
+        -------
+        float or ndarray : theta value(s) satisfying G(theta; alpha, b) = y.
+        """
+        if alpha < 1:
+            raise ValueError(f"Parameter alpha must satisfy alpha >= 1 (alpha={alpha}).")
+        if b <= 0:
+            raise ValueError(f"Parameter b must be positive (b={b}).")
+        y = np.asarray(y, dtype=float)
+        scalar_input = y.ndim == 0
+        if np.any(y < -np.pi) or np.any(y > np.pi):
+            raise ValueError("y must satisfy -pi <= y <= pi.")
+        result = beta_dist.ppf(y/(2*np.pi) + 0.5, alpha, alpha, loc=-b, scale=2*b)
+        # Force exact endpoints (scipy's ppf can return nan/inf at 0 or 1).
+        result = np.where(y == np.pi, b, result)
+        result = np.where(y == -np.pi, -b, result)
+        return result.item() if scalar_input else result
+
     @staticmethod # An alternative idea to the cutoff function? Currently unused.
     def _tanh_plus(theta, a, b):
         return (np.tanh(a*(1-(theta/b)**2) ) + 1.0001)/(1.0001+np.tanh(a))
@@ -1134,6 +1269,11 @@ class PerceptionModel:
             # factor cancels in rho. Use the precomputed spline.
             F = self._neural_angle_vonmises
             return sum(F(hi) - F(lo) for lo, hi in intervals)
+        elif self.neural_weight == 'symmetric_beta':
+            # G(theta) = 2*pi*(beta.cdf(theta, alpha, alpha, loc=-b, scale=2b) - 0.5);
+            # the constant factor cancels in rho. Use the precomputed spline.
+            F = self._neural_angle_symmetric_beta
+            return sum(F(hi) - F(lo) for lo, hi in intervals)
         else:
             raise NotImplementedError("Unknown neural weight function name.")
 
@@ -1160,6 +1300,8 @@ class PerceptionModel:
             return self._smooth_cutoff(theta, self.a, self.b)
         elif self.neural_weight == 'vonmises':
             return self._vonmises(theta, self.k)
+        elif self.neural_weight == 'symmetric_beta':
+            return self._symmetric_beta(theta, self.alpha, self.b)
         # elif self.neural_weight == 'tanh_plus':
         #     return self._tanh_plus(theta, self.a, self.b)
         else:
@@ -1191,6 +1333,8 @@ class PerceptionModel:
             return self._neural_angle_cutoff(theta)
         elif self.neural_angle == 'integral' and self.neural_weight == 'vonmises':
             return self._neural_angle_vonmises(theta)
+        elif self.neural_angle == 'integral' and self.neural_weight == 'symmetric_beta':
+            return self._neural_angle_symmetric_beta(theta)
         elif self.neural_angle == 'power':
             return self._power(theta, self.c)
         else:
@@ -1221,6 +1365,8 @@ class PerceptionModel:
             return self._neural_angle_cutoff_inverse(theta)
         elif self.neural_angle == 'integral' and self.neural_weight == 'vonmises':
             return self._neural_angle_vonmises_inverse(theta)
+        elif self.neural_angle == 'integral' and self.neural_weight == 'symmetric_beta':
+            return self._neural_angle_symmetric_beta_inverse(theta)
         elif self.neural_angle == 'power':
             return self._power_inverse(theta, self.c)
         else:

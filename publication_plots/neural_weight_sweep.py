@@ -134,6 +134,18 @@ def fig4_spec():
     return rows, title, 'neural_weight_sweep_vonmises_high_k.png'
 
 
+def fig5_spec():
+    """Symmetric Beta(alpha, alpha) weight, b=pi, varying alpha."""
+    alphas = [1.5, 2.0, 3.0, 5.0, 10.0]
+    rows = [
+        dict(weight='symmetric_beta', alpha=a, b=np.pi,
+             label=fr'symmetric beta, $\alpha={a:g}$, $b=\pi$')
+        for a in alphas
+    ]
+    title = r'Symmetric Beta neural weight, $b=\pi$ fixed, varying $\alpha$'
+    return rows, title, 'neural_weight_sweep_symmetric_beta_b_pi.png'
+
+
 # ---- model construction ----
 
 def build_models(row_spec):
@@ -148,6 +160,9 @@ def build_models(row_spec):
         percep.b = row_spec['b']
     elif row_spec['weight'] == 'vonmises':
         percep.k = row_spec['k']
+    elif row_spec['weight'] == 'symmetric_beta':
+        percep.alpha = row_spec['alpha']
+        percep.b = row_spec['b']
     else:
         raise ValueError(f"unsupported weight: {row_spec['weight']!r}")
     nbm = model.NeuralBandModel(percep)
@@ -166,6 +181,10 @@ def row_param_signature(row_spec):
                     b=float(row_spec['b']))
     elif row_spec['weight'] == 'vonmises':
         return dict(weight='vonmises', k=float(row_spec['k']))
+    elif row_spec['weight'] == 'symmetric_beta':
+        return dict(weight='symmetric_beta',
+                    alpha=float(row_spec['alpha']),
+                    b=float(row_spec['b']))
     else:
         raise ValueError(f"unsupported weight: {row_spec['weight']!r}")
 
@@ -401,22 +420,23 @@ def build_figure(rows, suptitle, out_name, pool, overflow_log,
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description=("Generate the four-figure neural-weight parameter "
+        description=("Generate the five-figure neural-weight parameter "
                      "sweep. Bifurcation rasters are cached per-figure so "
                      "layout tweaks don't trigger recomputation."))
     parser.add_argument('--regenerate', action='store_true',
                         help="ignore existing per-figure caches and "
                              "recompute every bifurcation panel")
-    parser.add_argument('--only', type=int, choices=[1, 2, 3, 4],
+    parser.add_argument('--only', type=int, choices=[1, 2, 3, 4, 5],
                         action='append', default=None,
-                        help="only build the listed figure(s) (1-4); may "
+                        help="only build the listed figure(s) (1-5); may "
                              "be passed multiple times. Default: all.")
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    all_specs = [fig1_spec(), fig2_spec(), fig3_spec(), fig4_spec()]
+    all_specs = [fig1_spec(), fig2_spec(), fig3_spec(), fig4_spec(),
+                 fig5_spec()]
     if args.only:
         selected = sorted(set(args.only))
         figure_specs = [all_specs[i-1] for i in selected]

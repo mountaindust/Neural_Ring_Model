@@ -1,8 +1,8 @@
 """
 Publication-quality version of VM_bifurcations/diagnostic_recount_compare.png.
 
-Three-panel bifurcation diagram for the von Mises neural-band model with two
-circle targets at (4.33, +/-2.5), k=0.55:
+Three-panel bifurcation diagram for the neural-band model with two
+circle targets at TARGET_LOCS:
 
   (1) # stable equilibria using the legacy gamma-only `_discrim_A` test
   (2) # stable equilibria using the full 3x3 coupled Jacobian (correct)
@@ -12,6 +12,9 @@ Panels (1) and (2) use NeuralBandModel.plot_bifurcation_diagram, which adaptivel
 refines cell boundaries up to a high virtual resolution. Panel (3) is computed
 on a uniform fine grid using the same _count_stable_at helper, since the diff
 requires both criteria evaluated at the same points.
+
+Set NEURAL_WEIGHT to 'vonmises' or 'cutoff' to choose the front-bias weighting.
+The output filename is suffixed with _VM or _SC accordingly.
 """
 
 import os
@@ -28,8 +31,18 @@ from multiprocessing import Pool
 import decision_model as model
 
 
+# ---- weighting choice ----
+# 'vonmises' -> von Mises pdf with parameter K_VONMISES (suffix _VM)
+# 'cutoff'   -> smooth cutoff with parameters A_CUTOFF, B_CUTOFF (suffix _SC)
+NEURAL_WEIGHT = 'cutoff'
+
+K_VONMISES = 0.55
+A_CUTOFF = np.pi / 3
+B_CUTOFF = 4 * np.pi / 5
+
 # ---- model setup (matches diagnostic_recount_grid.py) ----
 TARGET_LOCS = np.array([[4.33, 2.5], [4.33, -2.5]])
+TARGET_RADIUS = 0.5
 XLIM = (0.0, 6.0)
 YLIM = (-3.5, 3.5)
 
@@ -45,15 +58,34 @@ DIFF_NX = 241
 DIFF_NY = 241
 
 N_WORKERS = 10
-OUTPUT_NAME = "bifurcation_compare_discrim_vs_coupled.png"
+
+_WEIGHT_SUFFIX = {'vonmises': '_VM', 'cutoff': '_SC'}
+if NEURAL_WEIGHT not in _WEIGHT_SUFFIX:
+    raise ValueError(
+        f"NEURAL_WEIGHT must be 'vonmises' or 'cutoff', got {NEURAL_WEIGHT!r}")
+OUTPUT_NAME = (f"bifurcation_compare_discrim_vs_coupled"
+               f"{_WEIGHT_SUFFIX[NEURAL_WEIGHT]}.png")
+
+
+def weight_label():
+    """Human-readable name and parameter string for the active weighting."""
+    if NEURAL_WEIGHT == 'vonmises':
+        return 'von Mises', rf'$k={K_VONMISES:g}$'
+    return ('smooth cutoff',
+            rf'$a={A_CUTOFF/np.pi:.2g}\pi,\ b={B_CUTOFF/np.pi:.2g}\pi$')
 
 
 def build_model():
-    targets = model.Targets(locs=TARGET_LOCS, geom_name='circle', r=0.5)
+    targets = model.Targets(locs=TARGET_LOCS, geom_name='circle',
+                            r=TARGET_RADIUS)
     percep = model.PerceptionModel(targets, (0, 0), 0,
-                                   neural_weight='vonmises',
+                                   neural_weight=NEURAL_WEIGHT,
                                    neural_angle='integral')
-    percep.k = 0.55
+    if NEURAL_WEIGHT == 'vonmises':
+        percep.k = K_VONMISES
+    else:
+        percep.a = A_CUTOFF
+        percep.b = B_CUTOFF
     return model.NeuralBandModel(percep)
 
 
@@ -167,11 +199,15 @@ def main():
         ax.set_xlim(XLIM)
         ax.set_ylim(YLIM)
 
-    fig.suptitle('Self-consistent equilibria: legacy gamma-only stability vs. '
+    weight_name, weight_params = weight_label()
+    target_str = ', '.join(
+        rf'$({x:g}, {y:+g})$' for x, y in TARGET_LOCS)
+    fig.suptitle('Self-consistent equilibria: gamma-only stability vs. '
                  'coupled 3D Jacobian\n'
-                 r'(von Mises, $k=0.55$, two circle targets at '
-                 r'$(4.33, \pm 2.5)$)',
-                 fontsize=13, y=0.88)
+                 rf'({weight_name}, {weight_params}, '
+                 rf'circle targets (r={TARGET_RADIUS:g}) at '
+                 + target_str + ')',
+                 fontsize=14, y=0.88)
 
     fig.tight_layout(rect=[0, 0.10, 1, 0.95])
     fig.subplots_adjust(wspace=0.12)
