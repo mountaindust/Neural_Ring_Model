@@ -211,7 +211,8 @@ if __name__ == "__main__":
     args_list = [((j, i), xs[i], ys[j])
                  for j in range(ny) for i in range(nx)]
     print(f"Scanning {nx}x{ny}={nx*ny} cells...")
-    with Pool(10) as pool:
+    # HW-TEMP: 4-core laptop; restore to 10 on main workstation
+    with Pool(4) as pool:
         results = pool.map(cell_n_and_max_re, args_list)
     grid_n = np.zeros((ny, nx), dtype=int)
     grid_re = np.full((ny, nx), np.nan)

@@ -69,13 +69,14 @@ REFINEMENT_LEVELS = 4
 MAX_COUNT = 3   # pinned color scale; >3 flagged for follow-up
 STABILITY_CRITERION = 'coupled'
 
-N_WORKERS = 10
+# HW-TEMP: 4-core laptop; restore to 10 on main workstation
+N_WORKERS = 4
 DPI = 600
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Bumped whenever the cache layout or anything that would invalidate a
 # previously-saved npz changes. Mismatch forces a recompute.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 
 
 # ---- figure specifications ----
@@ -146,6 +147,19 @@ def fig5_spec():
     return rows, title, 'neural_weight_sweep_symmetric_beta_b_pi.png'
 
 
+def fig6_spec():
+    """Regularized power weight, e=1e-3 fixed, varying d."""
+    ds = [0.3, 0.5, 0.7, 0.9]
+    rows = [
+        dict(weight='reg_power', d=d, e=1e-3,
+             label=fr'reg power, $d={d:g}$, $e=10^{{-3}}$')
+        for d in ds
+    ]
+    title = (r'Regularized power neural weight, $e=10^{-3}$ fixed, '
+             r'varying $d$')
+    return rows, title, 'neural_weight_sweep_reg_power_e_1e-3.png'
+
+
 # ---- model construction ----
 
 def build_models(row_spec):
@@ -163,6 +177,9 @@ def build_models(row_spec):
     elif row_spec['weight'] == 'symmetric_beta':
         percep.alpha = row_spec['alpha']
         percep.b = row_spec['b']
+    elif row_spec['weight'] == 'reg_power':
+        percep.d = row_spec['d']
+        percep.e = row_spec['e']
     else:
         raise ValueError(f"unsupported weight: {row_spec['weight']!r}")
     nbm = model.NeuralBandModel(percep)
@@ -185,6 +202,10 @@ def row_param_signature(row_spec):
         return dict(weight='symmetric_beta',
                     alpha=float(row_spec['alpha']),
                     b=float(row_spec['b']))
+    elif row_spec['weight'] == 'reg_power':
+        return dict(weight='reg_power',
+                    d=float(row_spec['d']),
+                    e=float(row_spec['e']))
     else:
         raise ValueError(f"unsupported weight: {row_spec['weight']!r}")
 
@@ -420,15 +441,15 @@ def build_figure(rows, suptitle, out_name, pool, overflow_log,
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description=("Generate the five-figure neural-weight parameter "
+        description=("Generate the six-figure neural-weight parameter "
                      "sweep. Bifurcation rasters are cached per-figure so "
                      "layout tweaks don't trigger recomputation."))
     parser.add_argument('--regenerate', action='store_true',
                         help="ignore existing per-figure caches and "
                              "recompute every bifurcation panel")
-    parser.add_argument('--only', type=int, choices=[1, 2, 3, 4, 5],
+    parser.add_argument('--only', type=int, choices=[1, 2, 3, 4, 5, 6],
                         action='append', default=None,
-                        help="only build the listed figure(s) (1-5); may "
+                        help="only build the listed figure(s) (1-6); may "
                              "be passed multiple times. Default: all.")
     return parser.parse_args()
 
@@ -436,7 +457,7 @@ def parse_args():
 def main():
     args = parse_args()
     all_specs = [fig1_spec(), fig2_spec(), fig3_spec(), fig4_spec(),
-                 fig5_spec()]
+                 fig5_spec(), fig6_spec()]
     if args.only:
         selected = sorted(set(args.only))
         figure_specs = [all_specs[i-1] for i in selected]

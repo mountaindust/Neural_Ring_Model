@@ -48,7 +48,8 @@ def run_direction_mesh(pool=None):
 
 if __name__ == "__main__":
     # Create a multiprocessing pool to parallelize the computation
-    with Pool(10) as pool:
+    # HW-TEMP: 4-core laptop; restore to 10 on main workstation
+    with Pool(4) as pool:
         run_direction_mesh(pool)
 
 # # For testing without multiprocessing

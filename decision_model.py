@@ -432,7 +432,7 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        neural_weight : {'cutoff', 'vonmises', 'symmetric_beta', 'tanh_plus', None} (default = 'cutoff')
+        neural_weight : {'cutoff', 'vonmises', 'symmetric_beta', 'reg_power', 'tanh_plus', None} (default = 'cutoff')
             Weighting function for the neural band.
                 - 'cutoff' : a smooth cutoff function that is 1 in front and
                              0 in back, with a smooth transition in between.
@@ -448,6 +448,14 @@ class PerceptionModel:
                              b (> 0); alpha = 1 is uniform on [-b, b], larger
                              alpha gives a narrower peak. See _symmetric_beta
                              for details.
+                - 'reg_power' : a regularized power weight 1/(|theta|^d + e),
+                             with d, e > 0. Smaller d weights the front
+                             relatively less heavily; smaller e is a sharper
+                             peak at 0. As e -> 0 the normalized integral
+                             (used as the angle map) converges to
+                             _power(theta, c=1-d); e regularizes the singularity
+                             at 0 so a spline can resolve the integral. See
+                             _reg_power for details.
                 - None : no weighting, i.e. flat. All angles are weighted equally.
         neural_angle : {'integral', 'power', None} (default = 'integral')
             This defines a mapping between perceived center of each target and
@@ -502,6 +510,8 @@ class PerceptionModel:
         self._b = None
         self._k = None
         self._alpha = None
+        self._d = None
+        self._e = None
         if neural_weight == 'cutoff':
             # = 1 when |theta|<self.a, = 0 when |theta|>self.b, smooth in between
             self._a = np.pi/3
@@ -513,6 +523,14 @@ class PerceptionModel:
             # Beta(alpha, alpha) rescaled to [-b, b]; larger alpha = narrower peak.
             self._alpha = 5.0
             self._b = np.pi
+        elif neural_weight == 'reg_power':
+            # 1/(|theta|^d + e); the normalized integral converges to
+            # _power(theta, c=1-d) as e -> 0. Default e = 1e-3 gives a
+            # ~8e-3 max difference from _power(theta, c=0.5) on [-pi, pi]
+            # (see analyze_reg_power_e.py) while keeping the spline
+            # well-conditioned (slope at 0 is 1/e = 1000).
+            self._d = 0.5
+            self._e = 1e-3
         # elif neural_weight == 'tanh_plus':
         #     self._a = 2
         #     self._b = 2*np.pi/3
@@ -576,6 +594,24 @@ class PerceptionModel:
         self._alpha = value
         self._build_integral_splines()
 
+    @property
+    def d(self):
+        return self._d
+
+    @d.setter
+    def d(self, value):
+        self._d = value
+        self._build_integral_splines()
+
+    @property
+    def e(self):
+        return self._e
+
+    @e.setter
+    def e(self, value):
+        self._e = value
+        self._build_integral_splines()
+
     def _build_integral_splines(self):
         """Precompute spline lookups for the 'integral' neural-angle transform.
 
@@ -585,14 +621,16 @@ class PerceptionModel:
         in O(1) instead of calling scipy.integrate.quad or brentq on every
         invocation.
 
-        Only 'integral' + ('cutoff' | 'vonmises') configurations build splines;
-        everything else is identity or analytical and the spline attributes
-        stay None.
+        Only 'integral' + ('cutoff' | 'vonmises' | 'reg_power') configurations
+        build splines; everything else is identity or analytical and the spline
+        attributes stay None.
         """
         self._cutoff_forward_spline = None
         self._cutoff_inverse_spline = None
         self._vonmises_forward_spline = None
         self._vonmises_inverse_spline = None
+        self._reg_power_forward_spline = None
+        self._reg_power_inverse_spline = None
         # symmetric_beta uses scipy.stats.beta.cdf directly (machine
         # precision for any alpha; no spline cache).
 
@@ -658,6 +696,44 @@ class PerceptionModel:
                 theta_nodes, y_nodes, bc_type='natural')
             self._vonmises_inverse_spline = CubicSpline(
                 y_nodes, theta_nodes, bc_type='natural')
+        elif self.neural_weight == 'reg_power':
+            if self._d is None or self._e is None:
+                return
+            d = self._d
+            e = self._e
+            # Cubic mesh: theta = pi * sign(u) * |u|^3 with u = linspace(-1, 1).
+            # Concentrates nodes near 0, where the integrand 1/(|x|^d + e) is
+            # peaked (value 1/e there) and F has very high curvature
+            # (F''(theta) ~ |theta|^(d-2) for d < 1 as theta -> 0). Cubic
+            # stretching keeps cubic-spline error below ~5e-7 across
+            # d in [0.3, 1.0] and e in [1e-3, 1e-1] at n_nodes = 2001;
+            # quartic and higher meshes give only marginally better near-0
+            # accuracy at the cost of slightly worse error elsewhere.
+            n_nodes = 2001
+            u = np.linspace(-1.0, 1.0, n_nodes)
+            theta_nodes = np.pi * np.sign(u) * np.abs(u)**3
+            center = n_nodes // 2
+            theta_nodes[center] = 0.0
+            theta_nodes[0] = -np.pi
+            theta_nodes[-1] = np.pi
+            y_nodes = np.empty(n_nodes)
+            for i, x in enumerate(theta_nodes):
+                y_nodes[i] = PerceptionModel._reg_power_integral(x, d, e)
+            # Pin endpoints and center to exact theoretical values.
+            y_nodes[0] = -np.pi
+            y_nodes[-1] = np.pi
+            y_nodes[center] = 0.0
+            # The integrand is bounded below by 1/(pi^d + e) > 0, so the
+            # numerical integral is strictly monotone up to quad noise.
+            # Assert rather than filter (no flat-tail risk like cutoff).
+            assert np.all(np.diff(y_nodes) > 0), (
+                "reg_power integral nodes are not strictly increasing; "
+                "check d, e parameters and quad tolerance.")
+            self._reg_power_forward_spline = CubicSpline(
+                theta_nodes, y_nodes, bc_type='natural')
+            self._reg_power_inverse_spline = CubicSpline(
+                y_nodes, theta_nodes, bc_type='natural')
+
     def _neural_angle_cutoff(self, theta):
         """Spline evaluation of F(theta; a, b) for the smooth-cutoff weight.
 
@@ -703,6 +779,31 @@ class PerceptionModel:
         if np.any((y_arr < -np.pi) | (y_arr > np.pi)):
             raise ValueError("y must satisfy -pi <= y <= pi.")
         result = self._vonmises_inverse_spline(y_arr)
+        result = np.where(y_arr == np.pi, np.pi, result)
+        result = np.where(y_arr == -np.pi, -np.pi, result)
+        return float(result) if scalar else result
+
+    def _neural_angle_reg_power(self, theta):
+        """Spline evaluation of F(theta; d, e) for the regularized power weight.
+
+        Saturates to +-pi outside [-pi, pi] (the natural domain of the
+        mapping; the support of the weight is the full circle).
+        """
+        theta_arr = np.asarray(theta, dtype=float)
+        scalar = theta_arr.ndim == 0
+        clamped = np.clip(theta_arr, -np.pi, np.pi)
+        result = self._reg_power_forward_spline(clamped)
+        result = np.where(theta_arr >= np.pi, np.pi, result)
+        result = np.where(theta_arr <= -np.pi, -np.pi, result)
+        return float(result) if scalar else result
+
+    def _neural_angle_reg_power_inverse(self, y):
+        """Spline evaluation of F^{-1}(y; d, e) for the regularized power weight."""
+        y_arr = np.asarray(y, dtype=float)
+        scalar = y_arr.ndim == 0
+        if np.any((y_arr < -np.pi) | (y_arr > np.pi)):
+            raise ValueError("y must satisfy -pi <= y <= pi.")
+        result = self._reg_power_inverse_spline(y_arr)
         result = np.where(y_arr == np.pi, np.pi, result)
         result = np.where(y_arr == -np.pi, -np.pi, result)
         return float(result) if scalar else result
@@ -1058,6 +1159,168 @@ class PerceptionModel:
         result = np.where(y == -np.pi, -b, result)
         return result.item() if scalar_input else result
 
+    @staticmethod
+    def _reg_power(theta, d, e):
+        """A regularized power weight, 1 / (|theta|^d + e), for d, e > 0.
+
+        Bounded everywhere (max = 1/e at theta = 0) and symmetric about 0.
+        Approximates |theta|^(-d), the (un-normalized) derivative of the
+        _power(theta, c) angle map with c = 1 - d, with the e -> 0 singularity
+        at 0 regularized away. Not a normalized pdf; the constant factor cancels
+        when used as a neural weight (rho = G / G.sum()) and the normalization
+        used by _reg_power_integral makes the integral map [-pi, pi] -> [-pi, pi].
+
+        Parameters
+        ----------
+        theta : float or array_like
+            Angle(s) in radians.
+        d : float
+            Power exponent; must be positive.
+        e : float
+            Regularization parameter; must be positive.
+
+        Returns
+        -------
+        float or ndarray : The value(s) of the weight at the given theta.
+        """
+        if d <= 0:
+            raise ValueError(f"Parameter d must be positive (d={d}).")
+        if e <= 0:
+            raise ValueError(f"Parameter e must be positive (e={e}).")
+        theta = np.asarray(theta, dtype=float)
+        scalar_input = theta.ndim == 0
+        result = 1.0 / (np.abs(theta)**d + e)
+        return result.item() if scalar_input else result
+
+    @staticmethod
+    def _reg_power_integral(theta, d, e, tol=1.49e-10):
+        """
+        Compute F(theta; d, e) = pi * sign(theta) * I(|theta|) / I(pi), where
+        I(t) = integral_0^t 1/(x^d + e) dx. Maps [-pi, pi] to [-pi, pi] with
+        F(0) = 0, F(+/-pi) = +/-pi, saturating outside [-pi, pi]. As e -> 0,
+        F(theta; d, e) converges to _power(theta, c=1-d) (analytically, since
+        the antiderivative becomes |theta|^(1-d)/(1-d) for d != 1).
+
+        Used as the reference implementation; hot-path callers use the
+        precomputed spline in PerceptionModel._neural_angle_reg_power instead.
+
+        Parameters
+        ----------
+        theta : float or array_like
+            Upper limit(s) of integration; saturated outside [-pi, pi].
+        d : float
+            Power exponent; must be positive.
+        e : float
+            Regularization parameter; must be positive.
+        tol : float
+            Absolute and relative tolerance for scipy.integrate.quad.
+
+        Returns
+        -------
+        float or ndarray : The value(s) of F(theta; d, e).
+        """
+        if d <= 0:
+            raise ValueError(f"Parameter d must be positive (d={d}).")
+        if e <= 0:
+            raise ValueError(f"Parameter e must be positive (e={e}).")
+
+        def integrand(x):
+            return 1.0 / (x**d + e)
+
+        # Normalization: integral over [0, pi]. Cached per (d, e) call site
+        # via a simple memo so the spline build (one quad call per node) does
+        # not recompute Z each time.
+        Z = PerceptionModel._reg_power_normalization(d, e, tol)
+
+        theta_arr = np.asarray(theta, dtype=float)
+        scalar_input = theta_arr.ndim == 0
+        flat = np.atleast_1d(theta_arr).astype(float)
+        out = np.empty_like(flat)
+        for i, t in enumerate(flat):
+            if t >= np.pi:
+                out[i] = np.pi
+            elif t <= -np.pi:
+                out[i] = -np.pi
+            elif t == 0.0:
+                out[i] = 0.0
+            else:
+                I, _err = quad(integrand, 0.0, abs(t),
+                               epsabs=tol, epsrel=tol, limit=200)
+                out[i] = np.pi * np.sign(t) * I / Z
+        if scalar_input:
+            return float(out[0])
+        return out
+
+    # Tiny memo for the (d, e) -> Z normalization integral. Keyed by the
+    # exact float bit pattern; cleared rarely. Avoids n_nodes redundant quad
+    # calls during a spline build.
+    _reg_power_norm_cache = {}
+
+    @staticmethod
+    def _reg_power_normalization(d, e, tol=1.49e-10):
+        key = (float(d), float(e), float(tol))
+        cache = PerceptionModel._reg_power_norm_cache
+        Z = cache.get(key)
+        if Z is None:
+            Z, _err = quad(lambda x: 1.0/(x**d + e), 0.0, np.pi,
+                           epsabs=tol, epsrel=tol, limit=200)
+            cache[key] = Z
+        return Z
+
+    @staticmethod
+    def _reg_power_int_inverse(y, d, e, tol=1.0e-8):
+        """
+        Compute F^{-1}(y; d, e): the value of theta such that
+        F(theta; d, e) = y, for y in [-pi, pi]. Pins y = +-pi to +-pi.
+        Used as the reference implementation; hot-path callers use the
+        precomputed spline in PerceptionModel._neural_angle_reg_power_inverse
+        instead.
+
+        Parameters
+        ----------
+        y : float or array_like
+            Target value(s); each must satisfy -pi <= y <= pi.
+        d : float
+            Power exponent; must be positive.
+        e : float
+            Regularization parameter; must be positive.
+        tol : float
+            Absolute and relative tolerance for brentq.
+
+        Returns
+        -------
+        float or ndarray : theta value(s) satisfying F(theta; d, e) = y.
+        """
+        if d <= 0:
+            raise ValueError(f"Parameter d must be positive (d={d}).")
+        if e <= 0:
+            raise ValueError(f"Parameter e must be positive (e={e}).")
+        y_arr = np.asarray(y, dtype=float)
+        scalar_input = y_arr.ndim == 0
+        if np.any(y_arr < -np.pi) or np.any(y_arr > np.pi):
+            raise ValueError("y must satisfy -pi <= y <= pi.")
+        flat = np.atleast_1d(y_arr).astype(float)
+        out = np.empty_like(flat)
+        for i, yv in enumerate(flat):
+            if yv == np.pi:
+                out[i] = np.pi
+            elif yv == -np.pi:
+                out[i] = -np.pi
+            elif yv == 0.0:
+                out[i] = 0.0
+            else:
+                target = abs(yv)
+                func = lambda t: PerceptionModel._reg_power_integral(
+                    t, d, e, tol=1.49e-10) - target
+                # F(0) = 0 < target < pi = F(pi); strictly monotone.
+                eps = np.pi * 1e-14
+                root_pos = brentq(func, eps, np.pi - eps,
+                                  xtol=tol, rtol=tol, maxiter=200)
+                out[i] = np.sign(yv) * root_pos
+        if scalar_input:
+            return float(out[0])
+        return out
+
     @staticmethod # An alternative idea to the cutoff function? Currently unused.
     def _tanh_plus(theta, a, b):
         return (np.tanh(a*(1-(theta/b)**2) ) + 1.0001)/(1.0001+np.tanh(a))
@@ -1274,6 +1537,11 @@ class PerceptionModel:
             # the constant factor cancels in rho. Use the precomputed spline.
             F = self._neural_angle_symmetric_beta
             return sum(F(hi) - F(lo) for lo, hi in intervals)
+        elif self.neural_weight == 'reg_power':
+            # F(theta) = pi * sign(theta) * I(|theta|) / I(pi); the constant
+            # factor cancels in rho. Use the precomputed spline.
+            F = self._neural_angle_reg_power
+            return sum(F(hi) - F(lo) for lo, hi in intervals)
         else:
             raise NotImplementedError("Unknown neural weight function name.")
 
@@ -1302,6 +1570,8 @@ class PerceptionModel:
             return self._vonmises(theta, self.k)
         elif self.neural_weight == 'symmetric_beta':
             return self._symmetric_beta(theta, self.alpha, self.b)
+        elif self.neural_weight == 'reg_power':
+            return self._reg_power(theta, self.d, self.e)
         # elif self.neural_weight == 'tanh_plus':
         #     return self._tanh_plus(theta, self.a, self.b)
         else:
@@ -1335,6 +1605,8 @@ class PerceptionModel:
             return self._neural_angle_vonmises(theta)
         elif self.neural_angle == 'integral' and self.neural_weight == 'symmetric_beta':
             return self._neural_angle_symmetric_beta(theta)
+        elif self.neural_angle == 'integral' and self.neural_weight == 'reg_power':
+            return self._neural_angle_reg_power(theta)
         elif self.neural_angle == 'power':
             return self._power(theta, self.c)
         else:
@@ -1367,6 +1639,8 @@ class PerceptionModel:
             return self._neural_angle_vonmises_inverse(theta)
         elif self.neural_angle == 'integral' and self.neural_weight == 'symmetric_beta':
             return self._neural_angle_symmetric_beta_inverse(theta)
+        elif self.neural_angle == 'integral' and self.neural_weight == 'reg_power':
+            return self._neural_angle_reg_power_inverse(theta)
         elif self.neural_angle == 'power':
             return self._power_inverse(theta, self.c)
         else:

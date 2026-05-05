@@ -139,7 +139,8 @@ def examine_warping(geom, r, label, c=0.5, pool=None):
 
 
 if __name__ == '__main__':
-    with Pool(10) as pool:
+    # HW-TEMP: 4-core laptop; restore to 10 on main workstation
+    with Pool(4) as pool:
         # ============================================================
         print('=== Validation: NeuralBandModel vs IsingExtModel (no warping) ===')
         # ============================================================

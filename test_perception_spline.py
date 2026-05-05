@@ -301,6 +301,136 @@ else:
     print("FAIL symmetric_beta should reject b=0.0")
 
 # ========================================================
+print("\n=== Reg_power forward spline vs reference ===")
+# ========================================================
+
+pm_rp = PM(neural_weight='reg_power', neural_angle='integral')
+d_val = pm_rp.d
+e_val = pm_rp.e
+
+# Random samples plus stress points near 0 (where the integrand peaks).
+theta_rand = rng.uniform(-pi, pi, size=5000)
+theta_fixed = np.array([
+    0.0, pi, -pi, 0.99*pi, -0.99*pi,
+    1e-6, -1e-6, 1e-3, -1e-3, 0.1, -0.1,
+    pi/4, -pi/4, pi/2, -pi/2,
+])
+theta_all = np.concatenate([theta_rand, theta_fixed])
+
+spline_vals = pm_rp._neural_angle_reg_power(theta_all)
+ref_vals = PM._reg_power_integral(theta_all, d_val, e_val)
+# 2001-node cubic-power-stretched mesh has its accuracy floor set by the
+# u^3 concentration near 0; empirical max error on a random 5000-point
+# grid is ~5e-7 across d in [0.3, 1.0] and e in [1e-3, 1e-1].
+check_array("reg_power forward: spline vs quad", spline_vals, ref_vals,
+            tol=1e-6)
+
+# ========================================================
+print("\n=== Reg_power inverse spline vs reference ===")
+# ========================================================
+
+# brentq reference is set to xtol=1e-8, so the inverse-spline tolerance
+# matches the brentq accuracy floor. Stay away from +-pi (forward saturation).
+y_rand = rng.uniform(-pi + 1e-3, pi - 1e-3, size=2000)
+y_fixed = np.array([
+    0.0, 0.5*pi, -0.5*pi,
+    pi - 1e-3, -(pi - 1e-3),
+])
+y_all = np.concatenate([y_rand, y_fixed])
+
+spline_inv = pm_rp._neural_angle_reg_power_inverse(y_all)
+ref_inv = PM._reg_power_int_inverse(y_all, d_val, e_val)
+# Inverse spline error is dominated by the forward-spline interpolation
+# error (~5e-7), amplified mildly by the inverse Jacobian away from 0.
+check_array("reg_power inverse: spline vs brentq", spline_inv, ref_inv,
+            tol=1e-5)
+
+# ========================================================
+print("\n=== Reg_power roundtrip ===")
+# ========================================================
+
+theta_rt = rng.uniform(-pi, pi, size=5000)
+y_rt = pm_rp._neural_angle_reg_power(theta_rt)
+theta_back = pm_rp._neural_angle_reg_power_inverse(y_rt)
+# Two stacked cubic-spline interpolations: ~2x the forward floor.
+check_array("reg_power roundtrip theta -> y -> theta", theta_back, theta_rt,
+            tol=1e-5)
+
+y_dir = rng.uniform(-pi + 1e-3, pi - 1e-3, size=5000)
+theta_mid = pm_rp._neural_angle_reg_power_inverse(y_dir)
+y_back = pm_rp._neural_angle_reg_power(theta_mid)
+check_array("reg_power roundtrip y -> theta -> y", y_back, y_dir, tol=1e-5)
+
+# ========================================================
+print("\n=== Reg_power symmetry and endpoints ===")
+# ========================================================
+
+check_scalar("reg_power F(0) == 0",
+             pm_rp._neural_angle_reg_power(0.0), 0.0, tol=0.0)
+check_scalar("reg_power F(pi) == pi",
+             pm_rp._neural_angle_reg_power(pi), pi, tol=0.0)
+check_scalar("reg_power F(-pi) == -pi",
+             pm_rp._neural_angle_reg_power(-pi), -pi, tol=0.0)
+check_scalar("reg_power F(1.5*pi) saturates to pi",
+             pm_rp._neural_angle_reg_power(1.5*pi), pi, tol=0.0)
+check_scalar("reg_power F(-1.5*pi) saturates to -pi",
+             pm_rp._neural_angle_reg_power(-1.5*pi), -pi, tol=0.0)
+check_scalar("reg_power Finv(pi) == pi",
+             pm_rp._neural_angle_reg_power_inverse(pi), pi, tol=0.0)
+check_scalar("reg_power Finv(-pi) == -pi",
+             pm_rp._neural_angle_reg_power_inverse(-pi), -pi, tol=0.0)
+
+theta_sym = rng.uniform(-pi, pi, size=500)
+f_pos = pm_rp._neural_angle_reg_power(theta_sym)
+f_neg = pm_rp._neural_angle_reg_power(-theta_sym)
+check_array("reg_power antisymmetry F(-x) = -F(x)", f_neg, -f_pos, tol=1e-12)
+
+# ========================================================
+print("\n=== Reg_power validation ===")
+# ========================================================
+
+for bad_d in [-0.5, 0.0]:
+    try:
+        PM._reg_power(0.0, d=bad_d, e=1e-3)
+    except ValueError:
+        passed += 1
+        print(f"  ok reg_power rejects d={bad_d}")
+    else:
+        failed += 1
+        print(f"FAIL reg_power should reject d={bad_d}")
+
+for bad_e in [-1e-3, 0.0]:
+    try:
+        PM._reg_power(0.0, d=0.5, e=bad_e)
+    except ValueError:
+        passed += 1
+        print(f"  ok reg_power rejects e={bad_e}")
+    else:
+        failed += 1
+        print(f"FAIL reg_power should reject e={bad_e}")
+
+# ========================================================
+print("\n=== Reg_power approximation of _power (regression pin) ===")
+# ========================================================
+
+# Pinned tolerance: at the default (d=0.5, e=1e-3), the normalized integral
+# matches _power(theta, c=1-d=0.5) to ~8e-3 (see analyze_reg_power_e.py).
+# This guards against accidental changes to the default e or normalization
+# convention; bumping the bound here is fine if the default genuinely changes.
+theta_grid = np.linspace(-pi, pi, 2001)
+F_default = pm_rp._neural_angle_reg_power(theta_grid)
+P_target = PM._power(theta_grid, 1.0 - d_val)
+limit_err = float(np.max(np.abs(F_default - P_target)))
+if limit_err < 1e-2:
+    passed += 1
+    print(f"  ok reg_power matches _power(c=1-d) to {limit_err:.3e} "
+          f"at default d={d_val}, e={e_val}")
+else:
+    failed += 1
+    print(f"FAIL reg_power deviates from _power(c=1-d) by {limit_err:.3e} "
+          f"at default d={d_val}, e={e_val}")
+
+# ========================================================
 print("\n=== _integrate_neural_weight invariance (cutoff) ===")
 # ========================================================
 
@@ -345,6 +475,26 @@ check_array("e2e vonmises: c_angles unchanged", c_spline_vm, c_ref_vm,
             tol=1e-14)
 check_array("e2e vonmises: rho matches reference path", rho_spline_vm,
             rho_ref_vm, tol=1e-10)
+
+# ========================================================
+print("\n=== _integrate_neural_weight invariance (reg_power) ===")
+# ========================================================
+
+pm_e2e_rp = PM(targets=tgts, focal_loc=(5.0, 10.0), focal_angle=0.1,
+               neural_weight='reg_power', neural_angle='integral')
+c_spline_rp, rho_spline_rp = pm_e2e_rp._get_target_signals()
+
+d_e, e_e = pm_e2e_rp.d, pm_e2e_rp.e
+orig_fn = pm_e2e_rp._neural_angle_reg_power
+pm_e2e_rp._neural_angle_reg_power = lambda t: PM._reg_power_integral(
+    np.asarray(t, dtype=float), d_e, e_e)
+c_ref_rp, rho_ref_rp = pm_e2e_rp._get_target_signals()
+pm_e2e_rp._neural_angle_reg_power = orig_fn
+
+check_array("e2e reg_power: c_angles unchanged", c_spline_rp, c_ref_rp,
+            tol=1e-14)
+check_array("e2e reg_power: rho matches reference path", rho_spline_rp,
+            rho_ref_rp, tol=1e-9)
 
 # ========================================================
 print("\n=== _get_target_signals dispatch (symmetric_beta) ===")
@@ -411,6 +561,25 @@ for alpha_test, b_test in [(1.0, pi), (1.25, pi), (1.5, pi), (1.75, pi),
                 sp, rf, tol=1e-12)
 
 # ========================================================
+print("\n=== Parameter sweep (reg_power) ===")
+# ========================================================
+
+# Cover a range of d (front bias steepness) and e (regularization). At small
+# e the spline build runs more quad calls per node, but the spline-vs-quad
+# comparison is bounded by the sinh-stretched-mesh interpolation error.
+for d_test, e_test in [(0.3, 1e-2), (0.5, 1e-3), (0.5, 1e-2),
+                       (0.7, 1e-3), (0.7, 1e-2), (1.0, 1e-3),
+                       (0.5, 1e-1)]:
+    pm_sweep = PM(neural_weight='reg_power', neural_angle='integral')
+    pm_sweep.d = d_test
+    pm_sweep.e = e_test
+    theta_sweep = rng.uniform(-pi, pi, size=500)
+    sp = pm_sweep._neural_angle_reg_power(theta_sweep)
+    rf = PM._reg_power_integral(theta_sweep, d_test, e_test)
+    check_array(f"reg_power sweep d={d_test:.3f}, e={e_test:.0e}",
+                sp, rf, tol=1e-6)
+
+# ========================================================
 print("\n=== Property-setter rebuild ===")
 # ========================================================
 
@@ -461,6 +630,23 @@ check_scalar(
     tol=0.0,
 )
 
+pm_rb_rp = PM(neural_weight='reg_power', neural_angle='integral')
+pm_rb_rp.d = 0.7
+check_scalar(
+    "reg_power d-setter accuracy",
+    pm_rb_rp._neural_angle_reg_power(0.7),
+    float(PM._reg_power_integral(0.7, 0.7, pm_rb_rp.e)),
+    tol=1e-10,
+)
+
+pm_rb_rp.e = 1e-2
+check_scalar(
+    "reg_power e-setter accuracy",
+    pm_rb_rp._neural_angle_reg_power(0.4),
+    float(PM._reg_power_integral(0.4, pm_rb_rp.d, 1e-2)),
+    tol=1e-10,
+)
+
 # Single build during __init__: patch the counter and confirm exactly one call.
 build_count = {'n': 0}
 orig_build = PM._build_integral_splines
@@ -486,6 +672,11 @@ try:
     build_count['n'] = 0
     _ = PM(neural_weight='symmetric_beta', neural_angle='integral')
     check_scalar("symmetric_beta __init__ builds splines exactly once",
+                 build_count['n'], 1, tol=0.0)
+
+    build_count['n'] = 0
+    _ = PM(neural_weight='reg_power', neural_angle='integral')
+    check_scalar("reg_power __init__ builds splines exactly once",
                  build_count['n'], 1, tol=0.0)
 
     build_count['n'] = 0

@@ -57,7 +57,8 @@ MAX_COUNT = 3   # pin colour scale; >=3 stable equilibria not expected here
 DIFF_NX = 241
 DIFF_NY = 241
 
-N_WORKERS = 10
+# HW-TEMP: 4-core laptop; restore to 10 on main workstation
+N_WORKERS = 4
 
 _WEIGHT_SUFFIX = {'vonmises': '_VM', 'cutoff': '_SC'}
 if NEURAL_WEIGHT not in _WEIGHT_SUFFIX:

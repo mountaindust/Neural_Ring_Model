@@ -118,7 +118,8 @@ if __name__ == "__main__":
                  for j in range(ny) for i in range(nx)]
 
     print(f"Scanning {nx}x{ny} grid with coupled stability check...")
-    with Pool(10) as pool:
+    # HW-TEMP: 4-core laptop; restore to 10 on main workstation
+    with Pool(4) as pool:
         results = pool.map(count_at, args_list)
 
     grid_disc = np.zeros((ny, nx), dtype=int)

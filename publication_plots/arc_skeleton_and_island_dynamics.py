@@ -71,7 +71,8 @@ ISLAND_THETA_EQ = -0.0876     # location of the unstable equilibrium
 ISLAND_T_FINAL = 4000.0
 ISLAND_T_TRUNC = 2000.0       # cutoff for theta and |gamma| panels
 
-N_WORKERS = 10
+# HW-TEMP: 4-core laptop; restore to 10 on main workstation
+N_WORKERS = 4
 
 OUT_NAME = "arc_skeleton_and_island_dynamics.png"
 HERE = os.path.dirname(os.path.abspath(__file__))
