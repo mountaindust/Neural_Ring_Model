@@ -637,8 +637,8 @@ class PerceptionModel:
         # Splines are used both by the 'integral' neural-angle transformation
         # (forward + inverse) and by _integrate_neural_weight (forward only,
         # as an antiderivative for integrating the weight over angular
-        # intervals). Build whenever neural_weight is 'cutoff' or 'vonmises',
-        # independent of neural_angle.
+        # intervals). Build whenever neural_weight is 'cutoff', 'vonmises',
+        # or 'reg_power', independent of neural_angle.
 
         if self.neural_weight == 'cutoff':
             if self._a is None or self._b is None:

@@ -566,7 +566,7 @@ print("\n=== Parameter sweep (reg_power) ===")
 
 # Cover a range of d (front bias steepness) and e (regularization). At small
 # e the spline build runs more quad calls per node, but the spline-vs-quad
-# comparison is bounded by the sinh-stretched-mesh interpolation error.
+# comparison is bounded by the cubic-power-stretched-mesh interpolation error.
 for d_test, e_test in [(0.3, 1e-2), (0.5, 1e-3), (0.5, 1e-2),
                        (0.7, 1e-3), (0.7, 1e-2), (1.0, 1e-3),
                        (0.5, 1e-1)]:
