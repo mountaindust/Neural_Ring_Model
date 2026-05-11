@@ -2978,7 +2978,7 @@ class NeuralBandModel:
 
     def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
                      start_loc=None, start_angle=None, plot_tracks=False,
-                     wb_plot=False):
+                     ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the neural band torque model on
@@ -3017,8 +3017,17 @@ class NeuralBandModel:
             focal_angle in the attached PerceptionModel
         plot_tracks : bool
             Whether or not to overlay the walker trajectories
+        ax : matplotlib axis, optional
+            If provided, plot on this axis instead of creating a new figure and
+            axis. The colorbar is attached to ax.figure.
+        title : str, optional
+            Title for the plot. If not provided, a default title is used.
         wb_plot : bool
             Whether or not plotting in a Jupyter notebook (adjusts size of figure)
+
+        Returns
+        -------
+        ax : matplotlib axis, if ax was provided as an argument. Otherwise, None.
         '''
 
         if start_loc is None:
@@ -3088,10 +3097,15 @@ class NeuralBandModel:
         # For plotting with imshow, use transposed version
         H_plot = H_for_spline.T
 
-        if wb_plot:
-            fig = plt.figure(figsize=(6.5,4))
+        if ax is None:
+            local_plot = True
+            if wb_plot:
+                fig = plt.figure(figsize=(6.5,4))
+            else:
+                fig = plt.figure(figsize=(5.5,5))
         else:
-            fig = plt.figure(figsize=(5.5,5))
+            local_plot = False
+            fig = ax.figure
 
         # Get bin centers
         xcenters = (xedges[:-1] + xedges[1:]) / 2
@@ -3100,8 +3114,11 @@ class NeuralBandModel:
         # Guard against degenerate bin centers
         if xcenters.size < 2 or ycenters.size < 2:
             # fall back to simple imshow without interpolation
-            ax = fig.add_subplot(title='Random walker path histogram, interpolated',
-                                 aspect='equal')
+            default_title = 'Random walker paths\n and histogram'
+            if local_plot:
+                ax = fig.add_subplot(aspect='equal')
+            else:
+                ax.set_aspect('equal')
             im = ax.imshow(H_plot, extent=(xedges[0], xedges[-1], yedges[0], yedges[-1]),
                            origin='lower', interpolation='nearest', aspect='equal')
             fig.colorbar(im, ax=ax)
@@ -3111,11 +3128,19 @@ class NeuralBandModel:
             spline_interp = RectBivariateSpline(xcenters, ycenters, H_for_spline)
             H_fine = spline_interp(x_fine, y_fine).T  # transpose to shape (len(y_fine), len(x_fine))
             # Plot interpolated histogram
-            ax = fig.add_subplot(title='Random walker path histogram, interpolated',
-                                 aspect='equal')
+            default_title = 'Random walker paths\n and interpolated histogram'
+            if local_plot:
+                ax = fig.add_subplot(aspect='equal')
+            else:
+                ax.set_aspect('equal')
             im = ax.imshow(H_fine, extent=(x_fine[0], x_fine[-1], y_fine[0], y_fine[-1]),
                            origin='lower', interpolation='bilinear', aspect='equal')
             fig.colorbar(im, ax=ax)
+
+        if title is not None:
+            ax.set_title(title)
+        else:
+            ax.set_title(default_title)
 
         self.percep_model.targets.plot_targets_to_axis(ax)
 
@@ -3124,7 +3149,11 @@ class NeuralBandModel:
             for walk in all_walks:
                 walk = np.column_stack(walk)
                 ax.plot(walk[0,:], walk[1,:], 'k')
-        plt.show()
+
+        if local_plot:
+            plt.show()
+        else:
+            return ax
 
 
 
@@ -3769,16 +3798,16 @@ class IsingExtModel:
         
 
     def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
-                     start_loc=None, start_angle=None, plot_tracks=False, 
-                     wb_plot=False):
-        '''Plot a walker that starts at a specified location looking in a 
-        specified angle (defaults to the focal_loc and focal_angle in attached 
-        PerceptionModel) and moves according to the Ising torque model on a dt 
-        step size with zero-mean angular Gaussian noise with standard deviation 
-        as specified. Repeat for a number of repetitions and plot a heat map of 
+                     start_loc=None, start_angle=None, plot_tracks=False,
+                     ax=None, title=None, wb_plot=False):
+        '''Plot a walker that starts at a specified location looking in a
+        specified angle (defaults to the focal_loc and focal_angle in attached
+        PerceptionModel) and moves according to the Ising torque model on a dt
+        step size with zero-mean angular Gaussian noise with standard deviation
+        as specified. Repeat for a number of repetitions and plot a heat map of
         these walks in 2D space.
 
-        The walker stops whenever it is detected to be overlapping a target or 
+        The walker stops whenever it is detected to be overlapping a target or
         after max_steps.
 
         Set wb_plot to True if plotting in a Jupyter notebook
@@ -3797,15 +3826,24 @@ class IsingExtModel:
         max_steps : int
             Maximum number of steps for each walker
         start_loc : (x,y) coordinates, optional
-            Starting location of the walk, defaults to focal_loc in the attached 
+            Starting location of the walk, defaults to focal_loc in the attached
             PerceptionModel
         start_angle : float
-            Starting direction that the walker is facing. Defaults to 
+            Starting direction that the walker is facing. Defaults to
             focal_angle in the attached PerceptionModel
         plot_tracks : bool
             Whether or not to overlay the walker trajectories
+        ax : matplotlib axis, optional
+            If provided, plot on this axis instead of creating a new figure and
+            axis. The colorbar is attached to ax.figure.
+        title : str, optional
+            Title for the plot. If not provided, a default title is used.
         wb_plot : bool
             Whether or not plotting in a Jupyter notebook (adjusts size of figure)
+
+        Returns
+        -------
+        ax : matplotlib axis, if ax was provided as an argument. Otherwise, None.
         '''
 
         if start_loc is None:
@@ -3873,20 +3911,28 @@ class IsingExtModel:
         # For plotting with imshow, use transposed version
         H_plot = H_for_spline.T
 
-        if wb_plot:
-            fig = plt.figure(figsize=(6.5,4))
+        if ax is None:
+            local_plot = True
+            if wb_plot:
+                fig = plt.figure(figsize=(6.5,4))
+            else:
+                fig = plt.figure(figsize=(5.5,5))
         else:
-            fig = plt.figure(figsize=(5.5,5))
+            local_plot = False
+            fig = ax.figure
 
         # Get bin centers
         xcenters = (xedges[:-1] + xedges[1:]) / 2
         ycenters = (yedges[:-1] + yedges[1:]) / 2
         # Interpolate to finer grid for smoother plotting
         # Guard against degenerate bin centers
+        default_title = 'Random walker path histogram, interpolated'
         if xcenters.size < 2 or ycenters.size < 2:
             # fall back to simple imshow without interpolation
-            ax = fig.add_subplot(title='Random walker path histogram, interpolated',
-                                 aspect='equal')
+            if local_plot:
+                ax = fig.add_subplot(aspect='equal')
+            else:
+                ax.set_aspect('equal')
             im = ax.imshow(H_plot, extent=(xedges[0], xedges[-1], yedges[0], yedges[-1]),
                            origin='lower', interpolation='nearest', aspect='equal')
             fig.colorbar(im, ax=ax)
@@ -3896,11 +3942,18 @@ class IsingExtModel:
             spline_interp = RectBivariateSpline(xcenters, ycenters, H_for_spline)
             H_fine = spline_interp(x_fine, y_fine).T  # transpose to shape (len(y_fine), len(x_fine))
             # Plot interpolated histogram
-            ax = fig.add_subplot(title='Random walker path histogram, interpolated',
-                                 aspect='equal')
+            if local_plot:
+                ax = fig.add_subplot(aspect='equal')
+            else:
+                ax.set_aspect('equal')
             im = ax.imshow(H_fine, extent=(x_fine[0], x_fine[-1], y_fine[0], y_fine[-1]),
                            origin='lower', interpolation='bilinear', aspect='equal')
             fig.colorbar(im, ax=ax)
+
+        if title is not None:
+            ax.set_title(title)
+        else:
+            ax.set_title(default_title)
 
         # Display actual historgram
         # ax = fig.add_subplot(title='Random walker path histogram',
@@ -3927,4 +3980,8 @@ class IsingExtModel:
             for walk in all_walks:
                 walk = np.column_stack(walk)
                 ax.plot(walk[0,:], walk[1,:], 'k')
-        plt.show()
+
+        if local_plot:
+            plt.show()
+        else:
+            return ax
