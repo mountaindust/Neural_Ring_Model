@@ -9,6 +9,9 @@ Then examines:
 4. Circle targets, power warping c=0.5
 """
 
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from decision_model import (Targets, PerceptionModel, NeuralBandModel,
                             IsingExtModel, convert_angles)
 from multiprocessing import Pool

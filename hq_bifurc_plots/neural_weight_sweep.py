@@ -149,7 +149,7 @@ def fig5_spec():
 
 def fig6_spec():
     """Regularized power weight, e=1e-3 fixed, varying d."""
-    ds = [0.3, 0.5, 0.7, 0.9]
+    ds = [0.1, 0.2, 0.4, 0.5]
     rows = [
         dict(weight='reg_power', d=d, e=1e-3,
              label=fr'reg power, $d={d:g}$, $e=10^{{-3}}$')
@@ -164,7 +164,7 @@ def fig6_spec():
 
 def build_models(row_spec):
     """Return (PerceptionModel, NeuralBandModel) configured per row_spec."""
-    targets = model.Targets(locs=TARGET_LOCS, geom_name='circle',
+    targets = model.Targets(locs=TARGET_LOCS, geom_name=None,
                             r=TARGET_RADIUS)
     percep = model.PerceptionModel(
         targets, FOCAL_LOC, FOCAL_ANGLE,

@@ -1,5 +1,8 @@
 """Exhaustive tests for _subtract_intervals_circle and helper methods."""
 
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 from decision_model import PerceptionModel as PM
 

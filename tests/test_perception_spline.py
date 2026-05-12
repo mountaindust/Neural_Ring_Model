@@ -6,6 +6,9 @@ weighting functions, and sanity-checks the end-to-end routing into
 _integrate_neural_weight and the a/b/k property-setter rebuild path.
 """
 
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np
 from scipy.stats import vonmises
 from scipy.stats import beta as beta_dist
