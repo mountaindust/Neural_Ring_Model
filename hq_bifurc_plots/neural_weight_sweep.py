@@ -56,6 +56,7 @@ import decision_model as model
 
 # ---- fixed setup (matches compare_sc_vm.ipynb) ----
 TARGET_LOCS = np.array([[4.33, 2.5], [4.33, -2.5]])
+TARGET_GEOM = 'circle'
 TARGET_RADIUS = 0.5
 FOCAL_LOC = (0, 0)
 FOCAL_ANGLE = 0
@@ -164,7 +165,7 @@ def fig6_spec():
 
 def build_models(row_spec):
     """Return (PerceptionModel, NeuralBandModel) configured per row_spec."""
-    targets = model.Targets(locs=TARGET_LOCS, geom_name=None,
+    targets = model.Targets(locs=TARGET_LOCS, geom_name=TARGET_GEOM,
                             r=TARGET_RADIUS)
     percep = model.PerceptionModel(
         targets, FOCAL_LOC, FOCAL_ANGLE,
@@ -216,6 +217,7 @@ def figure_fingerprint(rows):
     return dict(
         cache_version=CACHE_VERSION,
         target_locs=TARGET_LOCS.tolist(),
+        target_geom=TARGET_GEOM,
         target_radius=TARGET_RADIUS,
         focal_loc=list(FOCAL_LOC),
         focal_angle=FOCAL_ANGLE,
