@@ -2277,6 +2277,7 @@ class NeuralBandModel:
                 candidates.append(theta_extra)
 
             # Polish each candidate with the 2D root finder
+            final_Rs = []
             for theta_c in candidates:
                 sol = root(self._self_consistent_eq, [theta_c, R_probe],
                            args=(focal_loc,), method='hybr', tol=1e-10)
@@ -2295,16 +2296,22 @@ class NeuralBandModel:
                 if np.abs(residual) > 1e-4:
                     continue
 
-                # Check if close to any existing solution
+                # Dedup by both theta and R: near a saddle-node bifurcation
+                # two genuine equilibria can share a theta to within the
+                # angular tolerance while differing in R, so theta alone is
+                # not enough to distinguish them.
                 close_check = False
-                for existing_angle in final_angles:
+                for existing_angle, existing_R in zip(final_angles,
+                                                       final_Rs):
                     angle_diff = np.abs(convert_angles(
                         theta_eq - existing_angle))
-                    if angle_diff < 0.02:
+                    R_diff = np.abs(R_eq - existing_R)
+                    if angle_diff < 0.02 and R_diff < 0.01:
                         close_check = True
                         break
                 if not close_check:
                     final_angles.append(theta_eq)
+                    final_Rs.append(R_eq)
                     gamma_eq = R_eq + 0j
                     stability.append(stability_test(
                         gamma_eq, theta_eq, focal_loc))
