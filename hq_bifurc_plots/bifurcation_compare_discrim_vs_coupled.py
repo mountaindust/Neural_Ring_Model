@@ -29,6 +29,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from multiprocessing import Pool
 
 import decision_model as model
+from parallel_config import get_n_workers
 
 
 # ---- weighting choice ----
@@ -57,8 +58,7 @@ MAX_COUNT = 3   # pin colour scale; >=3 stable equilibria not expected here
 DIFF_NX = 241
 DIFF_NY = 241
 
-# HW-TEMP: 4-core laptop; restore to 10 on main workstation
-N_WORKERS = 4
+N_WORKERS = get_n_workers()
 
 _WEIGHT_SUFFIX = {'vonmises': '_VM', 'cutoff': '_SC'}
 if NEURAL_WEIGHT not in _WEIGHT_SUFFIX:

@@ -52,6 +52,7 @@ from matplotlib.colors import BoundaryNorm
 from multiprocessing import Pool
 
 import decision_model as model
+from parallel_config import get_n_workers
 
 
 # ---- fixed setup (matches compare_sc_vm.ipynb) ----
@@ -70,8 +71,7 @@ REFINEMENT_LEVELS = 4
 MAX_COUNT = 3   # pinned color scale; >3 flagged for follow-up
 STABILITY_CRITERION = 'coupled'
 
-# HW-TEMP: 4-core laptop; restore to 10 on main workstation
-N_WORKERS = 4
+N_WORKERS = get_n_workers()
 DPI = 600
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 

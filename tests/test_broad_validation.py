@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from decision_model import (Targets, PerceptionModel, NeuralBandModel,
                             IsingExtModel, convert_angles)
 from multiprocessing import Pool
+from parallel_config import get_n_workers
 import numpy as np
 import warnings
 import time
@@ -142,8 +143,7 @@ def examine_warping(geom, r, label, c=0.5, pool=None):
 
 
 if __name__ == '__main__':
-    # HW-TEMP: 4-core laptop; restore to 10 on main workstation
-    with Pool(4) as pool:
+    with Pool(get_n_workers()) as pool:
         # ============================================================
         print('=== Validation: NeuralBandModel vs IsingExtModel (no warping) ===')
         # ============================================================

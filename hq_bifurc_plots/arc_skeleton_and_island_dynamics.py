@@ -46,6 +46,7 @@ from scipy.integrate import solve_ivp
 from multiprocessing import Pool
 
 import decision_model as model
+from parallel_config import get_n_workers
 
 
 # ---- model setup (matches diagnostic_arc_skeleton.py / island_dynamics) ----
@@ -71,8 +72,7 @@ ISLAND_THETA_EQ = -0.0876     # location of the unstable equilibrium
 ISLAND_T_FINAL = 4000.0
 ISLAND_T_TRUNC = 2000.0       # cutoff for theta and |gamma| panels
 
-# HW-TEMP: 4-core laptop; restore to 10 on main workstation
-N_WORKERS = 4
+N_WORKERS = get_n_workers()
 
 OUT_NAME = "arc_skeleton_and_island_dynamics.png"
 HERE = os.path.dirname(os.path.abspath(__file__))

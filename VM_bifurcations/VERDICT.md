@@ -96,7 +96,7 @@ The scripts import `decision_model` from the parent directory. From the
 
 ```
 python diagnostic_bifurc_vm.py
-python diagnostic_recount_grid.py     # uses Pool(10) — adjust if needed
+python diagnostic_recount_grid.py     # pool size from parallel_config.get_n_workers
 python diagnostic_island_final.py
 python diagnostic_arc_bifurcation.py
 python diagnostic_arc_skeleton.py

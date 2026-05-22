@@ -65,6 +65,7 @@ from matplotlib.colors import BoundaryNorm
 from multiprocessing import Pool
 
 import decision_model as model
+from parallel_config import get_n_workers
 
 
 # ---- fixed setup (matches hq_bifurc_plots/neural_weight_sweep.py) ----
@@ -91,9 +92,10 @@ REFINEMENT_LEVELS = 2
 MAX_COUNT = 3
 STABILITY_CRITERION = 'coupled'
 
-# 4 by default for a quad-core laptop; bump up via --workers when running
-# remotely on the many-core box.
-DEFAULT_N_WORKERS = 4
+# Default size of the multiprocessing pool. Resolved per-machine via
+# parallel_config (env var NR_N_WORKERS or machine_config.N_WORKERS).
+# Override on the command line with --workers.
+DEFAULT_N_WORKERS = get_n_workers()
 
 # Screen-friendly dpi; these are NOT publication plots.
 DPI = 150

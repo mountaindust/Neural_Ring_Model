@@ -23,6 +23,7 @@ from scipy.optimize import brentq, root
 from multiprocessing import Pool
 
 import decision_model as model
+from parallel_config import get_n_workers
 
 # ---- setup ----
 target_locs = np.array([[4.33, 2.5], [4.33, -2.5]])
@@ -118,8 +119,7 @@ if __name__ == "__main__":
                  for j in range(ny) for i in range(nx)]
 
     print(f"Scanning {nx}x{ny} grid with coupled stability check...")
-    # HW-TEMP: 4-core laptop; restore to 10 on main workstation
-    with Pool(4) as pool:
+    with Pool(get_n_workers()) as pool:
         results = pool.map(count_at, args_list)
 
     grid_disc = np.zeros((ny, nx), dtype=int)

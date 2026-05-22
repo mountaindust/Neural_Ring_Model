@@ -29,3 +29,5 @@ codegen/
 *.pdf
 # Claude
 *.lock
+# per-machine worker-count etc.; see machine_config.template.py
+machine_config.py

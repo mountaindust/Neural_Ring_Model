@@ -14,6 +14,7 @@ from scipy.optimize import brentq, root
 from multiprocessing import Pool
 
 import decision_model as model
+from parallel_config import get_n_workers
 
 target_locs = np.array([[4.33, 2.5], [4.33, -2.5]])
 targets = model.Targets(locs=target_locs, geom_name='circle', r=0.5)
@@ -105,8 +106,7 @@ if __name__ == "__main__":
     args_list = [((j, i), xs[i], ys[j])
                  for j in range(ny) for i in range(nx)]
     print(f"Scanning {nx}x{ny}={nx*ny} cells...")
-    # HW-TEMP: 4-core laptop; restore to 10 on main workstation
-    with Pool(4) as pool:
+    with Pool(get_n_workers()) as pool:
         results = pool.map(cell_data, args_list)
     grid_n = np.zeros((ny, nx), dtype=int)
     grid_s = np.zeros((ny, nx), dtype=int)
