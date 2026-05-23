@@ -4,6 +4,7 @@
 .Rhistory
 *.png
 !VM_bifurcations/*.png
+!weighting_analysis/*.png
 .~*
 *.swp
 __pycache__/
