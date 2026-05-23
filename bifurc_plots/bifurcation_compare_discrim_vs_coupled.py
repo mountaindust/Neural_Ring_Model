@@ -1,5 +1,7 @@
 """
-Publication-quality version of VM_bifurcations/diagnostic_recount_compare.png.
+Exploratory version of VM_bifurcations/diagnostic_recount_compare.png.
+Companion check that quantifies how much the legacy gamma-only `_discrim_A`
+stability test overcounts vs. the full 3x3 coupled Jacobian.
 
 Three-panel bifurcation diagram for the neural-band model with two
 circle targets at TARGET_LOCS:
@@ -8,13 +10,17 @@ circle targets at TARGET_LOCS:
   (2) # stable equilibria using the full 3x3 coupled Jacobian (correct)
   (3) Difference (1) - (2): cells the legacy test overcounts
 
-Panels (1) and (2) use NeuralBandModel.plot_bifurcation_diagram, which adaptively
-refines cell boundaries up to a high virtual resolution. Panel (3) is computed
-on a uniform fine grid using the same _count_stable_at helper, since the diff
-requires both criteria evaluated at the same points.
+Panels (1) and (2) use NeuralBandModel.plot_bifurcation_diagram, which
+adaptively refines cell boundaries. Panel (3) is computed on a uniform
+fine grid using the same _count_stable_at helper, since the diff requires
+both criteria evaluated at the same points.
 
-Set NEURAL_WEIGHT to 'vonmises' or 'cutoff' to choose the front-bias weighting.
-The output filename is suffixed with _VM or _SC accordingly.
+These plots are intentionally NOT publication-quality -- the grid is sized
+for fast iteration on a many-core machine. Bump NUM_X / NUM_Y / DIFF_NX /
+DIFF_NY / REFINEMENT_LEVELS for finer resolution at the cost of runtime.
+
+Set NEURAL_WEIGHT to 'vonmises' or 'cutoff' to choose the front-bias
+weighting. The output filename is suffixed with _VM or _SC accordingly.
 """
 
 import os
@@ -48,15 +54,18 @@ XLIM = (0.0, 6.0)
 YLIM = (-3.5, 3.5)
 
 # Plot-bifurcation-diagram settings for panels 1 and 2 (adaptive).
-NUM_X = 61
-NUM_Y = 61
-REFINEMENT_LEVELS = 4
+# Exploration-quality; bump up for finer Hopf-region resolution at the cost
+# of runtime.
+NUM_X = 29
+NUM_Y = 29
+REFINEMENT_LEVELS = 2
 BOUNDARY_DILATION = 1
 MAX_COUNT = 3   # pin colour scale; >=3 stable equilibria not expected here
 
-# Uniform fine grid for the difference panel.
-DIFF_NX = 241
-DIFF_NY = 241
+# Uniform grid for the difference panel. Coarser than HQ so each pair of
+# stability evaluations stays fast.
+DIFF_NX = 121
+DIFF_NY = 121
 
 N_WORKERS = get_n_workers()
 
@@ -215,7 +224,7 @@ def main():
 
     out_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                             OUTPUT_NAME)
-    fig.savefig(out_path, dpi=300, bbox_inches='tight')
+    fig.savefig(out_path, dpi=150, bbox_inches='tight')
     print(f"\nWrote {out_path}")
 
 

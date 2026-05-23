@@ -5,11 +5,13 @@ to warp the neural-angle map and is NOT used to weight signal contributions
 (group-size integration sees a flat weight). This isolates the contribution
 of the angle warping from the front-bias attractiveness weighting.
 
+Companion to ``neural_weight_sweep.py`` in this directory, which uses the
+full (``weight_angle_only=False``) weighting. Parameter rows mirror a
+subset of that script's figures so side-by-side comparison is direct.
+
 These plots are intentionally NOT publication-quality. They are sized to be
 fast enough for parameter exploration on a many-core machine while still
-being good enough to resolve approximate Hopf regions in the bifurcation
-diagrams. For the publication-quality counterparts (weight_angle_only=False,
-high dpi, fine bifurcation grid) see ``hq_bifurc_plots/neural_weight_sweep.py``.
+resolving approximate Hopf regions in the bifurcation diagrams.
 
 Each figure is an Nx3 panel matrix where one row corresponds to one
 parameterization of the perception model:
@@ -18,32 +20,18 @@ parameterization of the perception model:
     col 2 -- PerceptionModel.plot_blocked_signals (target-geometry panel)
     col 3 -- NeuralBandModel.plot_bifurcation_diagram
 
-Four figures are produced. Their parameter rows mirror a subset of the
-corresponding HQ figures so the side-by-side comparison is direct:
+Four figures are produced:
 
-    1. cutoff weight, b=pi, varying a:
-         a in {0, pi/8, pi/4, pi/3}
-         HQ counterpart: hq_bifurc_plots/neural_weight_sweep_cutoff_b_pi.png
-
+    1. cutoff weight, b=pi, varying a:        a in {0, pi/8, pi/4, pi/3}
     2. symmetric Beta(alpha, alpha) weight, b=pi, varying alpha
-       (first four rows of the HQ figure):
-         alpha in {1.5, 2.0, 3.0, 5.0}
-         HQ counterpart:
-           hq_bifurc_plots/neural_weight_sweep_symmetric_beta_b_pi.png
+       (first four rows):                     alpha in {1.5, 2.0, 3.0, 5.0}
+    3. von Mises weight, low k:               k in {0.1, 0.2, 0.3, 0.4, 0.5}
+    4. von Mises weight, high k:              k in {0.6, 0.7, 0.8, 0.9}
 
-    3. von Mises weight, low k:
-         k in {0.1, 0.2, 0.3, 0.4, 0.5}
-         HQ counterpart: hq_bifurc_plots/neural_weight_sweep_vonmises_low_k.png
-
-    4. von Mises weight, high k:
-         k in {0.6, 0.7, 0.8, 0.9}
-         HQ counterpart: hq_bifurc_plots/neural_weight_sweep_vonmises_high_k.png
-
-Per-figure caching mirrors the HQ script: the rasterized bifurcation `img`
-array for each row is saved to ``_cache_<out_name>.npz`` next to the figure,
-alongside a JSON fingerprint of every input that affects the result. The
-cache is invalidated automatically if any input (including
-``weight_angle_only``) changes.
+Per-figure caching: the rasterized bifurcation `img` array for each row is
+saved to ``_cache_<out_name>.npz`` next to the figure, alongside a JSON
+fingerprint of every input that affects the result. The cache is invalidated
+automatically if any input (including ``weight_angle_only``) changes.
 
 Bifurcation panels are pinned to ``max_count=3`` for color comparability;
 any parameterization whose data exceeds that triggers a captured warning
@@ -68,7 +56,7 @@ import decision_model as model
 from parallel_config import get_n_workers
 
 
-# ---- fixed setup (matches hq_bifurc_plots/neural_weight_sweep.py) ----
+# ---- fixed setup (matches bifurc_plots/neural_weight_sweep.py) ----
 TARGET_LOCS = np.array([[4.33, 2.5], [4.33, -2.5]])
 TARGET_GEOM = 'circle'
 TARGET_RADIUS = 0.5
@@ -80,10 +68,10 @@ FOCAL_ANGLE = 0
 # recompute.
 WEIGHT_ANGLE_ONLY = True
 
-# Bifurcation diagram settings. Lower than the HQ script (which uses
-# num_x=41, num_y=41, refinement_levels=4) because these are exploratory
-# plots, not publication output. The chosen settings still resolve Hopf
-# regions well enough for parameter exploration.
+# Bifurcation diagram settings. Matches the companion
+# bifurc_plots/neural_weight_sweep.py so the two are directly comparable.
+# Exploration-quality; bump up for finer Hopf-region resolution at the cost
+# of runtime.
 XLIM = (0.0, 6.0)
 YLIM = (-3.5, 3.5)
 NUM_X = 29
@@ -111,7 +99,7 @@ CACHE_VERSION = 1
 def fig1_spec():
     """Cutoff weight, b=pi, varying a -- angle-warping only.
 
-    Companion to hq_bifurc_plots/neural_weight_sweep_cutoff_b_pi.png.
+    Companion to bifurc_plots/neural_weight_sweep_cutoff_b_pi.png.
     """
     a_values = [0.0, np.pi/8, np.pi/4, np.pi/3]
     a_labels = [r'$a=0$', r'$a=\pi/8$', r'$a=\pi/4$', r'$a=\pi/3$']
@@ -122,18 +110,17 @@ def fig1_spec():
     ]
     title = (r'Cutoff neural weight (angle warping only), $b=\pi$ fixed, '
              r'varying $a$' '\n'
-             r'companion to hq_bifurc_plots/'
+             r'companion to bifurc_plots/'
              r'neural_weight_sweep_cutoff_b_pi.png')
     return rows, title, 'neural_weight_sweep_cutoff_b_pi_angle_only.png'
 
 
 def fig2_spec():
     """Symmetric Beta weight, b=pi, varying alpha (first four rows of the
-    HQ figure) -- angle-warping only.
+    full-weighting figure) -- angle-warping only.
 
-    Companion to hq_bifurc_plots/neural_weight_sweep_symmetric_beta_b_pi.png
-    (first four rows; the alpha=10 row of the HQ figure is intentionally
-    omitted here).
+    Companion to bifurc_plots/neural_weight_sweep_symmetric_beta_b_pi.png
+    (first four rows; the alpha=10 row is intentionally omitted here).
     """
     alphas = [1.5, 2.0, 3.0, 5.0]
     rows = [
@@ -143,7 +130,7 @@ def fig2_spec():
     ]
     title = (r'Symmetric Beta neural weight (angle warping only), '
              r'$b=\pi$ fixed, varying $\alpha$' '\n'
-             r'companion to hq_bifurc_plots/'
+             r'companion to bifurc_plots/'
              r'neural_weight_sweep_symmetric_beta_b_pi.png (first 4 rows)')
     return rows, title, \
         'neural_weight_sweep_symmetric_beta_b_pi_first4_angle_only.png'
@@ -152,7 +139,7 @@ def fig2_spec():
 def fig3_spec():
     """von Mises weight, low k -- angle-warping only.
 
-    Companion to hq_bifurc_plots/neural_weight_sweep_vonmises_low_k.png.
+    Companion to bifurc_plots/neural_weight_sweep_vonmises_low_k.png.
     """
     ks = [0.1, 0.2, 0.3, 0.4, 0.5]
     rows = [
@@ -161,7 +148,7 @@ def fig3_spec():
         for k in ks
     ]
     title = (r'von Mises neural weight (angle warping only), low $k$' '\n'
-             r'companion to hq_bifurc_plots/'
+             r'companion to bifurc_plots/'
              r'neural_weight_sweep_vonmises_low_k.png')
     return rows, title, 'neural_weight_sweep_vonmises_low_k_angle_only.png'
 
@@ -169,7 +156,7 @@ def fig3_spec():
 def fig4_spec():
     """von Mises weight, high k -- angle-warping only.
 
-    Companion to hq_bifurc_plots/neural_weight_sweep_vonmises_high_k.png.
+    Companion to bifurc_plots/neural_weight_sweep_vonmises_high_k.png.
     """
     ks = [0.6, 0.7, 0.8, 0.9]
     rows = [
@@ -178,7 +165,7 @@ def fig4_spec():
         for k in ks
     ]
     title = (r'von Mises neural weight (angle warping only), high $k$' '\n'
-             r'companion to hq_bifurc_plots/'
+             r'companion to bifurc_plots/'
              r'neural_weight_sweep_vonmises_high_k.png')
     return rows, title, 'neural_weight_sweep_vonmises_high_k_angle_only.png'
 

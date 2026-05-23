@@ -1,40 +1,44 @@
 """
-Parameter sweep over neural-weight geometry to map how the bifurcation diagram
-for self-consistent decision-making in space depends on the perception model.
+Exploratory parameter sweep over neural-weight geometry, with full weighting
+of signal contributions (the "standard" model -- ``weight_angle_only=False``).
+Companion to ``neural_weight_sweep_angle_only.py``, which isolates the
+angle-warping contribution from the front-bias attractiveness weighting.
 
-Each figure is an Nx3 panel matrix at 600 dpi where one row corresponds to one
+These plots are intentionally NOT publication-quality. They are sized to be
+fast enough for parameter exploration on a many-core machine while still
+resolving Hopf regions and saddle-node curves well enough to compare across
+weight families. More function-space exploration is needed before any of
+these settings can be locked in for publication.
+
+Each figure is an Nx3 panel matrix where one row corresponds to one
 parameterization of the perception model:
 
     col 1 -- PerceptionModel.plot_neural_weight (weighting curve + angle map)
-    col 2 -- PerceptionModel.plot_blocked_signals (target-geometry panel only)
-    col 3 -- NeuralBandModel.plot_bifurcation_diagram with refinement_levels=4,
-             num_x=41, num_y=41, max_count=3 (pinned for color comparability)
+    col 2 -- PerceptionModel.plot_blocked_signals (target-geometry panel)
+    col 3 -- NeuralBandModel.plot_bifurcation_diagram (stable count)
 
-Targets are fixed at two circle targets at (4.33, +/- 2.5), r=0.5, matching the
-parameterization in compare_sc_vm.ipynb. Observer is at (0,0) with focal_angle=0.
+Targets are fixed at two circle targets at (4.33, +/- 2.5), r=0.5, matching
+the parameterization in compare_sc_vm.ipynb. Observer scans (x, y) with
+focal_angle solved self-consistently per point.
 
-Four figures are produced:
+Six figures are produced:
     1. cutoff weight, b=pi, varying a:        a in {0, pi/8, pi/4, pi/3}
     2. cutoff weight, varying both a and b:   (a,b) in {(0, 4pi/5), (0, 3pi/4),
                                                           (pi/4, 4pi/5),
                                                           (pi/4, 3pi/4)}
     3. von Mises weight, low k:               k in {0.1, 0.2, 0.3, 0.4, 0.5}
     4. von Mises weight, high k:              k in {0.6, 0.7, 0.8, 0.9}
+    5. symmetric Beta weight, b=pi:           alpha in {1.5, 2.0, 3.0, 5.0, 10.0}
+    6. regularized power weight, e=1e-3:      d in {0.1, 0.2, 0.4, 0.5}
 
-Bifurcation panels are pinned to max_count=3. Any parameterization whose data
-contains >3 stable equilibria in some pixel triggers a matplotlib warning from
-plot_bifurcation_diagram; this script captures those warnings and prints a
-post-run summary listing the offending rows for follow-up study.
+Bifurcation panels are pinned to max_count=3 for color comparability; any
+parameterization whose data exceeds that triggers a captured warning which
+is reported in a post-run summary.
 
-Per-figure caching: the rasterized bifurcation `img` array for each row is
-saved to ``_cache_<out_name>.npz`` next to the figure, alongside a JSON
-fingerprint of every input that affects the result (target geometry,
-xlim/ylim, num_x/num_y, refinement_levels, max_count, stability criterion,
-and the row parameterizations). On a subsequent run, if the fingerprint
-matches, the bifurcation column is rebuilt from cache; otherwise the data
-is recomputed and the cache is overwritten. Use --regenerate to force a
-recompute. The cheap columns (1 and 2) are always rendered fresh from the
-PerceptionModel.
+Per-figure caching mirrors the angle-only script: the rasterized bifurcation
+`img` array for each row is saved to ``_cache_<out_name>.npz`` next to the
+figure, with a JSON fingerprint of every input. The cache is invalidated
+automatically if any input changes.
 """
 
 import argparse
@@ -62,17 +66,25 @@ TARGET_RADIUS = 0.5
 FOCAL_LOC = (0, 0)
 FOCAL_ANGLE = 0
 
-# Bifurcation diagram settings (per user spec).
+# Bifurcation diagram settings. Matches the companion angle-only script so
+# the two are directly comparable. These are exploration settings; bump
+# NUM_X/NUM_Y and REFINEMENT_LEVELS if you want finer Hopf-region resolution
+# at the cost of much longer runtime.
 XLIM = (0.0, 6.0)
 YLIM = (-3.5, 3.5)
-NUM_X = 41
-NUM_Y = 41
-REFINEMENT_LEVELS = 4
+NUM_X = 29
+NUM_Y = 29
+REFINEMENT_LEVELS = 2
 MAX_COUNT = 3   # pinned color scale; >3 flagged for follow-up
 STABILITY_CRITERION = 'coupled'
 
-N_WORKERS = get_n_workers()
-DPI = 600
+# Default size of the multiprocessing pool. Resolved per-machine via
+# parallel_config (env var NR_N_WORKERS or machine_config.N_WORKERS).
+# Override on the command line with --workers.
+DEFAULT_N_WORKERS = get_n_workers()
+
+# Screen-friendly dpi; these are NOT publication plots.
+DPI = 150
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Bumped whenever the cache layout or anything that would invalidate a
@@ -216,6 +228,7 @@ def figure_fingerprint(rows):
     bifurcation rasters for this figure. Used as the cache key."""
     return dict(
         cache_version=CACHE_VERSION,
+        weight_angle_only=False,
         target_locs=TARGET_LOCS.tolist(),
         target_geom=TARGET_GEOM,
         target_radius=TARGET_RADIUS,
@@ -453,6 +466,10 @@ def parse_args():
                         action='append', default=None,
                         help="only build the listed figure(s) (1-6); may "
                              "be passed multiple times. Default: all.")
+    parser.add_argument('--workers', type=int, default=DEFAULT_N_WORKERS,
+                        help=f"size of the multiprocessing pool. Default: "
+                             f"{DEFAULT_N_WORKERS}. Bump this up when "
+                             f"running on a many-core machine.")
     return parser.parse_args()
 
 
@@ -466,8 +483,10 @@ def main():
     else:
         figure_specs = all_specs
 
+    print(f"Using {args.workers} worker(s) for bifurcation evaluation.")
+
     overflow_log = []
-    with Pool(N_WORKERS) as pool:
+    with Pool(args.workers) as pool:
         for rows, suptitle, out_name in figure_specs:
             print(f"\n=== Building {out_name} ({len(rows)} rows) ===")
             build_figure(rows, suptitle, out_name, pool, overflow_log,

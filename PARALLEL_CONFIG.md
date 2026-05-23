@@ -21,7 +21,7 @@ needed.
    a cluster job script:
    ```powershell
    $env:NR_N_WORKERS = "12"
-   python hq_bifurc_plots/neural_weight_sweep.py
+   python bifurc_plots/neural_weight_sweep.py
    ```
 2. `N_WORKERS` from [machine_config.py](machine_config.py), if present.
    This file is gitignored so each machine keeps its own copy.
@@ -54,10 +54,10 @@ without editing files, set `NR_N_WORKERS` in the shell.
 
 | File | Symbol / call |
 | --- | --- |
-| [hq_bifurc_plots/neural_weight_sweep.py](hq_bifurc_plots/neural_weight_sweep.py) | `N_WORKERS = get_n_workers()` |
-| [hq_bifurc_plots/arc_skeleton_and_island_dynamics.py](hq_bifurc_plots/arc_skeleton_and_island_dynamics.py) | `N_WORKERS = get_n_workers()` |
-| [hq_bifurc_plots/bifurcation_compare_discrim_vs_coupled.py](hq_bifurc_plots/bifurcation_compare_discrim_vs_coupled.py) | `N_WORKERS = get_n_workers()` |
-| [exploratory_bifurc_plots/neural_weight_sweep_angle_only.py](exploratory_bifurc_plots/neural_weight_sweep_angle_only.py) | `DEFAULT_N_WORKERS = get_n_workers()` (also `--workers` CLI override) |
+| [bifurc_plots/neural_weight_sweep.py](bifurc_plots/neural_weight_sweep.py) | `DEFAULT_N_WORKERS = get_n_workers()` (also `--workers` CLI override) |
+| [bifurc_plots/neural_weight_sweep_angle_only.py](bifurc_plots/neural_weight_sweep_angle_only.py) | `DEFAULT_N_WORKERS = get_n_workers()` (also `--workers` CLI override) |
+| [bifurc_plots/arc_skeleton_and_island_dynamics.py](bifurc_plots/arc_skeleton_and_island_dynamics.py) | `N_WORKERS = get_n_workers()` |
+| [bifurc_plots/bifurcation_compare_discrim_vs_coupled.py](bifurc_plots/bifurcation_compare_discrim_vs_coupled.py) | `N_WORKERS = get_n_workers()` |
 | [tests/test_broad_validation.py](tests/test_broad_validation.py) | `with Pool(get_n_workers()) as pool:` |
 | [VM_bifurcations/diagnostic_arc_skeleton.py](VM_bifurcations/diagnostic_arc_skeleton.py) | `with Pool(get_n_workers()) as pool:` |
 | [VM_bifurcations/diagnostic_arc_bifurcation.py](VM_bifurcations/diagnostic_arc_bifurcation.py) | `with Pool(get_n_workers()) as pool:` |
