@@ -35,7 +35,8 @@ The current/preferred model. γ lives in **egocentric/neural** space.
 - Self-consistent equilibria have γ = R + 0j (real positive): heading=consensus ⇒ egocentric consensus = 0 ⇒ Θ_neural = f(0) = 0 ⇒ γ = R + 0j.
 
 Key methods:
-- [`gamma_equilib`](decision_model.py#L2181) — self-consistent equilibrium finder.
+- [`sc_equilib`](decision_model.py#L2250) — self-consistent equilibrium finder (heading = consensus). Used for bifurcation diagrams in (x, y).
+- [`gamma_equilib`](decision_model.py#L2181) — γ-equilibrium finder at a fixed observer heading. *Not* the self-consistent finder.
 - [`run_dgamma_dt`](decision_model.py#L2360) — ODE to steady state.
 - [`dtheta_dt`](decision_model.py#L2411) — heading dynamics.
 - [`convert_gamma`](decision_model.py#L2339) — inverse neural mapping from γ to `(ego_angle, R)`.
@@ -50,7 +51,7 @@ Closest to the published PNAS paper. γ lives in **allocentric** space.
 - Walker torque: `dθ/dt = K·|γ|·sin(angle(γ) − θ)`. Both `angle(γ)` and `θ` are allocentric; subtraction is needed because both live in the same absolute frame.
 - Self-consistent equilibria satisfy `dgamma_dt(γ, focal_angle=angle(γ)) = 0` where `angle(γ)` is the allocentric consensus direction.
 
-Key methods: [`gamma_equilib`](decision_model.py#L3473), [`run_dgamma_dt`](decision_model.py#L3337), [`dtheta_dt`](decision_model.py#L3390), [`plot_bifurcation_diagram`](decision_model.py#L3668), [`plot_direction_mesh`](decision_model.py#L3891), [`plot_walkers`](decision_model.py#L4057).
+Key methods: [`sc_equilib`](decision_model.py#L3567) (self-consistent finder, returns gammas; bifurcation diagrams), [`gamma_equilib`](decision_model.py#L3502) (fixed-heading γ-finder), [`run_dgamma_dt`](decision_model.py#L3337), [`dtheta_dt`](decision_model.py#L3390), [`plot_bifurcation_diagram`](decision_model.py#L3668), [`plot_direction_mesh`](decision_model.py#L3891), [`plot_walkers`](decision_model.py#L4057).
 
 ### Model usage constraint — read this before configuring `PerceptionModel`
 
@@ -58,7 +59,7 @@ Key methods: [`gamma_equilib`](decision_model.py#L3473), [`run_dgamma_dt`](decis
 
 **NBM is the model for warped perception.** If you need foveal density, egocentric warping, or any non-identity neural mapping, use NBM. The two are *not* substitutes for each other under warping; they were designed to handle the warping nonlinearity in incompatible ways.
 
-**Diagnostic note:** if an IEM bifurcation diagram or direction mesh comes back almost entirely zero/empty, the most likely cause is accidentally driving IEM with `neural_angle='integral'`. IEM's polar-init multistart in `gamma_equilib` doesn't find roots under that (invalid) configuration. This is *not* a solver bug — it's the model rejecting an invalid input. Switch to `neural_angle=None` to confirm.
+**Diagnostic note:** if an IEM bifurcation diagram or direction mesh comes back almost entirely zero/empty, the most likely cause is accidentally driving IEM with `neural_angle='integral'`. IEM's polar-init multistart in `sc_equilib` doesn't find roots under that (invalid) configuration. This is *not* a solver bug — it's the model rejecting an invalid input. Switch to `neural_angle=None` to confirm.
 
 ## Self-consistent equilibria
 
@@ -70,7 +71,7 @@ Three approaches were considered for handling neural warping with self-consisten
 2. ~~Hybrid with mismatch from Hamiltonian.~~ Rejected: suboptimal, no good error estimates.
 3. **Accept heading-dependent equilibria and find the self-consistent ones.** Adopted because we already accept that consensus direction should depend on where the observer is looking; the self-consistent solution is the physically meaningful subset.
 
-The allocentric consensus direction *is* `θ` (the heading) at a self-consistent equilibrium — no inverse mapping needed to recover the physical direction. `NBM.gamma_equilib(focal_angle=True)` returns `(allocentric_angles, stability_booleans)`.
+The allocentric consensus direction *is* `θ` (the heading) at a self-consistent equilibrium — no inverse mapping needed to recover the physical direction. `NBM.sc_equilib(focal_loc=..., stability_criterion=...)` returns `(allocentric_angles, stability_booleans)`. (`NBM.gamma_equilib` is a separate method that finds γ-eqs at a fixed observer heading; it is *not* the self-consistent finder.)
 
 For NBM, the mathematical proof that only `θ = n·π` self-consistent equilibria exist for turning: `sin(power_inverse(Θ)) = 0` requires `Θ = n·π`. Only `n=0` is stable for turning; `n=±1` corresponds to facing directly *away* from consensus.
 
@@ -83,7 +84,7 @@ For NBM, the mathematical proof that only `θ = n·π` self-consistent equilibri
 - [`_subtract_intervals_circle`](decision_model.py#L1457) computes visible angular intervals after blocking by closer targets.
 - [`_integrate_neural_weight`](decision_model.py#L1497) integrates neural weight (cutoff or vonmises) over those intervals analytically.
 
-The original implementation Riemann-summed over a discrete θ-mesh and produced equilibrium residuals of ~1e-3 — not roundoff but genuine discretization error that caused convergence failures in `gamma_equilib`. Switching to interval arithmetic dropped residuals to machine precision (~1e-14) and gave a 4.5× speedup for circle targets.
+The original implementation Riemann-summed over a discrete θ-mesh and produced equilibrium residuals of ~1e-3 — not roundoff but genuine discretization error that caused convergence failures in `sc_equilib`. Switching to interval arithmetic dropped residuals to machine precision (~1e-14) and gave a 4.5× speedup for circle targets.
 
 The `full_signal` parameter was renamed to `mesh_signal` (the mesh path is still used by `plot_blocked_signals`). The `G.sum()==0` case returns empty arrays instead of NaN division.
 
@@ -98,7 +99,7 @@ The `full_signal` parameter was renamed to `mesh_signal` (the mesh path is still
 - **Domain restriction:** inverse splines raise `ValueError` on `y` outside `[−π, π]`; forward splines saturate safely. Callers are domain-clean by construction.
 - **Reference kernels retained for testing:** `_smooth_cutoff_integral` and `_smooth_cutoff_int_inverse` (static methods) are still used by tests to validate the splines against `quad`/`brentq`. `scipy.stats.vonmises.cdf/ppf` are the vonmises reference.
 
-### NBM `gamma_equilib`: single-pass solver
+### NBM `sc_equilib`: single-pass solver
 
 Simplified from an earlier two-pass `brentq + multistart` to a single-pass strategy:
 
@@ -107,13 +108,13 @@ Simplified from an earlier two-pass `brentq + multistart` to a single-pass strat
 3. Add `θ = 0, ±π` as explicit candidates.
 4. Polish each with 2D `hybr` (`tol=1e-10`), require `sol.success`.
 5. Residual threshold **1e-4**. The `hybr+logistic` combination can produce residuals up to ~2e-5 due to exponential amplification; a tighter 1e-6 threshold was silently dropping ~10% of valid equilibria and creating apparent holes in direction meshes.
-6. Deduplicate with both circular angle distance < 0.02 **and** R distance < 0.01. Both axes are required: near a saddle-node bifurcation, two genuine equilibria of opposite stability can share θ to within ~1e-3 rad while differing in R by ~0.02, so θ-only dedup silently discards one of the pair. Which one survives depends on the brentq sign-change scan order, which flips under coordinate symmetries — producing visible chirality (anti-symmetric "1-stable invading 2-stable" intrusions) in bifurcation diagrams that should be y-symmetric. `IEM.gamma_equilib` was always correct here because it dedups by full complex `|γ_eq − existing_γ|`; NBM regressed in the cf6af66 self-consistent rewrite when the kept-list became θ-only (γ = R+0j made θ feel like the natural identifier). The broad-validation grid in [tests/test_broad_validation.py](tests/test_broad_validation.py) doesn't reach near-SN configurations, so this kind of regression won't show up there — y-symmetry of `plot_bifurcation_diagram` output on a symmetric target setup is the real diagnostic.
+6. Deduplicate with both circular angle distance < 0.02 **and** R distance < 0.01. Both axes are required: near a saddle-node bifurcation, two genuine equilibria of opposite stability can share θ to within ~1e-3 rad while differing in R by ~0.02, so θ-only dedup silently discards one of the pair. Which one survives depends on the brentq sign-change scan order, which flips under coordinate symmetries — producing visible chirality (anti-symmetric "1-stable invading 2-stable" intrusions) in bifurcation diagrams that should be y-symmetric. `IEM.sc_equilib` was always correct here because it dedups by full complex `|γ_eq − existing_γ|`; NBM regressed in the cf6af66 self-consistent rewrite when the kept-list became θ-only (γ = R+0j made θ feel like the natural identifier). The broad-validation grid in [tests/test_broad_validation.py](tests/test_broad_validation.py) doesn't reach near-SN configurations, so this kind of regression won't show up there — y-symmetry of `plot_bifurcation_diagram` output on a symmetric target setup is the real diagnostic.
 
 **Residual asymmetry (known):** even with full (θ, R) dedup, ~25–30% of the y-flip pixel asymmetry persists in `weight_angle_only=True` cutoff/beta/vonmises sweeps. Traced to `scipy.optimize.root(method='hybr')` itself: `_self_consistent_eq` is y-flip symmetric to 1e-20, but hybr's internal Jacobian estimation uses positive forward-difference steps, so the trajectory from a starting point is not the mirror of its trajectory from the sign-flipped starting point. Two scaffolds for fixing this if it ever matters: symmetrize the multistart by also trying mirrored starts for every candidate, or densify the brentq candidate seeding so both members of a near-SN pair are reachable from independent starts.
 
-### IEM `gamma_equilib`: multistart polar-init
+### IEM `sc_equilib`: multistart polar-init
 
-[`IEM.gamma_equilib`](decision_model.py#L3473) uses multistart root finding seeded on a polar grid at radius 0.5 around the unit circle. This is the strategy appropriate for the *allocentric, unwarped* problem IEM is designed for. After the interval-arithmetic refactor, the smoother ρ landscape allowed the root finder to converge to spurious boundary solutions (e.g. `R=1.0` with self-consistent residual ~0.5) that mesh noise had previously masked.
+[`IEM.sc_equilib`](decision_model.py#L3567) uses multistart root finding seeded on a polar grid at radius 0.5 around the unit circle. This is the strategy appropriate for the *allocentric, unwarped* problem IEM is designed for. After the interval-arithmetic refactor, the smoother ρ landscape allowed the root finder to converge to spurious boundary solutions (e.g. `R=1.0` with self-consistent residual ~0.5) that mesh noise had previously masked.
 
 **Fix in place:** after finding `γ_eq`, re-evaluate `dgamma_dt` with `focal_angle=angle(γ_eq)` and reject if `|residual| > 1e-6`. This is the correct self-consistency criterion: at equilibrium, the observer faces its consensus direction.
 
@@ -136,7 +137,7 @@ Default stability test is the **3×3 coupled Jacobian** on `(γ_re, γ_im, θ)`,
 - NBM uses `dθ/dt = K·R·sin(ego_angle)` (via `convert_gamma`).
 - IEM uses `dθ/dt = K·|γ|·sin(angle(γ) − θ)`.
 
-Implemented in [`NBM._discrim_coupled`](decision_model.py#L2449) and [`IEM._discrim_coupled`](decision_model.py#L3565). `gamma_equilib`, `_count_stable_at`, `_process_point`, `plot_direction_mesh`, and `plot_bifurcation_diagram` all accept `stability_criterion='coupled'` (default) or `'discrim_a'` (legacy 2D test, kept for side-by-side comparison plots).
+Implemented in [`NBM._discrim_coupled`](decision_model.py#L2449) and [`IEM._discrim_coupled`](decision_model.py#L3565). `sc_equilib`, `gamma_equilib`, `_count_stable_at`, `_process_point`, `plot_direction_mesh`, and `plot_bifurcation_diagram` all accept `stability_criterion='coupled'` (default) or `'discrim_a'` (legacy 2D test, kept for side-by-side comparison plots). (NBM only — `IEM.sc_equilib` and `IEM.gamma_equilib` return just gammas without a stability list; the IEM plot/count helpers do their own stability test.)
 
 **Why the coupled criterion is correct:** for self-consistent equilibria, the physically meaningful question is stability of the **coupled 3D system**, not the 2D γ subsystem at fixed `focal_angle`. The two criteria disagree wherever the heading dimension contributes a positive eigenvalue while the γ subsystem alone is stable.
 
@@ -188,10 +189,13 @@ In the parameter window analyzed in [VM_bifurcations/VERDICT.md](VM_bifurcations
 
 - **`IEM.run_dgamma_dt` LSODA port** — same restarted-RK45 pattern as the old NBM version; apply matching real-valued LSODA fix when warnings appear.
 - **Cell-center sampling for bifurcation refinement** — deferred; propose if `boundary_dilation` + grid increases are insufficient for thin features.
+- **Walker "target found" termination criterion.** In reproducible cases visible in the Jupyter notebooks, walkers occasionally graze a target, then diverge outward and keep running until the max-step cap. Especially common with delta targets; suspected to also happen with circles. When this misfires it is expensive (simulation runs long past when it should) and corrupts the aggregated-walker figures. Need to (a) tighten the criterion for declaring a target "found" so that grazing approaches end the walk, and (b) investigate any scenarios where a walker is genuinely missing all targets — figure out why and when those occur and what the right response is (terminate? log? extend?).
+- **Two-panel bifurcation + basin-of-attraction plot.** The current bifurcation diagrams (count of stable self-consistent equilibria over (x, y)) tell only part of the story: they don't say *which direction* each stable equilibrium points, and give no indication of basin-of-attraction size. The asymptotic dynamics that the walker follows before noise is added back in are mean-field Glauber; noise can throw the system into a different basin, so noise-robustness of each SC equilibrium matters. Goal: a two-panel figure pairing the existing bifurcation raster with a modified `plot_direction_mesh` that, at each grid point, draws one arrow per stable equilibrium pointing in the *allocentric* consensus direction, colored (or otherwise annotated) by noise robustness. Expected qualitative behavior: in a bistable region where the observer is very close to one circular target and the other is far, the far target's basin should be small.
+  - Quantifying robustness has been hard because the unstable equilibria — which sit on the basin boundaries — are difficult to nail down with the current finder. Two avenues worth considering: (i) use the statistical-mechanics correspondence — stable equilibria are energy minimizers, so local curvature of the energy landscape (or related quantities) at each minimum could give a relative noise-robustness measure without explicitly resolving the saddles; (ii) some more direct estimate of the basin extent in angle space — possibly via numerical integration of the deterministic flow from a fan of initial headings around each stable eq, to find where trajectories switch basins. If the saddle-finding can be made robust, the basin edges themselves could be drawn at each grid point in a contrasting color rather than encoding robustness in a scalar.
 
 ## Common gotchas
 
-- When modifying `gamma_equilib` or `_get_target_signals`, preserve exact interval arithmetic. Mesh-based fallback paths exist for plotting only.
+- When modifying `sc_equilib`, `gamma_equilib`, or `_get_target_signals`, preserve exact interval arithmetic. Mesh-based fallback paths exist for plotting only.
 - When changing the neural-angle transform, the `a`/`b`/`k` setters trigger `_build_integral_splines` rebuild automatically — don't bypass them.
 - When modifying `run_dgamma_dt`, preserve the real-valued reformulation for LSODA compatibility.
 - When discussing model differences or debugging warping-related issues, always check which coordinate system each quantity lives in. Most subtle bugs trace back to a coordinate-frame mismatch.

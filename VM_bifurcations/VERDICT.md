@@ -3,7 +3,7 @@
 ## TL;DR
 
 When the standard self-consistent bifurcation diagram is computed with
-`NeuralBandModel.gamma_equilib(focal_angle=True)` for the parameter set
+`NeuralBandModel.sc_equilib` for the parameter set
 below, two non-obvious features appear:
 
 1. **A small "4 / 5-stable" bullseye near (1.5, 0)** — *numerical artifact.*
@@ -83,8 +83,9 @@ enough to render the bullseye and the 0-stable arcs visibly.
 
 ### Coupled-stability criterion
 
-`gamma_equilib`'s default `_discrim_A` checks only the γ-Jacobian at fixed
-heading. The "true" coupled stability requires forming the 3×3 Jacobian of
+`sc_equilib`'s historical default `_discrim_A` checks only the γ-Jacobian
+at fixed heading (it has since been replaced by `_discrim_coupled` —
+this section was written before that fix). The "true" coupled stability requires forming the 3×3 Jacobian of
 the (γ_re, γ_im, θ) system, where `dθ/dt = K·R·sin(ego_angle)`. All
 diagnostic scripts in this folder do this check by finite difference; see
 e.g. `coupled_jacobian_max_re` in [diagnostic_arc_skeleton.py](diagnostic_arc_skeleton.py).
@@ -110,7 +111,7 @@ Each script writes its `.png` outputs into the current directory.
 
 ## Why the 4/5-stable region is spurious
 
-`NeuralBandModel.gamma_equilib` calls `_discrim_A` (decision_model.py:1942)
+`NeuralBandModel.sc_equilib` historically called `_discrim_A` (decision_model.py:1942)
 to classify each self-consistent equilibrium. `_discrim_A` is the
 discriminant of the **2×2 γ-Jacobian at fixed heading** — it asks "is this
 γ-equilibrium stable as a fixed point of `dgamma_dt` with `focal_angle`

@@ -38,11 +38,11 @@ def _compare_worker(args):
     nbm = NeuralBandModel(pm)
     iem = IsingExtModel(pm)
 
-    nbm_angles, nbm_stab = nbm.gamma_equilib(focal_angle=True, focal_loc=loc)
+    nbm_angles, nbm_stab = nbm.sc_equilib(focal_loc=loc)
     nbm_angles = np.array(nbm_angles)
     nbm_stab = np.array(nbm_stab)
 
-    gammas = iem.gamma_equilib(focal_angle=True, focal_loc=loc)
+    gammas = iem.sc_equilib(focal_loc=loc)
     if not gammas:
         iem_angles = np.array([])
         iem_stab = np.array([], dtype=bool)
@@ -99,7 +99,7 @@ def _warping_worker(args):
     pm.c = c
     nbm = NeuralBandModel(pm)
 
-    angles, stab = nbm.gamma_equilib(focal_angle=True, focal_loc=loc)
+    angles, stab = nbm.sc_equilib(focal_loc=loc)
     angles = np.array(angles)
     stab = np.array(stab)
     n_stable = int(stab.sum()) if len(stab) else 0

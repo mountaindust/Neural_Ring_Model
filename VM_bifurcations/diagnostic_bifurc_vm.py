@@ -44,7 +44,7 @@ nbm = model.NeuralBandModel(percep)
 
 
 def count_at(xy):
-    angles, stab = nbm.gamma_equilib(focal_angle=True, focal_loc=np.array(xy))
+    angles, stab = nbm.sc_equilib(focal_loc=np.array(xy))
     return int(sum(stab)), len(angles), list(zip(angles, stab))
 
 
