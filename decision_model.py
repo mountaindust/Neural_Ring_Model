@@ -305,6 +305,110 @@ class Targets:
             return spine_dist <= self.w / 2
     
 
+    def check_trajectory_intersection(self, old_loc, new_loc):
+        '''Check if the line segment from old_loc to new_loc passes through
+        any target. Returns a bool array of length N.
+
+        Parameters
+        ----------
+        old_loc : 1D ndarray of length 2
+            Start of the trajectory segment
+        new_loc : 1D ndarray of length 2
+            End of the trajectory segment
+
+        Returns
+        -------
+        length N ndarray of bool
+        '''
+        n_targets = len(self.locs)
+
+        if self.geom_name is None:
+            return np.zeros(n_targets, dtype=bool)
+
+        elif self.geom_name == 'circle':
+            d = new_loc - old_loc
+            seg_len2 = np.dot(d, d)
+            if seg_len2 < 1e-24:
+                return np.zeros(n_targets, dtype=bool)
+            f = old_loc - self.locs  # (N, 2)
+            t = np.clip(-np.sum(f * d, axis=1) / seg_len2, 0, 1)
+            proj = old_loc + np.outer(t, d)  # (N, 2)
+            dist = np.linalg.norm(self.locs - proj, axis=1)
+            return dist <= self.r
+
+        elif self.geom_name == 'capsule':
+            seg_vec = np.column_stack([self.l/2*np.cos(self.theta),
+                                       self.l/2*np.sin(self.theta)])
+            spine_start = self.locs - seg_vec
+            spine_end = self.locs + seg_vec
+            if isinstance(self.w, np.ndarray):
+                half_w = self.w / 2
+            else:
+                half_w = np.full(n_targets, self.w / 2)
+            result = np.zeros(n_targets, dtype=bool)
+            for i in range(n_targets):
+                dist = self._min_dist_segments(old_loc, new_loc,
+                                               spine_start[i], spine_end[i])
+                result[i] = dist <= half_w[i]
+            return result
+
+
+    @staticmethod
+    def _min_dist_segments(P0, P1, Q0, Q1):
+        '''Minimum distance between line segment P0-P1 and line segment Q0-Q1.
+
+        Parameters
+        ----------
+        P0, P1 : 1D ndarray
+            Endpoints of first segment
+        Q0, Q1 : 1D ndarray
+            Endpoints of second segment
+
+        Returns
+        -------
+        float
+        '''
+        d1 = P1 - P0
+        d2 = Q1 - Q0
+        r = P0 - Q0
+
+        a = np.dot(d1, d1)
+        e = np.dot(d2, d2)
+        f = np.dot(d2, r)
+
+        if a < 1e-12 and e < 1e-12:
+            return np.linalg.norm(r)
+
+        if a < 1e-12:
+            t = np.clip(f / e, 0, 1)
+            return np.linalg.norm(P0 - (Q0 + t * d2))
+
+        c = np.dot(d1, r)
+
+        if e < 1e-12:
+            s = np.clip(-c / a, 0, 1)
+            return np.linalg.norm((P0 + s * d1) - Q0)
+
+        b = np.dot(d1, d2)
+        denom = a * e - b * b
+
+        if abs(denom) > 1e-12:
+            s = np.clip((b * f - c * e) / denom, 0, 1)
+        else:
+            s = 0.0
+
+        t = (b * s + f) / e
+
+        if t < 0:
+            t = 0.0
+            s = np.clip(-c / a, 0, 1)
+        elif t > 1:
+            t = 1.0
+            s = np.clip((b - c) / a, 0, 1)
+
+        return np.linalg.norm((P0 + s * d1) - (Q0 + t * d2))
+
+
     @staticmethod
     def closest_dist_btwn_lines_and_pt(Q0_list, Q1_list, pt):
         '''
@@ -3005,9 +3109,9 @@ class NeuralBandModel:
             return ax
 
 
-    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
-                     start_loc=None, start_angle=None, plot_tracks=False,
-                     ax=None, title=None, wb_plot=False):
+    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=1500,
+                     start_loc=None, start_angle=None, target_tol=None,
+                     plot_tracks=False, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the neural band torque model on
@@ -3020,8 +3124,8 @@ class NeuralBandModel:
         egocentric physical angle via the inverse neural mapping. The resulting
         torque K*R*sin(ego_angle) drives the heading update.
 
-        The walker stops whenever it is detected to be overlapping a target or
-        after max_steps.
+        The walker stops when it is within target_tol of a target surface,
+        when its trajectory passes through a target, or after max_steps.
 
         Set wb_plot to True if plotting in a Jupyter notebook
 
@@ -3044,6 +3148,10 @@ class NeuralBandModel:
         start_angle : float
             Starting direction that the walker is facing. Defaults to
             focal_angle in the attached PerceptionModel
+        target_tol : float, optional
+            Proximity threshold for declaring a target "found". The walker
+            stops when the distance to any target surface is less than this
+            value. If None (default), uses v*dt (one step size).
         plot_tracks : bool
             Whether or not to overlay the walker trajectories
         ax : matplotlib axis, optional
@@ -3065,10 +3173,13 @@ class NeuralBandModel:
             start_loc = np.array(start_loc, dtype=float)
         if start_angle is None:
             start_angle = self.percep_model.focal_angle
+        if target_tol is None:
+            target_tol = v * dt
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
         orig_gamma = self.gamma
 
+        targets = self.percep_model.targets
         all_walks = []
 
         for n in range(repetitions):
@@ -3077,28 +3188,29 @@ class NeuralBandModel:
             self.gamma = orig_gamma
             walk = [start_loc.copy()]
             for step in range(max_steps):
-                # check for target overlap
-                if np.any(self.percep_model.targets.check_target_overlap(
-                          self.percep_model.focal_loc)):
+                if np.any(targets.get_dist_to_targets(
+                          self.percep_model.focal_loc) < target_tol):
                     break
-                elif self.percep_model.targets.geom_name is None and \
-                np.any(np.linalg.norm(
-                       self.percep_model.focal_loc-self.percep_model.targets.locs,
-                       axis=1)<v*dt):
-                    break
-                # determine allocentric direction and take a step
+                old_loc = self.percep_model.focal_loc.copy()
                 if std > 0:
                     noise = self.rng.normal(scale=std)
                 else:
                     noise = 0
-                # Use an Euler step for the heading SDE
                 theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)
-                # append location to walk list
                 walk.append(self.percep_model.focal_loc.copy())
-            # done. save to all_walks
+                if np.any(targets.check_trajectory_intersection(
+                          old_loc, self.percep_model.focal_loc)):
+                    break
+            else:
+                dists = targets.get_dist_to_targets(self.percep_model.focal_loc)
+                warnings.warn(
+                    f"Walker {n} reached max_steps ({max_steps}). "
+                    f"Final position: ({self.percep_model.focal_loc[0]:.2f}, "
+                    f"{self.percep_model.focal_loc[1]:.2f}), "
+                    f"closest target distance: {dists.min():.4f}")
             all_walks.append(list(walk))
 
         # Restore focal location, angle, and gamma
@@ -4123,9 +4235,9 @@ class IsingExtModel:
             return ax
         
 
-    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=3000,
-                     start_loc=None, start_angle=None, plot_tracks=False,
-                     ax=None, title=None, wb_plot=False):
+    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=1500,
+                     start_loc=None, start_angle=None, target_tol=None,
+                     plot_tracks=False, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the Ising torque model on a dt
@@ -4133,8 +4245,8 @@ class IsingExtModel:
         as specified. Repeat for a number of repetitions and plot a heat map of
         these walks in 2D space.
 
-        The walker stops whenever it is detected to be overlapping a target or
-        after max_steps.
+        The walker stops when it is within target_tol of a target surface,
+        when its trajectory passes through a target, or after max_steps.
 
         Set wb_plot to True if plotting in a Jupyter notebook
 
@@ -4157,6 +4269,10 @@ class IsingExtModel:
         start_angle : float
             Starting direction that the walker is facing. Defaults to
             focal_angle in the attached PerceptionModel
+        target_tol : float, optional
+            Proximity threshold for declaring a target "found". The walker
+            stops when the distance to any target surface is less than this
+            value. If None (default), uses v*dt (one step size).
         plot_tracks : bool
             Whether or not to overlay the walker trajectories
         ax : matplotlib axis, optional
@@ -4178,9 +4294,12 @@ class IsingExtModel:
             start_loc = np.array(start_loc, dtype=float)
         if start_angle is None:
             start_angle = self.percep_model.focal_angle
+        if target_tol is None:
+            target_tol = v * dt
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
 
+        targets = self.percep_model.targets
         all_walks = []
 
         for n in range(repetitions):
@@ -4188,17 +4307,10 @@ class IsingExtModel:
             self.percep_model.focal_angle = start_angle
             walk = [start_loc.copy()]
             for step in range(max_steps):
-                # check for target overlap
-                if np.any(self.percep_model.targets.check_target_overlap(
-                          self.percep_model.focal_loc)):
+                if np.any(targets.get_dist_to_targets(
+                          self.percep_model.focal_loc) < target_tol):
                     break
-                elif self.percep_model.targets.geom_name is None and \
-                np.any(np.linalg.norm(
-                       self.percep_model.focal_loc-self.percep_model.targets.locs,
-                       axis=1)<v*dt):
-                    break
-                # determine allocentric direction and take a step
-                #   assume turning speed is infinite
+                old_loc = self.percep_model.focal_loc.copy()
                 if std > 0:
                     noise = self.rng.normal(scale=std)
                 else:
@@ -4208,9 +4320,17 @@ class IsingExtModel:
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)
-                # append location to walk list
                 walk.append(self.percep_model.focal_loc.copy())
-            # done. save to all_walks
+                if np.any(targets.check_trajectory_intersection(
+                          old_loc, self.percep_model.focal_loc)):
+                    break
+            else:
+                dists = targets.get_dist_to_targets(self.percep_model.focal_loc)
+                warnings.warn(
+                    f"Walker {n} reached max_steps ({max_steps}). "
+                    f"Final position: ({self.percep_model.focal_loc[0]:.2f}, "
+                    f"{self.percep_model.focal_loc[1]:.2f}), "
+                    f"closest target distance: {dists.min():.4f}")
             all_walks.append(list(walk))
 
         # Restore focal location and angle

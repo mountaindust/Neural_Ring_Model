@@ -130,6 +130,15 @@ Simplified from an earlier two-pass `brentq + multistart` to a single-pass strat
 
 At `θ = π` with cutoff weighting, targets behind the observer have zero neural weight, so `dgamma_dt = −γ` and the only equilibrium is `R = 0`. The filter correctly excludes this trivial state.
 
+### Walker target detection (`plot_walkers`)
+
+Both `NBM.plot_walkers` and `IEM.plot_walkers` use a two-layer target detection system:
+
+1. **Proximity check** — `Targets.get_dist_to_targets(loc) < target_tol` at the start of each step. Works for all geometry types (circle returns `center_dist - r`, capsule returns `max(spine_dist - w/2, 0)`, delta returns Euclidean distance). Default `target_tol = v*dt` (one step size).
+2. **Trajectory intersection** — `Targets.check_trajectory_intersection(old_loc, new_loc)` after each step. Catches pass-throughs where the walker steps entirely through a target in one Euler step. Uses point-to-segment distance for circles, segment-to-segment distance (`Targets._min_dist_segments`) for capsules.
+
+If a walker exhausts `max_steps` (default 1500) without finding a target, a `warnings.warn` is issued with the repetition number, final position, and closest target distance. The walk is still included in the heatmap aggregation.
+
 ## Stability criterion
 
 Default stability test is the **3×3 coupled Jacobian** on `(γ_re, γ_im, θ)`, built numerically with `h=1e-6`, `tol=1e-8`.
@@ -189,7 +198,7 @@ In the parameter window analyzed in [VM_bifurcations/VERDICT.md](VM_bifurcations
 
 - **`IEM.run_dgamma_dt` LSODA port** — same restarted-RK45 pattern as the old NBM version; apply matching real-valued LSODA fix when warnings appear.
 - **Cell-center sampling for bifurcation refinement** — deferred; propose if `boundary_dilation` + grid increases are insufficient for thin features.
-- **Walker "target found" termination criterion.** In reproducible cases visible in the Jupyter notebooks, walkers occasionally graze a target, then diverge outward and keep running until the max-step cap. Especially common with delta targets; suspected to also happen with circles. When this misfires it is expensive (simulation runs long past when it should) and corrupts the aggregated-walker figures. Need to (a) tighten the criterion for declaring a target "found" so that grazing approaches end the walk, and (b) investigate any scenarios where a walker is genuinely missing all targets — figure out why and when those occur and what the right response is (terminate? log? extend?).
+- **Walker blind-spot trap under cutoff weighting.** With `a=0, b=pi` cutoff + integral neural mapping and delta targets, walkers that overshoot a target and get all targets behind them lose the ability to navigate back. The integral neural mapping collapses all behind-the-walker ego angles to ±180° in neural space, gamma locks onto -1+0j (the ±π branch cut), and `sin(±180°) ≈ 0` kills the restoring torque. The walker enters a pure random walk. Detailed analysis in [weighting_analysis/README.md](weighting_analysis/README.md). Possible remedies: minimum torque floor / U-turn behavior, wider neural mapping (`a > 0`), or heading-dependent noise. Not yet implemented.
 - **Two-panel bifurcation + basin-of-attraction plot.** The current bifurcation diagrams (count of stable self-consistent equilibria over (x, y)) tell only part of the story: they don't say *which direction* each stable equilibrium points, and give no indication of basin-of-attraction size. The asymptotic dynamics that the walker follows before noise is added back in are mean-field Glauber; noise can throw the system into a different basin, so noise-robustness of each SC equilibrium matters. Goal: a two-panel figure pairing the existing bifurcation raster with a modified `plot_direction_mesh` that, at each grid point, draws one arrow per stable equilibrium pointing in the *allocentric* consensus direction, colored (or otherwise annotated) by noise robustness. Expected qualitative behavior: in a bistable region where the observer is very close to one circular target and the other is far, the far target's basin should be small.
   - Quantifying robustness has been hard because the unstable equilibria — which sit on the basin boundaries — are difficult to nail down with the current finder. Two avenues worth considering: (i) use the statistical-mechanics correspondence — stable equilibria are energy minimizers, so local curvature of the energy landscape (or related quantities) at each minimum could give a relative noise-robustness measure without explicitly resolving the saddles; (ii) some more direct estimate of the basin extent in angle space — possibly via numerical integration of the deterministic flow from a fan of initial headings around each stable eq, to find where trajectories switch basins. If the saddle-finding can be made robust, the basin edges themselves could be drawn at each grid point in a contrasting color rather than encoding robustness in a scalar.
 

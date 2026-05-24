@@ -373,6 +373,88 @@ zero — i.e., the destabilization is a real-eigenvalue crossing
 (pitchfork-like, consistent with the y=0 symmetry), not a Hopf. The
 Hopf-positive cells found above are all off-axis.
 
+## Walker blind-spot trap under cutoff weighting (delta targets)
+
+**Date:** 2026-05-23
+
+Investigation of why delta-target walkers sometimes wander off and never
+return to any target, triggered by the walker termination criterion work.
+
+### Setup
+
+Same four-target delta geometry as the rest of this folder:
+`target_locs = [(4.33, ±2.25), (4.33, ±0.75)]`, `geom_name=None`.
+`neural_weight='cutoff'`, `a=0`, `b=pi`, `neural_angle='integral'`,
+`K=10`, `dt=0.1`, `v=1`, `std=0.5`.  30 walkers from `(0, 0)` facing 0.
+
+5 of 30 walkers hit `max_steps` without finding any target.  All five
+ended up 50-75 units from the targets — not grazing, but genuinely lost.
+
+### Mechanism: neural-angle collapse at ±pi
+
+Detailed step-by-step diagnostic of seed=3 (reproduces the behavior):
+
+1. **Overshoot (steps 0-57).**  The walker approaches target 0, steered by
+   strong torque (`K*R*sin(ego) ≈ 8-10 rad/s`).  But it overrotates —
+   heading swings past the target direction to 122.7° at closest approach
+   (distance 0.165 from target 0).
+
+2. **Noise kick (step 57).**  A large negative noise draw (-1.247) swings
+   the heading back to 99.3°.  Now all four targets are behind the walker
+   (physical ego angles 130-170°).
+
+3. **Neural angle collapse (steps 58+).**  The integral neural mapping
+   with `a=0, b=pi` maps physical ego angles near ±180° to neural angles
+   of **exactly ±180°**.  By step 60, all four neural angles are pinned
+   at ±180° — the mapping has lost all directional differentiation.
+
+4. **Gamma locks onto the branch cut.**  With all neural angles at ±180°,
+   `dgamma_dt` converges to `gamma = -1 + 0j` (angle = ±180°, R = 1.0).
+   This sits exactly on the ±pi branch cut of `np.angle`.
+
+5. **Torque death.**  `convert_gamma(gamma)` returns `ego_angle ≈ ±180°`.
+   `sin(±180°) ≈ 0`, so `K*R*sin(ego_angle) ≈ 0`.  The restoring torque
+   drops from ~8 rad/s (target in front) to **< 0.3 rad/s** (all targets
+   behind).  Floating-point noise at the branch cut also causes the torque
+   to **oscillate in sign** between steps — the model can't decide whether
+   to turn left or right.
+
+6. **Pure random walk.**  With negligible net torque, the walker drifts
+   under noise.  Cumulative torque after 40 steps past closest approach:
+   -0.507 rad.  Cumulative noise: -0.383 rad.  Neither dominates; the
+   heading oscillates between ~85° and ~127° with no net progress toward
+   facing the targets.
+
+### Root cause
+
+This is a genuine physical feature of the model, not a numerical artifact.
+The cutoff weighting + integral neural mapping creates a **perceptual dead
+zone** directly behind the walker: physical angles near ±180° are all
+mapped to the same neural angle (±180°), destroying the directional
+information the torque equation needs to steer the walker back.
+
+The model's prediction: an agent with foveal (forward-biased) perception
+that overshoots its target and gets everything behind it will be unable to
+navigate back.  Whether this is a desirable prediction or a modeling
+artifact to be addressed is an open question.
+
+### Possible remedies (not yet implemented)
+
+- **Minimum torque floor or explicit U-turn behavior:** if all targets are
+  behind the walker, impose a minimum turning rate to force a U-turn.
+- **Wider neural mapping:** use `a > 0` or a less peaked weighting so that
+  targets at ±150° still have distinct neural angles (not collapsed to
+  ±180°).
+- **Heading noise coupling:** make the noise term heading-dependent so that
+  walkers in the dead zone get larger random kicks, modeling increased
+  "searching" behavior when all targets are behind.
+
+### Reproduction
+
+Seed 3 with the setup above reproduces the behavior deterministically.
+Seeds 10 and 16 also wander off with 400-step walks.  Diagnostic script
+is in the conversation transcript that produced this section.
+
 ## What's NOT covered here
 
 - **3+ symmetric targets with observer at the center** (the configuration
