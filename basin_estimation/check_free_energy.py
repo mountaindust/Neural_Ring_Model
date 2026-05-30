@@ -168,186 +168,183 @@ def fd_jacobian_dgamma(gamma_re, gamma_im, theta, focal_loc, h=1e-6):
 
 
 # -----------------------------------------------------------------------------
-# Test points
+# Tests (run only when this script is executed directly, not imported)
 # -----------------------------------------------------------------------------
-rng = np.random.default_rng(42)
-N_RANDOM = 200
+if __name__ == "__main__":
+    rng = np.random.default_rng(42)
+    N_RANDOM = 200
 
-def sample_random_point():
-    return (rng.uniform(0.5, 5.5),               # focal_x
-            rng.uniform(-2.5, 2.5),              # focal_y
-            rng.uniform(-np.pi, np.pi),          # theta
-            rng.uniform(-0.85, 0.85),            # gamma_re
-            rng.uniform(-0.85, 0.85))            # gamma_im
+    def sample_random_point():
+        return (rng.uniform(0.5, 5.5),               # focal_x
+                rng.uniform(-2.5, 2.5),              # focal_y
+                rng.uniform(-np.pi, np.pi),          # theta
+                rng.uniform(-0.85, 0.85),            # gamma_re
+                rng.uniform(-0.85, 0.85))            # gamma_im
 
-# Calibration points where we'll enumerate γ-equilibria
-eq_focal_locs = [(0.5, 0), (1.5, 0), (3.0, 0),
-                  (4.0, 1.5), (2.0, -2.0), (4.33, 0)]
-eq_thetas = [0.0, 0.3, 0.6, np.pi/2, 2.0, -1.0, -np.pi/3]
+    # Calibration points where we'll enumerate γ-equilibria
+    eq_focal_locs = [(0.5, 0), (1.5, 0), (3.0, 0),
+                      (4.0, 1.5), (2.0, -2.0), (4.33, 0)]
+    eq_thetas = [0.0, 0.3, 0.6, np.pi/2, 2.0, -1.0, -np.pi/3]
 
+    results = []
 
-# -----------------------------------------------------------------------------
-# Tests
-# -----------------------------------------------------------------------------
-results = []
+    # T1 — analytical vs FD gradient
+    max_err = 0.0
+    for _ in range(N_RANDOM):
+        fx, fy, th, gr, gi = sample_random_point()
+        floc = np.array([fx, fy])
+        err = np.max(np.abs(grad_F_hat(gr, gi, th, floc)
+                            - fd_grad_F_hat(gr, gi, th, floc)))
+        if err > max_err:
+            max_err = err
+    print(f"T1 analytical vs FD ∇F̂:     max err = {max_err:.2e}")
+    results.append(("T1", max_err < 1e-7))
 
-# T1 — analytical vs FD gradient
-max_err = 0.0
-for _ in range(N_RANDOM):
-    fx, fy, th, gr, gi = sample_random_point()
-    floc = np.array([fx, fy])
-    err = np.max(np.abs(grad_F_hat(gr, gi, th, floc)
-                        - fd_grad_F_hat(gr, gi, th, floc)))
-    if err > max_err:
-        max_err = err
-print(f"T1 analytical vs FD ∇F̂:     max err = {max_err:.2e}")
-results.append(("T1", max_err < 1e-7))
+    # T2 — -∇F̂ equals dgamma_dt
+    max_err = 0.0
+    for _ in range(N_RANDOM):
+        fx, fy, th, gr, gi = sample_random_point()
+        floc = np.array([fx, fy])
+        grad = grad_F_hat(gr, gi, th, floc)
+        dg = nbm.dgamma_dt(gamma=gr + 1j*gi, focal_angle=th, focal_loc=floc)
+        err = np.max(np.abs(-grad - np.array([dg.real, dg.imag])))
+        if err > max_err:
+            max_err = err
+    print(f"T2 -∇F̂ vs dgamma_dt:        max err = {max_err:.2e}")
+    results.append(("T2", max_err < 1e-13))
 
-# T2 — -∇F̂ equals dgamma_dt
-max_err = 0.0
-for _ in range(N_RANDOM):
-    fx, fy, th, gr, gi = sample_random_point()
-    floc = np.array([fx, fy])
-    grad = grad_F_hat(gr, gi, th, floc)
-    dg = nbm.dgamma_dt(gamma=gr + 1j*gi, focal_angle=th, focal_loc=floc)
-    err = np.max(np.abs(-grad - np.array([dg.real, dg.imag])))
-    if err > max_err:
-        max_err = err
-print(f"T2 -∇F̂ vs dgamma_dt:        max err = {max_err:.2e}")
-results.append(("T2", max_err < 1e-13))
+    # T3 — ∇F̂(γ_eq) ≈ 0
+    max_err = 0.0
+    n_total = 0
+    for floc_tuple in eq_focal_locs:
+        floc = np.array(floc_tuple)
+        for th in eq_thetas:
+            gammas, _ = nbm.gamma_equilib(focal_angle=th, focal_loc=floc,
+                                           stability_criterion='discrim_a')
+            for g in gammas:
+                n_total += 1
+                err = np.max(np.abs(grad_F_hat(g.real, g.imag, th, floc)))
+                if err > max_err:
+                    max_err = err
+    print(f"T3 ∇F̂(γ_eq) over {n_total} eqs: max err = {max_err:.2e}")
+    results.append(("T3", max_err < 1e-5))
 
-# T3 — ∇F̂(γ_eq) ≈ 0
-max_err = 0.0
-n_total = 0
-for floc_tuple in eq_focal_locs:
-    floc = np.array(floc_tuple)
-    for th in eq_thetas:
-        gammas, _ = nbm.gamma_equilib(focal_angle=th, focal_loc=floc,
-                                       stability_criterion='discrim_a')
-        for g in gammas:
+    # T4 — analytical vs FD Hessian
+    max_err = 0.0
+    for _ in range(N_RANDOM):
+        fx, fy, th, gr, gi = sample_random_point()
+        floc = np.array([fx, fy])
+        H_anal = hess_F_hat(gr, gi, th, floc)
+        H_fd = fd_hess_F_hat(gr, gi, th, floc)
+        err = np.max(np.abs(H_anal - H_fd))
+        if err > max_err:
+            max_err = err
+    print(f"T4 analytical vs FD Hessian: max err = {max_err:.2e}")
+    results.append(("T4", max_err < 1e-6))
+
+    # T5 — Jacobian of dgamma_dt at γ_eq equals -Hessian of F̂
+    max_err = 0.0
+    n_total = 0
+    for floc_tuple in eq_focal_locs:
+        floc = np.array(floc_tuple)
+        for th in eq_thetas:
+            gammas, _ = nbm.gamma_equilib(focal_angle=th, focal_loc=floc,
+                                           stability_criterion='discrim_a')
+            for g in gammas:
+                n_total += 1
+                J = fd_jacobian_dgamma(g.real, g.imag, th, floc)
+                H = hess_F_hat(g.real, g.imag, th, floc)
+                err = np.max(np.abs(J + H))
+                if err > max_err:
+                    max_err = err
+    print(f"T5 J(dgamma) + H(F̂) over {n_total} eqs: max err = {max_err:.2e}")
+    results.append(("T5", max_err < 1e-5))
+
+    # T6 — γ-Hessian negative eig ⟹ _discrim_coupled says unstable
+    # (γ-saddle in the γ subsystem ⟹ coupled 3×3 system also unstable.)
+    n_total = 0
+    n_violations = 0
+    violations = []
+    discrim_A_disagreements = []
+    for floc_tuple in eq_focal_locs:
+        floc = np.array(floc_tuple)
+        sc_angles, sc_stab_coupled = nbm.sc_equilib(
+            focal_loc=floc, stability_criterion='coupled')
+        _, sc_stab_discrimA = nbm.sc_equilib(
+            focal_loc=floc, stability_criterion='discrim_a')
+        # Align by angle
+        for th_sc, coupled_stable, discrimA_stable in zip(
+                sc_angles, sc_stab_coupled, sc_stab_discrimA):
+            gammas, _ = nbm.gamma_equilib(focal_angle=th_sc, focal_loc=floc,
+                                           stability_criterion='discrim_a')
+            sc_g = None
+            for g in gammas:
+                if abs(np.angle(g)) < 0.05 and abs(g) > 0.01:
+                    sc_g = g
+                    break
+            if sc_g is None:
+                continue
             n_total += 1
-            err = np.max(np.abs(grad_F_hat(g.real, g.imag, th, floc)))
-            if err > max_err:
-                max_err = err
-print(f"T3 ∇F̂(γ_eq) over {n_total} eqs: max err = {max_err:.2e}")
-results.append(("T3", max_err < 1e-5))
-
-# T4 — analytical vs FD Hessian
-max_err = 0.0
-for _ in range(N_RANDOM):
-    fx, fy, th, gr, gi = sample_random_point()
-    floc = np.array([fx, fy])
-    H_anal = hess_F_hat(gr, gi, th, floc)
-    H_fd = fd_hess_F_hat(gr, gi, th, floc)
-    err = np.max(np.abs(H_anal - H_fd))
-    if err > max_err:
-        max_err = err
-print(f"T4 analytical vs FD Hessian: max err = {max_err:.2e}")
-results.append(("T4", max_err < 1e-6))
-
-# T5 — Jacobian of dgamma_dt at γ_eq equals -Hessian of F̂
-max_err = 0.0
-n_total = 0
-for floc_tuple in eq_focal_locs:
-    floc = np.array(floc_tuple)
-    for th in eq_thetas:
-        gammas, _ = nbm.gamma_equilib(focal_angle=th, focal_loc=floc,
-                                       stability_criterion='discrim_a')
-        for g in gammas:
-            n_total += 1
-            J = fd_jacobian_dgamma(g.real, g.imag, th, floc)
-            H = hess_F_hat(g.real, g.imag, th, floc)
-            err = np.max(np.abs(J + H))
-            if err > max_err:
-                max_err = err
-print(f"T5 J(dgamma) + H(F̂) over {n_total} eqs: max err = {max_err:.2e}")
-results.append(("T5", max_err < 1e-5))
-
-# T6 — γ-Hessian negative eig ⟹ _discrim_coupled says unstable
-# (γ-saddle in the γ subsystem ⟹ coupled 3×3 system also unstable.)
-n_total = 0
-n_violations = 0
-violations = []
-discrim_A_disagreements = []
-for floc_tuple in eq_focal_locs:
-    floc = np.array(floc_tuple)
-    sc_angles, sc_stab_coupled = nbm.sc_equilib(
-        focal_loc=floc, stability_criterion='coupled')
-    _, sc_stab_discrimA = nbm.sc_equilib(
-        focal_loc=floc, stability_criterion='discrim_a')
-    # Align by angle
-    for th_sc, coupled_stable, discrimA_stable in zip(
-            sc_angles, sc_stab_coupled, sc_stab_discrimA):
-        gammas, _ = nbm.gamma_equilib(focal_angle=th_sc, focal_loc=floc,
-                                       stability_criterion='discrim_a')
-        sc_g = None
-        for g in gammas:
-            if abs(np.angle(g)) < 0.05 and abs(g) > 0.01:
-                sc_g = g
-                break
-        if sc_g is None:
-            continue
-        n_total += 1
-        H = hess_F_hat(sc_g.real, sc_g.imag, th_sc, floc)
-        eigs = np.linalg.eigvalsh(H)
-        has_neg = bool(np.any(eigs < 0))
-        # Required: γ-saddle ⟹ coupled-unstable
-        if has_neg and coupled_stable:
-            n_violations += 1
-            violations.append((floc_tuple, th_sc, sc_g, eigs.tolist()))
-        # Diagnostic: where _discrim_A differs from γ-Hessian sign
-        if has_neg and discrimA_stable:
-            discrim_A_disagreements.append(
-                (floc_tuple, th_sc, sc_g, eigs.tolist()))
-print(f"T6 γ-Hessian sign vs _discrim_coupled at {n_total} SC eqs:")
-print(f"   violations (γ-saddle but coupled-stable): {n_violations}")
-if n_violations:
-    for v in violations:
+            H = hess_F_hat(sc_g.real, sc_g.imag, th_sc, floc)
+            eigs = np.linalg.eigvalsh(H)
+            has_neg = bool(np.any(eigs < 0))
+            # Required: γ-saddle ⟹ coupled-unstable
+            if has_neg and coupled_stable:
+                n_violations += 1
+                violations.append((floc_tuple, th_sc, sc_g, eigs.tolist()))
+            # Diagnostic: where _discrim_A differs from γ-Hessian sign
+            if has_neg and discrimA_stable:
+                discrim_A_disagreements.append(
+                    (floc_tuple, th_sc, sc_g, eigs.tolist()))
+    print(f"T6 γ-Hessian sign vs _discrim_coupled at {n_total} SC eqs:")
+    print(f"   violations (γ-saddle but coupled-stable): {n_violations}")
+    if n_violations:
+        for v in violations:
+            print(f"     focal_loc={v[0]}, θ_sc={v[1]:.3f}, "
+                  f"γ={v[2]:.3f}, H eigs={v[3]}")
+    print(f"   diagnostic: {len(discrim_A_disagreements)} SC eqs where "
+          f"_discrim_A says stable but γ-Hessian shows a saddle")
+    print(f"   (these are expected — the documented _discrim_A over-counting)")
+    for v in discrim_A_disagreements:
         print(f"     focal_loc={v[0]}, θ_sc={v[1]:.3f}, "
               f"γ={v[2]:.3f}, H eigs={v[3]}")
-print(f"   diagnostic: {len(discrim_A_disagreements)} SC eqs where "
-      f"_discrim_A says stable but γ-Hessian shows a saddle")
-print(f"   (these are expected — the documented _discrim_A over-counting)")
-for v in discrim_A_disagreements:
-    print(f"     focal_loc={v[0]}, θ_sc={v[1]:.3f}, "
-          f"γ={v[2]:.3f}, H eigs={v[3]}")
-results.append(("T6", n_violations == 0))
+    results.append(("T6", n_violations == 0))
 
-# T7 — at γ_eq, 2k·F̂ equals F_mf per spin at n_j*(γ_eq)
-max_err = 0.0
-n_total = 0
-for floc_tuple in eq_focal_locs:
-    floc = np.array(floc_tuple)
-    for th in eq_thetas:
-        neural_angles, _ = _neural_data(th, floc)
-        if neural_angles.size == 0:
-            continue
-        k = neural_angles.size
-        gammas, _ = nbm.gamma_equilib(focal_angle=th, focal_loc=floc,
-                                       stability_criterion='discrim_a')
-        for g in gammas:
-            n_total += 1
-            F_h = F_hat(g.real, g.imag, th, floc)
-            F_mf = F_mf_per_spin_at_constrained(g.real, g.imag, th, floc)
-            err = abs(2*k*F_h - F_mf)
-            if err > max_err:
-                max_err = err
-print(f"T7 2k·F̂(γ_eq) vs F_mf at n_j*: max err over {n_total} eqs = {max_err:.2e}")
-results.append(("T7", max_err < 1e-10))
+    # T7 — at γ_eq, 2k·F̂ equals F_mf per spin at n_j*(γ_eq)
+    max_err = 0.0
+    n_total = 0
+    for floc_tuple in eq_focal_locs:
+        floc = np.array(floc_tuple)
+        for th in eq_thetas:
+            neural_angles, _ = _neural_data(th, floc)
+            if neural_angles.size == 0:
+                continue
+            k = neural_angles.size
+            gammas, _ = nbm.gamma_equilib(focal_angle=th, focal_loc=floc,
+                                           stability_criterion='discrim_a')
+            for g in gammas:
+                n_total += 1
+                F_h = F_hat(g.real, g.imag, th, floc)
+                F_mf = F_mf_per_spin_at_constrained(g.real, g.imag, th, floc)
+                err = abs(2*k*F_h - F_mf)
+                if err > max_err:
+                    max_err = err
+    print(f"T7 2k·F̂(γ_eq) vs F_mf at n_j*: max err over {n_total} eqs = {max_err:.2e}")
+    results.append(("T7", max_err < 1e-10))
 
 
-# -----------------------------------------------------------------------------
-# Summary
-# -----------------------------------------------------------------------------
-print()
-print("=" * 60)
-n_pass = sum(1 for _, p in results if p)
-n_fail = len(results) - n_pass
-for name, passed in results:
-    print(f"  {name}: {'PASS' if passed else 'FAIL'}")
-print(f"\n{n_pass}/{len(results)} tests passed.")
-if n_fail == 0:
-    print("F̂ derivation is numerically validated.")
-else:
-    print("F̂ derivation FAILED validation — see above.")
-sys.exit(0 if n_fail == 0 else 1)
+    # -----------------------------------------------------------------------------
+    # Summary
+    # -----------------------------------------------------------------------------
+    print()
+    print("=" * 60)
+    n_pass = sum(1 for _, p in results if p)
+    n_fail = len(results) - n_pass
+    for name, passed in results:
+        print(f"  {name}: {'PASS' if passed else 'FAIL'}")
+    print(f"\n{n_pass}/{len(results)} tests passed.")
+    if n_fail == 0:
+        print("F̂ derivation is numerically validated.")
+    else:
+        print("F̂ derivation FAILED validation — see above.")
+    sys.exit(0 if n_fail == 0 else 1)
