@@ -25,6 +25,7 @@ step contributed each section.
 | 3  | Slow-manifold θ-scan and γ-continuation | 4 |
 | 4  | Basins, effective potential, and the multistable case | 5 |
 | 5  | The Schur complement and slow eigenvalues | 5 (technical) |
+| 6  | γ-saddle finding and ΔF_γ at fixed θ | 6 |
 
 ## 1. The state space and the slow manifold
 
@@ -601,15 +602,168 @@ If you find yourself trying to "extract a slow direction" from a
 coupled linear system, the Schur complement is almost always what
 you want.
 
-## 6. Summary and what's next
+## 6. γ-saddle finding and ΔF_γ at fixed θ — Step 6
 
-**Solid foundations (Steps 1–4):**
+Step 5 looked at *basin boundaries in θ* on the slow manifold. Step 6
+looks at *basin boundaries in γ at fixed θ*: at each stable SC
+equilibrium (γ_s, θ_s), the γ-only dynamics defines a 2D landscape
+F̂(γ; θ_s) whose minimum is γ_s. The γ-basin of γ_s in the complex
+γ-plane is bounded by **γ-saddles** — critical points of F̂(γ; θ_s) at
+which the Hessian has one negative eigenvalue.
+
+This question is much cleaner than Step 5's because everything happens
+at fixed θ — no γ-folds, no branch ambiguities. We're just enumerating
+critical points of a 2D smooth function and computing barrier heights.
+
+### 6.1 The barrier height ΔF_γ
+
+For each γ-saddle γ_sad neighboring γ_s, the **barrier height** is
+
+$$ΔF_γ = F̂(γ_{sad}; θ_s) - F̂(γ_s; θ_s).$$
+
+By Kramers theory, the escape rate of a Langevin trajectory from the
+γ_s basin over this saddle is
+
+$$\text{rate} \;\sim\; \exp\!\bigl(-ΔF_γ / D\bigr),$$
+
+where D = T/(2kN) is the γ-Langevin diffusion coefficient (§2.5).
+**Bigger ΔF_γ means a more noise-robust γ-equilibrium**; small ΔF_γ
+means γ-noise can readily kick the trajectory out of its current
+γ-basin into a neighboring one.
+
+### 6.2 Two ways to evaluate ΔF_γ, and why they should agree
+
+**Direct evaluation:** plug γ_s and γ_sad into the F̂ formula
+(derivation §3) and subtract.
+
+**Path integral:** for any path γ(s) from γ_s to γ_sad,
+
+$$ΔF_γ = \int_0^1 \nabla F̂(γ(s)) \cdot γ'(s)\, ds.$$
+
+By the **gradient theorem** (the fundamental theorem of calculus for
+line integrals), this is path-independent: as long as ∇F̂ is the
+gradient of a single-valued scalar field, *any* path from γ_s to γ_sad
+gives the same value. We use the straight line γ(s) = γ_s + s(γ_sad
+− γ_s).
+
+Test T1 checks these agree to machine precision (6.6e-17 max). This
+is a *consistency check on the implementation*: if direct and path
+disagreed, either F̂ or ∇F̂ would have a bug. They don't.
+
+### 6.3 Hessian directional curvature
+
+At γ_s a γ-minimum, expand F̂ to second order along the unit direction
+n̂ pointing toward γ_sad:
+
+$$F̂(γ_s + t\, n̂) \;\approx\; F̂(γ_s) + \tfrac{1}{2}\,(n̂^T H n̂)\, t^2.$$
+
+The leading coefficient n̂ᵀ H n̂ is the **directional curvature** of
+F̂ at γ_s along the escape direction. By centered finite difference,
+
+$$V''(0) \approx \frac{F̂(γ_s + h n̂) - 2 F̂(γ_s) + F̂(γ_s - h n̂)}{h^2}.$$
+
+Test T2 checks that V''(0) computed by finite differences matches
+n̂ᵀ H n̂ computed analytically. Max error 5.9e-8, at the floor of
+the centered-FD truncation error (~h²·V'''' with h=1e-4). This is
+another consistency check between F̂'s second-order expansion and
+its analytical Hessian.
+
+### 6.4 What the calibration points show
+
+|              Point | θ_s        | # γ-eqs | # γ-saddles | ΔF_γ      |
+|--------------------|------------|---------|-------------|-----------|
+| (2.0, 0) side      | ±0.82      | 3       | 1           | **0.144** |
+| (1.2, 0) center    | 0          | 5       | 2 (mirror)  | **0.0154** |
+| (1.2, 0) side      | ±0.66      | 3       | 1           | **0.00426** |
+
+**Three structural observations:**
+
+1. **ΔF_γ varies by ~30× across the calibration setup.** The side
+   stables at (1.2, 0) have very small barriers — they will be much
+   more susceptible to γ-noise than the (2.0, 0) sides. A small ΔF_γ
+   means a γ-noise kick can flip γ to a different basin and the
+   walker switches branches.
+
+2. **The number of γ-saddles per stable depends on local structure.**
+   At the y=0 symmetric central stable of (1.2, 0), reflection symmetry
+   gives a *mirror pair* of γ-saddles — two parallel escape channels
+   with identical barrier height. The Kramers total escape rate is
+   the sum, which doubles the effective rate compared to a single
+   channel. Off-axis stables have only one saddle each.
+
+3. **5 γ-equilibria at (1.2, 0), θ=0** matches the "5-stable bullseye"
+   that CLAUDE.md flags as `discrim_A`'s over-count at the
+   nearby (1.5, 0) — but here those are 3 *γ-stable* eqs at fixed θ
+   (γ-mins of F̂), not 5 *coupled-stable* SC eqs. The structure is
+   real; the over-count was just `discrim_A` not testing the
+   parallel-to-γ direction.
+
+### 6.5 Sketch — γ-landscape at (1.2, 0), θ=0
+
+Schematic F̂(γ; θ=0) iso-contours on the complex γ-plane at the central
+stable's θ:
+
+```
+       γ_im
+        │
+   ●────│────●          ● = γ-mins (3)
+   │ ╲  │  ╱ │
+   │  ╲ │ ╱  │          ▲ = γ-saddles (2)
+   │   ▲│▲   │
+   │   ─●─   │ ────── γ_re      ● at center: SC γ_s ≈ R+0j
+   │   ▲│▲   │                  ● off-axis: ≈ 0.25 ± 0.43i (symmetric pair)
+   │  ╱ │ ╲  │
+   │ ╱  │  ╲ │
+   ●────│────●
+        │
+```
+
+γ_s = +0.50 + 0j (the central minimum on the real axis). The two
+mirror-image γ-saddles lie at ≈+0.37 ± 0.22i, between γ_s and the
+two off-axis γ-mins at ≈+0.25 ± 0.43i. Either γ-saddle gives an
+escape channel; by y-symmetry their barrier heights are equal
+(ΔF_γ ≈ 0.0154 each).
+
+The Kramers γ-noise escape rate is the sum over both channels:
+
+$$\text{rate}_\text{γ-escape} \;\approx\; 2 \exp(-0.0154 / D)$$
+
+with D = T/(2kN). For T = 0.2, k = 2, N = 1000, D ≈ 5e-5 — so the
+Kramers exponent is 0.0154/5e-5 ≈ 308, and exp(-308) is vanishingly
+small. So γ-escape from this central stable is rare at N = 1000. At
+N = 100, D ≈ 5e-4, exponent ≈ 31, exp(-31) ≈ 3e-14 — still rare. At
+N = 10, exponent ≈ 3, exp(-3) ≈ 0.05 — finally non-negligible.
+
+The smaller-ΔF_γ side stables at (1.2, 0) (ΔF_γ ≈ 0.00426) require
+about 4× lower N to see comparable escape rates, so they should be
+noticeably more noise-sensitive in MC.
+
+### 6.6 Implication for Step 8
+
+Step 8 (Monte Carlo escape times) will validate these Kramers
+predictions empirically. The prediction is straightforward:
+
+- Run γ-Langevin at fixed θ = θ_s starting from γ_s.
+- Measure mean first-passage time τ to leave a small γ-neighborhood
+  of γ_s (or, equivalently, to cross over a γ-saddle).
+- Check 1/τ ≈ (Kramers prefactor) · exp(-ΔF_γ/D).
+
+The ΔF_γ values from Step 6 fix the exponential factor; the prefactor
+involves curvatures at γ_s and γ_sad (1D Kramers formula) or
+determinants (2D version). Step 8 will probe this.
+
+## 7. Summary and what's next
+
+**Solid foundations (Steps 1–4, 6):**
 
 - F̂(γ) derivation: verified to machine precision against `dgamma_dt`.
 - γ-Langevin SDE: Boltzmann stationary distribution, calibration
   D = T/(2kN), local Gaussian, 1/N scaling all verified.
 - Slow-manifold θ-scan with warm-start γ-continuation: tracks one
   γ-branch correctly.
+- γ-saddle finding at fixed θ: works. Direct and path-integrated
+  ΔF_γ agree to machine precision. Directional curvature consistency
+  between analytical Hessian and finite-diff verified.
 
 **The substantive finding (Step 5):**
 
@@ -625,13 +779,23 @@ the positive real axis and to one γ-branch at a time. Sign-change
 bisection and basin-attribution bisection answer different questions;
 the latter is what the walker actually experiences.
 
+**The substantive finding (Step 6):**
+
+ΔF_γ — the γ-noise escape barrier from a stable SC equilibrium —
+varies by ~30× across our calibration setup. The side stables at
+(1.2, 0) have very small barriers (ΔF_γ ≈ 0.00426); the (2.0, 0)
+side stables have much larger ones (ΔF_γ ≈ 0.144). Different
+SC equilibria are dramatically different in their γ-noise robustness.
+y-symmetric calibration points have mirror-image γ-saddle pairs,
+which add their escape rates as parallel channels.
+
 **Outstanding:**
 
-- Step 6: γ-saddle finding at fixed θ and ΔF_γ. At fixed θ, the
-  γ-fold issue doesn't apply — we're looking at the γ-Hessian
-  landscape of F̂ at a single SC equilibrium, finding γ-saddles
-  in the complex γ-plane.
 - Step 7: proper basin-attribution bisection for finding fold
-  boundaries from the dynamics rather than from γ-jump heuristics.
+  boundaries (and the corresponding ΔV barrier estimates) from the
+  dynamics rather than from γ-jump heuristics.
 - Step 8: Monte Carlo validation of basin sizes via γ-Langevin
-  escape times — empirical ground truth for everything above.
+  escape times — empirical ground truth for both Step 5 (θ-basin
+  boundaries) and Step 6 (ΔF_γ Kramers predictions).
+- Step 9-11: asymmetric basin test, Hopf island graceful failure,
+  performance benchmark.
