@@ -26,6 +26,7 @@ step contributed each section.
 | 4  | Basins, effective potential, and the multistable case | 5 |
 | 5  | The Schur complement and slow eigenvalues | 5 (technical) |
 | 6  | γ-saddle finding and ΔF_γ at fixed θ | 6 |
+| 7  | Discontinuity detection during θ-scans | 7 |
 
 ## 1. The state space and the slow manifold
 
@@ -752,9 +753,164 @@ The ΔF_γ values from Step 6 fix the exponential factor; the prefactor
 involves curvatures at γ_s and γ_sad (1D Kramers formula) or
 determinants (2D version). Step 8 will probe this.
 
-## 7. Summary and what's next
+## 7. Discontinuity detection during θ-scans — Step 7
 
-**Solid foundations (Steps 1–4, 6):**
+Step 5 established that basin boundaries on the slow manifold can be
+either smooth saddles (zeros of f with f'>0) or γ-folds (catastrophic
+γ-branch terminations). Step 7 builds dedicated detectors for the
+non-saddle events, plus a third event type — *perception collapse* —
+which we discovered during Step 7 itself.
+
+### 7.1 Three event types and their signatures
+
+For a θ-scan with consecutive samples (θ_i, γ_eq,i, f_i), we identify
+three classes of basin-boundary events:
+
+| Event | Mechanism | Signature on the scan |
+|-------|-----------|-----------------------|
+| **γ-fold** | γ-branch terminates; γ catastrophically jumps to a different branch | |Δγ_eq| between consecutive samples is much larger than typical |
+| **f-jump** | Discrete change in perception (e.g. occlusion transition for non-delta geometries) without a corresponding γ-jump | |Δf| is large *without* |Δγ| being large |
+| **Perception collapse** | All targets fall outside the perception window for some θ-range; ρ_j = 0 for every j, so γ_eq = 0, R = 0, f = 0 | R is essentially zero over an extended interval of consecutive samples |
+
+### 7.2 Why |Δf| isn't a strong primary signal
+
+A natural question: shouldn't an f-jump be a stronger signal than a
+γ-jump, since the basin dynamics are governed by f? Empirically — no.
+Looking at the largest events on the (1.2, 0) CW scan from +0.6625:
+
+```
+   i        θ       |Δγ|       |Δf|
+  37  -0.4999 5.2878e-01 1.9870e-01
+ 104  -2.6047 3.4893e-01 3.3557e-01
+  96  -2.3534 3.0134e-01 1.9326e-01
+   1  +0.6311 3.2387e-02 1.9936e-02
+```
+
+The known γ-fold is at i=37 with |Δγ| = 0.53 (about 17× the typical
+0.03 step). But |Δf| there is 0.20 — only about 10× the typical 0.02
+step. Another event at i=104 has |Δf| = 0.34, the LARGEST in the
+scan, but its |Δγ| is moderate. The ranking by |Δf| would mislead.
+
+The reason: f = K·R·sin(ego_angle). A γ-fold flips γ to a different
+branch where R, ego_angle can be anything — sometimes nearly the same
+sin·R product as before, sometimes very different. |Δγ| measures the
+γ-displacement directly, |Δf| measures only one component of the
+geometric consequence. Use |Δγ| as the primary signal and |Δf| as a
+complementary one (the f-jump detector we built fires only when |Δf|
+is large *without* a corresponding |Δγ| jump — those are perception
+discontinuities, not γ-folds).
+
+### 7.3 The static vs. dynamical "blind-spot trap" distinction
+
+`weighting_analysis/README.md` documents a *dynamical* blind-spot
+trap under integral-neural-mapping + cutoff `a=0/b=π` weighting:
+a noisy walker that rotates such that all targets get behind it has
+γ collapse onto the ±π branch cut (where the integral mapping pins
+multiple distinct ego angles to the same neural angle), and the
+restoring torque dies. The walker enters a pure random walk.
+
+When we set this exact configuration up and looked at the *static*
+slow-manifold scan, we discovered something subtle: **the static
+signature of "γ pinned to the ±π branch cut" is indistinguishable
+from a normal SC saddle.**
+
+- At a normal saddle near θ = ±π, γ_eq = −R + 0j (negative real
+  axis) with R close to 1. arg(γ) = π, |f| ≈ 0.
+- At the blind-spot trap point, γ also has arg = π and |f| ≈ 0,
+  with R ≈ 1.
+
+The two have the *same* values of R, arg(γ), f. The distinction
+between them is purely dynamical: at a saddle, a deterministic
+trajectory placed slightly off it slides away on a well-defined
+unstable manifold. At the trap, the noisy γ-Langevin equation lingers
+because γ-noise can't escape the branch cut quickly (the perception
+geometry makes the gradient of F̂ near γ = −1+0j flat in the relevant
+direction).
+
+So **Step 7's static detector cannot detect the blind-spot trap as
+distinct from a normal back-of-circle saddle.** This is a limitation
+in principle, not in implementation. The dynamical signature (slow
+mixing in the branch-cut region) would require Step 8's MC machinery
+to confirm.
+
+### 7.4 Perception collapse — the static signature we *can* detect
+
+If we tighten the cutoff so that the perception window doesn't cover
+the full circle, an entirely different kind of discontinuity appears:
+*genuine perception collapse*. With cutoff `a=0/b=π/2`, targets with
+|ego_angle| > π/2 (anything more than 90° off the front) have ρ_j = 0.
+
+For our 4-target setup at observer (0, 0), targets sit at
+ego ≈ ±9.8°, ±27.5° when the observer faces forward. When the
+observer rotates by θ, those ego angles shift by −θ. The first
+target to exit the perception window does so at θ ≈ 90° − 27.5°
+(or thereabouts); by θ ≈ 90° + 27.5° = 117.5°, *all* four targets
+are outside the cutoff window. From that θ until 360° − 117.5° on
+the other side, every ρ_j = 0.
+
+The γ-dynamics in this regime become trivially:
+
+$$dγ/dt = \sum_j 0 \cdot e^{i\hat θ_j}\, \sigma(\cdot) - γ = -γ,$$
+
+so γ_eq = 0 and R = 0 and f = 0 over the whole "blind" θ-range.
+
+This *is* statically detectable: just look for an extended run of
+consecutive scan samples with R near zero. The detector we built
+fires on the BlindSpot (b=π/2) setup and identifies a 69-sample
+collapse zone covering θ in [−π, −2.07] ∪ [+2.07, +π] (about 2 rad
+of arc, behind the walker).
+
+### 7.5 What this means for basin structure
+
+In §4.4 we listed two possible basin-boundary types: a smooth saddle
+on the same γ-branch, or a γ-fold. Step 7 adds a third:
+
+- **Perception collapse boundary**: where R drops to 0 over an
+  extended θ-range. A walker entering this region has no torque to
+  re-orient by. The basin in θ is bounded by the *edge* of this
+  collapse zone — where the first target re-enters the perception
+  window as the walker rotates toward the front.
+
+The Kramers escape rate near a perception collapse boundary is
+different again from the saddle and fold cases: the torque is
+identically zero in the collapse region, so the system behaves
+like pure diffusion (Brownian motion in θ) until θ wanders close
+enough to the boundary that a target re-enters perception. The
+mean first-passage time across a collapse region of width Δθ is
+~ Δθ² / (2 D_θ) — diffusive, not exponential.
+
+So the model has at least three qualitatively distinct basin-boundary
+mechanisms, each with its own Kramers / FPT signature:
+
+| Boundary type | Escape rate scaling |
+|---------------|--------------------|
+| Saddle | exp(−ΔV / D_θ)  [exponential, Kramers] |
+| γ-fold | exp(−ΔV_fold / D_θ)  [exponential, but with ΔV at the discontinuity rather than at a smooth max] |
+| Perception collapse | Δθ² / (2 D_θ)  [polynomial, diffusive] |
+
+### 7.6 Bonus finding — extra γ-fold at (2.0, 0)
+
+The (2.0, 0) CW scan from +0.8204 caught TWO folds in Step 7, not
+one: at θ ≈ −0.92 and θ ≈ −2.46. Step 5 only saw the first one
+because it terminated at the first event. Step 7's detector
+post-processes a full-circle scan and finds both.
+
+Both are at moderate |Δγ| (0.83 and 0.40, severity 29× and 14×).
+The second fold is the same |Δγ| = 0.27 event I marked as "ambiguous"
+in Step 5 — bumping the threshold from 0.15 to 0.4 in Step 5 had
+hidden it. Step 7's threshold (0.4 absolute) catches it because the
+severity (relative to median |Δγ| of this longer scan) is high.
+
+This is a real second fold on the +0.8204 γ-branch — not a numerical
+artifact. The γ-branch from +0.8204 going CW has TWO catastrophic
+jumps before completing the loop. Whether either is the "correct"
+basin boundary depends on which side we're approaching from. The
+basin-attribution bisection of Step 7's extension (deferred) would
+disambiguate.
+
+## 8. Summary and what's next
+
+**Solid foundations (Steps 1–4, 6, 7):**
 
 - F̂(γ) derivation: verified to machine precision against `dgamma_dt`.
 - γ-Langevin SDE: Boltzmann stationary distribution, calibration
@@ -764,6 +920,9 @@ determinants (2D version). Step 8 will probe this.
 - γ-saddle finding at fixed θ: works. Direct and path-integrated
   ΔF_γ agree to machine precision. Directional curvature consistency
   between analytical Hessian and finite-diff verified.
+- Discontinuity detection during θ-scans: γ-fold detection by |Δγ|
+  threshold works; perception-collapse detection by extended R≈0
+  runs works. |Δf| is a complementary signal, not a primary one.
 
 **The substantive finding (Step 5):**
 
@@ -789,13 +948,27 @@ SC equilibria are dramatically different in their γ-noise robustness.
 y-symmetric calibration points have mirror-image γ-saddle pairs,
 which add their escape rates as parallel channels.
 
+**The substantive finding (Step 7):**
+
+The basin boundary catalog now has three mechanisms (saddle, γ-fold,
+perception collapse), each with a different Kramers / first-passage
+signature. The dynamical "blind-spot trap" of weighting_analysis/
+turns out to be indistinguishable from a normal back-of-circle SC
+saddle on a static scan — its trap character is purely dynamical. A
+genuine static "perception collapse" signature emerges only with
+tighter cutoffs (b < π) that physically exclude targets from the
+back hemisphere. As a bonus, Step 7 caught a second γ-fold at
+(2.0, 0) that Step 5 missed.
+
 **Outstanding:**
 
-- Step 7: proper basin-attribution bisection for finding fold
-  boundaries (and the corresponding ΔV barrier estimates) from the
-  dynamics rather than from γ-jump heuristics.
 - Step 8: Monte Carlo validation of basin sizes via γ-Langevin
   escape times — empirical ground truth for both Step 5 (θ-basin
-  boundaries) and Step 6 (ΔF_γ Kramers predictions).
+  boundaries), Step 6 (ΔF_γ Kramers predictions), and Step 7
+  (perception-collapse first-passage times).
 - Step 9-11: asymmetric basin test, Hopf island graceful failure,
   performance benchmark.
+- Basin-attribution bisection (originally slated for Step 7) still
+  outstanding as a refinement to Step 5's heuristic γ-fold detection
+  — would give the exact basin boundary θ between two γ-branches by
+  integrating the full coupled dynamics from probe midpoints.
