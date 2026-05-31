@@ -8,6 +8,7 @@ Mathematical model of collective decision-making based on Ising-type dynamics on
 - Jupyter notebooks (`compare_sc_vm.ipynb`, `compare_sc_beta.ipynb`, `neural_band.ipynb`, `neural_band_walker.ipynb`, `ising_workbook.ipynb`, `debug_all_unstable.ipynb`) — testing, exploration, and visualization.
 - [VM_bifurcations/](VM_bifurcations/) — diagnostic scripts and the [VERDICT.md](VM_bifurcations/VERDICT.md) write-up of the Hopf-island / saddle-node bifurcation skeleton near (2.1, ±2.45) in the vonmises-k0.55 / two-target setup.
 - [bifurc_plots/](bifurc_plots/) — exploratory parameter-sweep scripts. `neural_weight_sweep.py` (full weighting) and `neural_weight_sweep_angle_only.py` (warping-only) are companions; `bifurcation_compare_discrim_vs_coupled.py` compares stability criteria; `arc_skeleton_and_island_dynamics.py` is the upper-arc / island-dynamics combined figure. Not publication-quality — settings are sized for fast iteration on a many-core machine. More function-space exploration is needed before any of these can be locked in for publication.
+- [basin_estimation/](basin_estimation/) — vetting work for the basin-of-attraction estimator that supports the two-panel bifurcation+basin plot TODO. Eleven-step vetting plan complete; public API ready but **not yet wired into `decision_model.py`** (deferred behind pending modeling changes — see "Basin-of-attraction estimator" section below). Running mathematical findings in [basin_estimation/findings.md](basin_estimation/findings.md).
 - [tests/](tests/) — unit tests (e.g. `test_broad_validation.py`, `test_intervals.py`, `test_segments.py`).
 - [Matlab/](Matlab/), [early_ideas/](early_ideas/) — legacy / prototype code, not part of the active model.
 - [PARALLEL_CONFIG.md](PARALLEL_CONFIG.md), [parallel_config.py](parallel_config.py), [machine_config.py](machine_config.py) — per-machine worker-count settings for multiprocessing.
@@ -194,13 +195,78 @@ In the parameter window analyzed in [VM_bifurcations/VERDICT.md](VM_bifurcations
 
 **How to apply:** in similar parameter regimes, expect to see Hopf-unstable foci coexisting with stable limit cycles, not just simple "decision paralysis." [VERDICT.md](VM_bifurcations/VERDICT.md) is the authoritative write-up with reproducibility, scripts, and PNGs.
 
+## Basin-of-attraction estimator (vetted in basin_estimation/, not yet wired in)
+
+An end-to-end vetting effort for the basin-estimation machinery that supports the two-panel bifurcation+basin plot TODO lives in [basin_estimation/](basin_estimation/). The eleven-step vetting plan is complete; everything load-bearing is documented in [basin_estimation/findings.md](basin_estimation/findings.md) (§1–§13). The folder also contains [free_energy_derivation.md](basin_estimation/free_energy_derivation.md) (the F̂(γ) derivation), [README.md](basin_estimation/README.md) (the vetting plan), and standalone test scripts that all pass.
+
+**Status:** not wired into `decision_model.py`. The user has chosen to make the modeling changes described in the next subsection *before* integrating, so the integration doesn't have to be redone.
+
+**Public API.** The vetted entry point is
+
+```python
+result = compute_basins_at_focal_loc(focal_loc, *, scan_single_stable=False)
+# in basin_estimation/basin_via_theta.py
+```
+
+Always returns a dict with `basins` (list per stable SC eq), `stable_count`, `unstable_count`, and `sentinel` (None for normal cases; a short reason string for Hopf islands, perception-collapse cells, or partial-success cases). The basin-dict shape depends on cell class — see findings.md §10.2.
+
+**Key results worth knowing without reading findings.md in full:**
+
+- **F̂(γ; θ, focal_loc)** has a closed-form expression derived from the Hamiltonian and Glauber dynamics; verified to machine precision against `dgamma_dt`. F̂ is the Lyapunov function for the deterministic γ-flow.
+- **The slow manifold is not a global object.** Projecting (γ, θ) dynamics onto 1D heading dynamics gives a *union of γ-branches glued at γ-folds*, not a single smooth f(θ). Basin boundaries in θ can be smooth saddles, γ-folds (catastrophic γ-branch jumps), perception-collapse zones (R → 0 over an interval under tight cutoffs), or — under the proposed sin(Θ*/2) dynamics — branch-cut discontinuities. See findings.md §4 and §7.
+- **ΔF_γ** (the F̂-barrier between the γ-min at γ_s and a γ-saddle at fixed θ_s) is the empirically validated noise-robustness scalar **but only in multistable cells**. γ-Langevin MC at (1.2, 0) confirms Kramers prediction within factor of 2; slope of log(τ) vs 1/D within 16% of ΔF_γ; relative ordering correct. See findings.md §6, §8.
+- **Conceptual scope correction (findings.md §13.6).** Noise-robustness scalars (ΔV, ΔF_γ) only carry their Kramers meaning in multistable regions on S¹. In 1-stable regions the basin is the entire circle minus the unstable point; noise pushing the walker over the V-saddle just sends θ around the loop back to the same stable. The right 1-stable visualization is direction arrow only (optionally with a stiffness glyph from the F̂-Hessian at γ_s), no Kramers-style robustness coloring. The default `scan_single_stable=False` reflects this — 1-stable cells return a minimal basin record without running the scan.
+- **Per-cell-class rendering rules** for the two-panel plot are in findings.md §10.4 and §12: 0-stable cells get sentinel-marker glyphs (limit cycle, blind zone); 1-stable cells get a direction arrow; multistable cells get one arrow per stable colored or sized by ΔF_γ.
+- **Cost benchmark**: parallel runtime ~4.2 min on 32 cores for a 41×41 grid with basins (vs ~20 s for sc_equilib-only baseline). See findings.md §11. Multistable cells dominate the budget; 1-stable cells are essentially free.
+
+**Headline open theory question** (findings.md §13.4): is θ-noise (the existing `std` knob in `plot_walkers`) a faithful proxy for γ-noise (the physically motivated noise from Glauber T and finite-size 1/N fluctuations)? Deferred from Step 8. A focused MC sweep at the (1.2, 0) multistable calibration points would close it. Other smaller theory gaps and the carry-forward list are in findings.md §13.5.
+
+### How the proposed modeling changes affect the basin-estimation findings
+
+Two modeling changes are planned (in a future session) *before* wiring the basin estimator into `decision_model.py`. Below is what they do and don't change about the vetting work above. The full discussion (including the half-angle-identity discontinuity correction) is in the session that produced this CLAUDE.md update; the summary follows.
+
+**Change (1): replace `dθ/dt = K·R·sin(Θ*)` with `dθ/dt = K·R·sin(Θ*/2)`.** Motivation: under the current sin(Θ*) form, torque is zero both when consensus is straight ahead (Θ*=0, the SC equilibrium) AND when consensus is directly behind (Θ*=±π). The behind case is a *spurious* zero — the walker becomes undecided. With sin(Θ*/2), torque is zero only at Θ*=0 and maximal at the facing-away point.
+
+What is unchanged in the vetting:
+- F̂(γ; θ, focal_loc) derivation — the θ-equation does not enter F̂ at all (F̂ comes from γ-only Glauber dynamics).
+- γ-Langevin SDE, γ-saddle finding at fixed θ, ΔF_γ values, all of Steps 1–3 and Step 6.
+- Discontinuity detection framework (Step 7) — the detector handles a new event type naturally.
+- All sentinel-handling and graceful-failure behavior (Step 10).
+
+What changes:
+- f(θ) on the slow manifold has a new functional form; numerical values shift.
+- The Schur-complement slow eigenvalue (Step 5 §5) scales by ½ at SC eqs because d/dθ[sin(ego/2)] at ego=0 is ½ vs 1. Stability classification (sign) is unchanged.
+- **A new basin-boundary type appears.** Under sin(Θ*/2), wherever γ_eq crosses the negative real axis (consensus directly behind), f has a *jump discontinuity* from +K·R to −K·R. **This is not a numerical artifact.** Both sin(arg(γ)/2) and the algebraic half-angle identity `sign(γ_im)·sqrt((|γ|−γ_re)/(2|γ|))` give two-sided limits +1 and −1 at γ = −|γ|+0j. Any single-valued angle representation with range (−π, π] inherits this discontinuity. Physically it represents the left/right ambiguity at the facing-away point — a real fork in the deterministic dynamics. Step 7's |Δf|-jump detector already catches discontinuities of this kind; the basin-extraction machinery would gain a fourth boundary type (saddle, γ-fold, perception-collapse, branch-cut).
+- Poincaré-Hopf in its smooth form (#stable = #unstable smooth zeros) becomes a generalized version that counts sign-change discontinuities with the same parity as smooth unstable zeros.
+- Specific findings to re-verify after the change: Hopf island location at (2.1, 2.45) (depends on 3×3 Jacobian eigenvalues, which change), specific slow-eigenvalue magnitudes, specific basin widths. Qualitative existence of Hopf islands somewhere is likely preserved.
+
+Code that needs updating for Change (1): `decision_model.py` (`dtheta_dt`, `_discrim_coupled`, and the analogous IEM functions); `basin_estimation/theta_scan.py`, `basin_estimation/basin_via_theta.py`, `basin_estimation/mc_escape.py` (the `_eval_f` formula and the θ-update in the MC integrator).
+
+**Change (2): default `weight_angle_only=True` in `PerceptionModel`; possibly decouple weighting from warping entirely.** Motivation: cleaner API, more interpretable defaults.
+
+What is unchanged in the vetting:
+- F̂ derivation, ∇F̂, Hessian formulas — all are functions of (θ̂_j, ρ_j), the perception-model outputs. New defaults give different (θ̂_j, ρ_j) values but the closed forms are identical.
+- All framework machinery (γ-Langevin, basin extraction, discontinuity detection, MC validation, Kramers checks, sentinel handling). Every basin-estimation test script in basin_estimation/ remains parameter-agnostic and would still pass.
+
+What changes:
+- Numerical values at every calibration point shift. The vetting was done with VM-k055 (vonmises k=0.55 + integral warping); the existing calibration points like "(1.2, 0) is 3-stable" may no longer be true under the new defaults.
+- Bifurcation structure on (x, y) shifts. Multistable regions probably shrink (less perception nonlinearity); Hopf islands may move or disappear under default uniform-weighting.
+- The blind-spot trap (see Open TODOs) becomes an opt-in scenario rather than the default behavior. The Step 7 BlindSpot test is still valid as a stress test of the perception-collapse detector but requires explicit cutoff weighting.
+
+Code that needs updating for Change (2): `PerceptionModel` constructor defaults; possible factoring of weighting and warping into separate optional callables. The basin_estimation/ scripts don't need code changes for Change (2); they just need new calibration points re-identified.
+
+**Bottom line.** The vetting *framework* (every methodology and test script in basin_estimation/) survives both changes intact. The specific *numerical results* at the calibration points used in Steps 5–9 would change under either change. Doing the model work first and then wiring the basin estimator avoids re-vetting against parameters that are about to move.
+
 ## Open TODOs
 
 - **`IEM.run_dgamma_dt` LSODA port** — same restarted-RK45 pattern as the old NBM version; apply matching real-valued LSODA fix when warnings appear.
 - **Cell-center sampling for bifurcation refinement** — deferred; propose if `boundary_dilation` + grid increases are insufficient for thin features.
 - **Walker blind-spot trap under cutoff weighting.** With `a=0, b=pi` cutoff + integral neural mapping and delta targets, walkers that overshoot a target and get all targets behind them lose the ability to navigate back. The integral neural mapping collapses all behind-the-walker ego angles to ±180° in neural space, gamma locks onto -1+0j (the ±π branch cut), and `sin(±180°) ≈ 0` kills the restoring torque. The walker enters a pure random walk. Detailed analysis in [weighting_analysis/README.md](weighting_analysis/README.md). Possible remedies: minimum torque floor / U-turn behavior, wider neural mapping (`a > 0`), or heading-dependent noise. Not yet implemented.
-- **Two-panel bifurcation + basin-of-attraction plot.** The current bifurcation diagrams (count of stable self-consistent equilibria over (x, y)) tell only part of the story: they don't say *which direction* each stable equilibrium points, and give no indication of basin-of-attraction size. The asymptotic dynamics that the walker follows before noise is added back in are mean-field Glauber; noise can throw the system into a different basin, so noise-robustness of each SC equilibrium matters. Goal: a two-panel figure pairing the existing bifurcation raster with a modified `plot_direction_mesh` that, at each grid point, draws one arrow per stable equilibrium pointing in the *allocentric* consensus direction, colored (or otherwise annotated) by noise robustness. Expected qualitative behavior: in a bistable region where the observer is very close to one circular target and the other is far, the far target's basin should be small.
-  - Quantifying robustness has been hard because the unstable equilibria — which sit on the basin boundaries — are difficult to nail down with the current finder. Two avenues worth considering: (i) use the statistical-mechanics correspondence — stable equilibria are energy minimizers, so local curvature of the energy landscape (or related quantities) at each minimum could give a relative noise-robustness measure without explicitly resolving the saddles; (ii) some more direct estimate of the basin extent in angle space — possibly via numerical integration of the deterministic flow from a fan of initial headings around each stable eq, to find where trajectories switch basins. If the saddle-finding can be made robust, the basin edges themselves could be drawn at each grid point in a contrasting color rather than encoding robustness in a scalar.
+- **Two-panel bifurcation + basin-of-attraction plot.** The vetting work for the basin estimator is complete in [basin_estimation/](basin_estimation/); see the "Basin-of-attraction estimator" section above for status, public API, and key results. ΔF_γ (γ-noise free-energy barrier from the F̂ Lyapunov function) is the empirically validated noise-robustness scalar in multistable cells. Public API `compute_basins_at_focal_loc` ready to call from a new `NeuralBandModel` method. **Pending modeling changes (sin/2 dθ/dt and weighting/warping defaults) before integration** — see the next TODO and the "How the proposed modeling changes affect the basin-estimation findings" subsection above.
+
+- **Modeling changes pending before basin-estimator integration:**
+  - **(1) Change `dθ/dt` from `K·R·sin(Θ*)` to `K·R·sin(Θ*/2)`.** Gives the walker maximum torque when consensus is directly behind (instead of zero torque, the current "undecided" pathology). Introduces a deliberate left/right discontinuity in f(θ) at the facing-away configuration — this is intrinsic to sin(Θ*/2) on a single-valued angle representation and represents a real physical fork in the dynamics, not a numerical artifact. Affects `dtheta_dt`, `_discrim_coupled` in NBM (and IEM analogs); affects a few basin_estimation/ test scripts. Impact analysis: see "Basin-of-attraction estimator" section above.
+  - **(2) Default `weight_angle_only=True` in `PerceptionModel`; possibly decouple weighting from warping entirely** (warping as user-specified neural-angle map; weighting as user-specified μ(θ) defaulting to uniform). Purely parametric API improvement from the basin-estimator framework's perspective — the math machinery is parameter-agnostic — but numerical values at calibration points shift, and the blind-spot trap (next TODO) becomes opt-in rather than default. Impact analysis: see "Basin-of-attraction estimator" section above.
 
 ## Common gotchas
 
