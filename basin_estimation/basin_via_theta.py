@@ -392,6 +392,126 @@ def find_sc_gamma(theta_sc, focal_loc):
 
 
 # =============================================================================
+# Public-API wrapper: handles all cases including 0 stable (Hopf island)
+# =============================================================================
+def compute_basins_at_focal_loc(focal_loc, n_max=300, gamma_jump_factor=8.0,
+                                 scan_single_stable=False):
+    """Compute basin features for every stable SC equilibrium at
+    `focal_loc`, with graceful handling of cases where no stable SC eq
+    exists (Hopf islands).
+
+    Parameters
+    ----------
+    focal_loc : (2,) array
+    n_max, gamma_jump_factor : forwarded to basin_features.
+    scan_single_stable : bool, default False
+        If False (default), 1-stable cells skip the θ-scan and return
+        a minimal basin record with the stable's θ and γ but no scan-
+        derived fields (delta_theta_*, delta_V_*, etc.). This is the
+        conceptually correct default: in a 1-stable region on S¹ the
+        basin is the entire circle minus the unstable point
+        (Poincaré-Hopf), so the V-barrier, basin width, and
+        fold-vs-saddle classification don't carry their multistable
+        meaning. The renderer should draw only the direction arrow
+        (and optionally a local-stiffness glyph from the F̂-Hessian
+        at γ_s) for these cells.
+        If True, run the full scan even at 1-stable cells (the
+        original behavior, retained for diagnostic / vetting use).
+
+    Returns
+    -------
+    dict with keys:
+      'basins'         : list of basin dicts.
+                         At multistable cells (or 1-stable cells when
+                         scan_single_stable=True), each basin dict is
+                         the full output of basin_features().
+                         At 1-stable cells with scan_single_stable=False
+                         (the default), the basin dict contains only
+                         'theta_stable', 'gamma_stable', and
+                         'is_single_stable': True.
+      'stable_count'   : int — number of stable SC eqs found.
+      'unstable_count' : int — number of unstable SC eqs found.
+      'sentinel'       : None if basins were computed normally,
+                         otherwise a short string explaining why no
+                         basins were returned.
+
+    Use cases for 'sentinel' being non-None:
+      - "no stable SC eq; suspect Hopf-unstable focus + limit cycle"
+        when sc_equilib finds only unstable eqs (Hopf island).
+      - "no SC eq found at all" when sc_equilib returns nothing.
+      - "could not recover γ for stable θ=…" when a stable SC eq
+        is found but its γ can't be reconstructed from gamma_equilib.
+
+    Never crashes, hangs, or returns garbage. Intended as the
+    bifurcation-plot integration point.
+    """
+    sc_angles, sc_stab = nbm.sc_equilib(
+        focal_loc=focal_loc, stability_criterion='coupled')
+    stable_thetas = sorted([a for a, s in zip(sc_angles, sc_stab) if s])
+    unstable_thetas = sorted(
+        [a for a, s in zip(sc_angles, sc_stab) if not s])
+
+    if not stable_thetas:
+        if unstable_thetas:
+            sentinel = (
+                f"no stable SC eq found; "
+                f"suspect Hopf-unstable focus + limit cycle. "
+                f"Unstable θ found: "
+                f"{[f'{a:+.4f}' for a in unstable_thetas]}")
+        else:
+            sentinel = "no SC eq found at all at this focal_loc"
+        return {
+            'basins': [],
+            'stable_count': 0,
+            'unstable_count': len(unstable_thetas),
+            'sentinel': sentinel,
+        }
+
+    is_single_stable = (len(stable_thetas) == 1)
+    skip_scan = is_single_stable and not scan_single_stable
+
+    basins = []
+    skipped = []
+    for theta_s in stable_thetas:
+        gamma_s = find_sc_gamma(theta_s, focal_loc)
+        if gamma_s is None:
+            skipped.append(theta_s)
+            continue
+        if skip_scan:
+            # 1-stable cell: return direction-only record; no
+            # basin-barrier scalars are meaningful (see findings.md
+            # §4.4 scope caveat and §13.6).
+            basins.append({
+                'theta_stable': theta_s,
+                'gamma_stable': gamma_s,
+                'is_single_stable': True,
+            })
+        else:
+            b = basin_features(focal_loc, theta_s, gamma_s,
+                                n_max=n_max,
+                                gamma_jump_factor=gamma_jump_factor)
+            basins.append(b)
+
+    if skipped and not basins:
+        sentinel = (f"sc_equilib found {len(skipped)} stable θ but no γ "
+                    f"could be recovered for any: "
+                    f"{[f'{a:+.4f}' for a in skipped]}")
+    elif skipped:
+        sentinel = (f"recovered basins for {len(basins)} / "
+                    f"{len(stable_thetas)} stable θ; "
+                    f"skipped: {[f'{a:+.4f}' for a in skipped]}")
+    else:
+        sentinel = None
+
+    return {
+        'basins': basins,
+        'stable_count': len(stable_thetas),
+        'unstable_count': len(unstable_thetas),
+        'sentinel': sentinel,
+    }
+
+
+# =============================================================================
 # Main: validation
 # =============================================================================
 if __name__ == "__main__":
