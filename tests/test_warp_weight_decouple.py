@@ -39,7 +39,7 @@ def raises(fn, frag, name):
     global passed, failed
     try:
         fn()
-    except (ValueError, NotImplementedError) as e:
+    except (ValueError, NotImplementedError, TypeError, AttributeError) as e:
         if frag.lower() in str(e).lower():
             passed += 1
             print(f"  ok {name}")
@@ -147,24 +147,25 @@ print("\n=== Respline isolation ===")
 pm3 = PM(tg(), neural_angle_dist="vonmises", a_warp=0.55,
          angle_weight="cutoff", a_weight=0.0, b_weight=pi)
 w_before = pm3.get_neural_angle(th).copy()
-pm3.set_weight_params(a=pi / 4)
+pm3.a_weight = pi / 4
 ok(np.allclose(pm3.get_neural_angle(th), w_before, atol=0.0),
-   "set_weight_params leaves warp map byte-identical")
+   "a_weight assignment leaves warp map byte-identical")
 
 _, rho_before = pm3._get_target_signals(focal_angle=0, focal_loc=(3.0, 1.0))
 rho_before = rho_before.copy()
-pm3.set_warp_params(k=1.5)
+pm3.a_warp = 1.5
 _, rho_after = pm3._get_target_signals(focal_angle=0, focal_loc=(3.0, 1.0))
 ok(np.allclose(rho_before, rho_after, atol=0.0),
-   "set_warp_params leaves independent-weight rho unchanged")
+   "a_warp assignment leaves independent-weight rho unchanged")
 
-# tied: set_warp_params moves rho; set_weight_params errors.
+# tied: a_warp moves rho; a_weight errors.
 pm4 = PM(tg(), neural_angle_dist="cutoff", angle_weight="neural_angle_dist")
 _, rb0 = pm4._get_target_signals(focal_angle=0, focal_loc=(3.0, 1.0))
 rb0 = rb0.copy()
-pm4.set_warp_params(a=0.0, b=pi)
+pm4.a_warp = 0.0
+pm4.b_warp = pi
 _, rb1 = pm4._get_target_signals(focal_angle=0, focal_loc=(3.0, 1.0))
-ok(not np.allclose(rb0, rb1), "tied: set_warp_params moves rho too")
+ok(not np.allclose(rb0, rb1), "tied: a_warp assignment moves rho too")
 
 
 # ---------------------------------------------------------------------------
@@ -194,15 +195,28 @@ raises(lambda: PM(tg(), neural_angle_dist="bogus"),
        "must be one of", "unknown warp family rejected")
 raises(lambda: PM(tg(), angle_weight="bogus"),
        "must be one of", "unknown weight family rejected")
-raises(lambda: PM(tg(), neural_angle_dist=None).set_warp_params(k=1),
-       "no warp parameters", "set_warp_params errors on identity warp")
-raises(lambda: PM(tg(), angle_weight=None).set_weight_params(a=1),
-       "no weight parameters", "set_weight_params errors on uniform weight")
-raises(lambda: PM(tg(), neural_angle_dist="vonmises",
-                  angle_weight="neural_angle_dist").set_weight_params(k=1),
-       "tied to the warp", "set_weight_params errors when tied")
-raises(lambda: PM(tg(), neural_angle_dist="vonmises").set_warp_params(a=1),
-       "takes parameter", "set_warp_params rejects wrong param name")
+# Post-init parameter mutation now goes through the a_warp/b_warp/a_weight/
+# b_weight properties; their strict setters reject invalid targets. (setattr
+# wrappers because a lambda body can't contain an assignment statement.)
+raises(lambda: setattr(PM(tg(), neural_angle_dist=None), "a_warp", 1),
+       "identity warp", "a_warp set errors on identity warp")
+raises(lambda: setattr(PM(tg(), angle_weight=None), "a_weight", 1),
+       "uniform weight", "a_weight set errors on uniform weight")
+raises(lambda: setattr(PM(tg(), neural_angle_dist="vonmises",
+                          angle_weight="neural_angle_dist"), "a_weight", 1),
+       "tied to the warp", "a_weight set errors when tied")
+raises(lambda: setattr(PM(tg(), neural_angle_dist="vonmises"), "b_warp", 3.0),
+       "not used", "b_warp set rejects unused slot")
+raises(lambda: setattr(PM(tg(), neural_angle_dist="cutoff"), "a_warp", 5.0),
+       "0 <= a < b", "a_warp set re-validates (a < b)")
+
+# Read-only parameter views: both write paths blocked with a helpful message.
+raises(lambda: PM(tg(), neural_angle_dist="vonmises").warp_params.__setitem__("k", 9),
+       "read-only", "warp_params item assignment blocked")
+raises(lambda: setattr(PM(tg(), neural_angle_dist="vonmises"), "warp_params", {"k": 9}),
+       "read-only", "warp_params rebinding blocked")
+ok(PM(tg(), neural_angle_dist="vonmises", a_warp=0.55).warp_params == {"k": 0.55},
+   "warp_params read-only view compares equal to a plain dict")
 
 
 def test_decouple():

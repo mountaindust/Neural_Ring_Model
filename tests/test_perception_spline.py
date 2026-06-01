@@ -527,7 +527,8 @@ print("\n=== Parameter sweep (cutoff) ===")
 for a_test, b_test in [(0.2, 1.0), (0.5, 1.5), (pi/4, 3*pi/4),
                        (0.01, pi - 0.1), (1.0, 2.8)]:
     pm_sweep = PM(neural_angle_dist='cutoff')
-    pm_sweep.set_warp_params(a=a_test, b=b_test)
+    pm_sweep.a_warp = a_test
+    pm_sweep.b_warp = b_test
     theta_sweep = rng.uniform(-b_test, b_test, size=500)
     sp = pm_sweep.get_neural_angle(theta_sweep)
     rf = np.array([PM._smooth_cutoff_integral(t, a_test, b_test)
@@ -541,7 +542,7 @@ print("\n=== Parameter sweep (vonmises) ===")
 
 for k_test in [0.5, 1.0, 3.0, 5.0, 10.0]:
     pm_sweep = PM(neural_angle_dist='vonmises')
-    pm_sweep.set_warp_params(k=k_test)
+    pm_sweep.a_warp = k_test
     theta_sweep = rng.uniform(-pi, pi, size=500)
     sp = pm_sweep.get_neural_angle(theta_sweep)
     rf = PM._vonmises_integral(theta_sweep, k_test)
@@ -558,7 +559,8 @@ for alpha_test, b_test in [(1.0, pi), (1.25, pi), (1.5, pi), (1.75, pi),
                            (2.0, pi), (3.0, pi), (5.0, pi), (10.0, pi),
                            (3.0, 0.8*pi), (5.0, 0.5*pi)]:
     pm_sweep = PM(neural_angle_dist='symmetric_beta')
-    pm_sweep.set_warp_params(alpha=alpha_test, b=b_test)
+    pm_sweep.a_warp = alpha_test
+    pm_sweep.b_warp = b_test
     theta_sweep = rng.uniform(-b_test, b_test, size=500)
     sp = pm_sweep.get_neural_angle(theta_sweep)
     rf = PM._symmetric_beta_integral(theta_sweep, alpha_test, b_test)
@@ -576,7 +578,8 @@ for d_test, e_test in [(0.3, 1e-2), (0.5, 1e-3), (0.5, 1e-2),
                        (0.7, 1e-3), (0.7, 1e-2), (1.0, 1e-3),
                        (0.5, 1e-1)]:
     pm_sweep = PM(neural_angle_dist='reg_power')
-    pm_sweep.set_warp_params(d=d_test, e=e_test)
+    pm_sweep.a_warp = d_test
+    pm_sweep.b_warp = e_test
     theta_sweep = rng.uniform(-pi, pi, size=500)
     sp = pm_sweep.get_neural_angle(theta_sweep)
     rf = PM._reg_power_integral(theta_sweep, d_test, e_test)
@@ -587,12 +590,12 @@ for d_test, e_test in [(0.3, 1e-2), (0.5, 1e-3), (0.5, 1e-2),
 print("\n=== Property-setter rebuild ===")
 # ========================================================
 
-# set_warp_params must trigger a warp-spline rebuild; the accuracy checks
+# assigning a_warp/b_warp must trigger a warp-spline rebuild; the accuracy checks
 # after each call verify this by comparing against the freshly parameterised
 # reference. (id()-based identity checks are unreliable — CPython can reuse
 # freed memory slots immediately for the new CubicSpline instance.)
 pm_rb = PM(neural_angle_dist='cutoff')
-pm_rb.set_warp_params(a=0.8)
+pm_rb.a_warp = 0.8
 check_scalar(
     "cutoff a-setter accuracy",
     pm_rb.get_neural_angle(0.5),
@@ -600,7 +603,7 @@ check_scalar(
     tol=1e-10,
 )
 
-pm_rb.set_warp_params(b=2.5)
+pm_rb.b_warp = 2.5
 check_scalar(
     "cutoff b-setter accuracy",
     pm_rb.get_neural_angle(1.2),
@@ -609,7 +612,7 @@ check_scalar(
 )
 
 pm_rb_vm = PM(neural_angle_dist='vonmises')
-pm_rb_vm.set_warp_params(k=4.0)
+pm_rb_vm.a_warp = 4.0
 check_scalar(
     "vonmises k-setter accuracy",
     pm_rb_vm.get_neural_angle(0.7),
@@ -618,7 +621,7 @@ check_scalar(
 )
 
 pm_rb_sb = PM(neural_angle_dist='symmetric_beta')
-pm_rb_sb.set_warp_params(alpha=3.0)
+pm_rb_sb.a_warp = 3.0
 check_scalar(
     "symmetric_beta alpha-setter accuracy",
     pm_rb_sb.get_neural_angle(0.7),
@@ -626,7 +629,7 @@ check_scalar(
     tol=0.0,
 )
 
-pm_rb_sb.set_warp_params(b=0.7*pi)
+pm_rb_sb.b_warp = 0.7*pi
 check_scalar(
     "symmetric_beta b-setter accuracy",
     pm_rb_sb.get_neural_angle(0.4),
@@ -636,7 +639,7 @@ check_scalar(
 )
 
 pm_rb_rp = PM(neural_angle_dist='reg_power')
-pm_rb_rp.set_warp_params(d=0.7)
+pm_rb_rp.a_warp = 0.7
 check_scalar(
     "reg_power d-setter accuracy",
     pm_rb_rp.get_neural_angle(0.7),
@@ -644,7 +647,7 @@ check_scalar(
     tol=1e-10,
 )
 
-pm_rb_rp.set_warp_params(e=1e-2)
+pm_rb_rp.b_warp = 1e-2
 check_scalar(
     "reg_power e-setter accuracy",
     pm_rb_rp.get_neural_angle(0.4),

@@ -519,6 +519,42 @@ _FAMILY_INFO = {
 }
 
 
+class _ReadOnlyParams(dict):
+    """A read-only dict view of a PerceptionModel role's parameters.
+
+    Reads behave exactly like a dict (indexing, iteration, ``==`` against a
+    plain dict, ``dict(...)``); any attempt to mutate raises with a message
+    pointing the user at the ``a_warp``/``b_warp`` / ``a_weight``/``b_weight``
+    properties, which are the supported way to change parameters (they rebuild
+    the affected splines). Subclasses ``dict`` so equality and read access are
+    free; only the mutators are overridden.
+    """
+    _MSG = ("PerceptionModel parameter dicts are read-only; set parameters via "
+            "the a_warp/b_warp (or a_weight/b_weight) properties, which rebuild "
+            "the splines.")
+
+    def __setitem__(self, *args):
+        raise TypeError(self._MSG)
+
+    def __delitem__(self, *args):
+        raise TypeError(self._MSG)
+
+    def update(self, *args, **kwargs):
+        raise TypeError(self._MSG)
+
+    def setdefault(self, *args):
+        raise TypeError(self._MSG)
+
+    def pop(self, *args):
+        raise TypeError(self._MSG)
+
+    def popitem(self):
+        raise TypeError(self._MSG)
+
+    def clear(self):
+        raise TypeError(self._MSG)
+
+
 class PerceptionModel:
     '''This class takes in a Targets object and a focal location and angle for an
     observer, and then translates that into a neural angular position and a neural 
@@ -550,9 +586,13 @@ class PerceptionModel:
         independently. The default (angle_weight=None) gives uniform weighting.
 
         Mutable post-init: focal_loc, focal_angle, targets. Warp and weight
-        parameters are changed via set_warp_params(...) / set_weight_params(...),
-        which rebuild only the affected role's splines. The roles
-        (neural_angle_dist, angle_weight) themselves are not mutable post-init.
+        parameters are changed by assigning the a_warp/b_warp/a_weight/b_weight
+        properties (same slot names as the constructor args below), which
+        rebuild only the affected role's splines automatically. The
+        warp_params/weight_params attributes are read-only views of the current
+        parameters (keyed by canonical name); assign the a_*/b_* properties to
+        change them. The roles (neural_angle_dist, angle_weight) themselves are
+        not mutable post-init.
 
         Parameters
         ----------
@@ -622,7 +662,7 @@ class PerceptionModel:
                 f"neural_angle_dist must be one of "
                 f"{sorted(_FAMILY_INFO)} or None, got {neural_angle_dist!r}.")
         self.warp_name = neural_angle_dist
-        self.warp_params = self._resolve_params(
+        self._warp_params = self._resolve_params(
             neural_angle_dist, a_warp, b_warp, role='warp')
 
         # --- Resolve and validate the WEIGHT role. ---
@@ -649,14 +689,14 @@ class PerceptionModel:
                     "weight with.")
             # Weight uses the warp family + params.
             self.weight_name = self.warp_name
-            self.weight_params = dict(self.warp_params)
+            self._weight_params = dict(self._warp_params)
         elif angle_weight is None:
             if a_weight is not None or b_weight is not None:
                 raise ValueError(
                     "a_weight/b_weight must be None when angle_weight is None "
                     "(uniform weighting has no parameters).")
             self.weight_name = None
-            self.weight_params = {}
+            self._weight_params = {}
         else:
             if angle_weight not in _FAMILY_INFO:
                 raise ValueError(
@@ -664,7 +704,7 @@ class PerceptionModel:
                     f"{sorted(k for k in _FAMILY_INFO if k != 'direct_power')}, "
                     f"'neural_angle_dist', or None, got {angle_weight!r}.")
             self.weight_name = angle_weight
-            self.weight_params = self._resolve_params(
+            self._weight_params = self._resolve_params(
                 angle_weight, a_weight, b_weight, role='weight')
 
         if targets is None:
@@ -769,53 +809,125 @@ class PerceptionModel:
                     f"for direct_power {role}, a_{role} (c) must be > 0 "
                     f"(got c={params['c']}).")
 
-    def set_warp_params(self, **kwargs):
-        """Update the warp family's parameters (by real name, e.g. k=..., a=...,
-        b=..., alpha=..., d=..., e=..., c=...) and rebuild the warp splines.
+    # --- read-only views of the live parameter dicts ---
 
-        Does not touch the weight splines unless the weight is tied to the warp
-        (angle_weight='neural_angle_dist'), in which case the weight tracks the
-        warp and its splines are rebuilt too.
-        """
-        if self.warp_name is None:
-            raise ValueError(
-                "no warp parameters to set: neural_angle_dist is None "
-                "(identity warp).")
-        self._update_params(self.warp_params, self.warp_name, 'warp', kwargs)
-        self._build_warp_splines()
+    @property
+    def warp_params(self):
+        """Read-only view of the warp family's current parameters (keyed by
+        canonical name, e.g. {'k': 0.55}). To change a parameter, assign the
+        a_warp/b_warp properties (they rebuild the splines)."""
+        return _ReadOnlyParams(dict(self._warp_params))
+
+    @warp_params.setter
+    def warp_params(self, value):
+        raise AttributeError(_ReadOnlyParams._MSG)
+
+    @property
+    def weight_params(self):
+        """Read-only view of the weight family's current parameters. To change a
+        parameter, assign the a_weight/b_weight properties (they rebuild the
+        splines)."""
+        return _ReadOnlyParams(dict(self._weight_params))
+
+    @weight_params.setter
+    def weight_params(self, value):
+        raise AttributeError(_ReadOnlyParams._MSG)
+
+    # --- assignable two-slot parameter properties (auto-respline on write) ---
+    #
+    # a_warp/b_warp/a_weight/b_weight map a role's generic slots onto its
+    # family's canonical parameter (see _FAMILY_INFO and the constructor
+    # docstring for the slot->name table). The getter is permissive (returns
+    # None for an unused slot / identity warp / uniform weight); the setter is
+    # strict and rebuilds the affected role's splines.
+
+    @property
+    def a_warp(self):
+        return self._get_slot('warp', 0)
+
+    @a_warp.setter
+    def a_warp(self, value):
+        self._set_slot('warp', 0, value)
+
+    @property
+    def b_warp(self):
+        return self._get_slot('warp', 1)
+
+    @b_warp.setter
+    def b_warp(self, value):
+        self._set_slot('warp', 1, value)
+
+    @property
+    def a_weight(self):
+        return self._get_slot('weight', 0)
+
+    @a_weight.setter
+    def a_weight(self, value):
+        self._set_slot('weight', 0, value)
+
+    @property
+    def b_weight(self):
+        return self._get_slot('weight', 1)
+
+    @b_weight.setter
+    def b_weight(self, value):
+        self._set_slot('weight', 1, value)
+
+    def _role_state(self, role):
+        """Return (name, params_dict) for 'warp' or 'weight'. For a tied weight
+        the warp's name + live params are returned (the weight mirrors them)."""
+        if role == 'warp':
+            return self.warp_name, self._warp_params
         if self._weight_tied_to_warp:
-            self.weight_params = dict(self.warp_params)
-            self._build_weight_splines()
+            return self.warp_name, self._warp_params
+        return self.weight_name, self._weight_params
 
-    def set_weight_params(self, **kwargs):
-        """Update the weight family's parameters (by real name) and rebuild only
-        the weight splines. Errors when the weight is uniform (None) or tied to
-        the warp (set those via set_warp_params instead)."""
-        if self._weight_tied_to_warp:
-            raise ValueError(
-                "weight is tied to the warp (angle_weight='neural_angle_dist'); "
-                "change parameters via set_warp_params instead.")
-        if self.weight_name is None:
-            raise ValueError(
-                "no weight parameters to set: angle_weight is None "
-                "(uniform weight).")
-        self._update_params(self.weight_params, self.weight_name, 'weight',
-                            kwargs)
-        self._build_weight_splines()
+    def _get_slot(self, role, slot_idx):
+        """Permissive read of a role's slot value. Returns None when the role is
+        identity/uniform (no family) or the slot is unused by the family."""
+        name, params = self._role_state(role)
+        if name is None:
+            return None
+        key = _FAMILY_INFO[name]['slots'][slot_idx]
+        if key is None:
+            return None
+        return params.get(key)
 
-    @staticmethod
-    def _update_params(params, name, role, kwargs):
-        """In-place update of a role's param dict from real-name kwargs, with
-        validation. Rejects parameter names not used by the family."""
-        a_key, b_key = _FAMILY_INFO[name]['slots']
-        allowed = {k for k in (a_key, b_key) if k is not None}
-        for key, val in kwargs.items():
-            if key not in allowed:
+    def _set_slot(self, role, slot_idx, value):
+        """Strict write of a role's slot value, then rebuild that role's splines
+        (mirroring + rebuilding the weight too when a tied warp is changed).
+        Raises when there is no parameter to set for this slot."""
+        slot_name = f'{"a" if slot_idx == 0 else "b"}_{role}'
+        if role == 'weight' and self._weight_tied_to_warp:
+            raise ValueError(
+                f"cannot set {slot_name}: the weight is tied to the warp "
+                "(angle_weight='neural_angle_dist'); set a_warp/b_warp instead.")
+        name, params = self._role_state(role)
+        if name is None:
+            if role == 'warp':
                 raise ValueError(
-                    f"{name!r} {role} takes parameter(s) {sorted(allowed)}; "
-                    f"got unexpected {key!r}.")
-            params[key] = val
-        PerceptionModel._validate_params(name, params, role)
+                    f"cannot set {slot_name}: neural_angle_dist is None "
+                    "(identity warp has no parameters).")
+            raise ValueError(
+                f"cannot set {slot_name}: angle_weight is None "
+                "(uniform weight has no parameters).")
+        key = _FAMILY_INFO[name]['slots'][slot_idx]
+        if key is None:
+            raise ValueError(
+                f"{slot_name} is not used by {name!r} "
+                f"(it has a single parameter {_FAMILY_INFO[name]['slots'][0]!r}).")
+        # Validate against a trial copy so a bad value leaves state unchanged.
+        trial = dict(params)
+        trial[key] = value
+        self._validate_params(name, trial, role)
+        params[key] = value
+        if role == 'warp':
+            self._build_warp_splines()
+            if self._weight_tied_to_warp:
+                self._weight_params = dict(self._warp_params)
+                self._build_weight_splines()
+        else:
+            self._build_weight_splines()
 
     @staticmethod
     def _make_integral_spline(name, params):
@@ -921,7 +1033,7 @@ class PerceptionModel:
         """Build the warp role's forward+inverse integral splines (left None for
         analytic symmetric_beta, identity None, or the direct_power map)."""
         self._warp_forward_spline, self._warp_inverse_spline = \
-            self._make_integral_spline(self.warp_name, self.warp_params)
+            self._make_integral_spline(self.warp_name, self._warp_params)
 
     def _build_weight_splines(self):
         """Build the weight role's forward integral spline (the antiderivative
@@ -932,7 +1044,7 @@ class PerceptionModel:
             self._weight_forward_spline = None
             return
         self._weight_forward_spline, _ = \
-            self._make_integral_spline(self.weight_name, self.weight_params)
+            self._make_integral_spline(self.weight_name, self._weight_params)
 
     @staticmethod
     def _eval_forward_map(name, params, fwd_spline, theta):
@@ -1698,7 +1810,7 @@ class PerceptionModel:
             fwd = self._warp_forward_spline
         else:
             fwd = self._weight_forward_spline
-        F = lambda x: self._eval_forward_map(name, self.weight_params, fwd, x)
+        F = lambda x: self._eval_forward_map(name, self._weight_params, fwd, x)
         return sum(F(hi) - F(lo) for lo, hi in intervals)
 
 
@@ -1720,7 +1832,7 @@ class PerceptionModel:
         '''
 
         name = self.weight_name
-        p = self.weight_params
+        p = self._weight_params
         if name is None:
             return np.ones_like(theta)
         elif name == 'cutoff':
@@ -1756,10 +1868,10 @@ class PerceptionModel:
         if name is None:
             return theta
         elif name == 'direct_power':
-            return self._power(theta, self.warp_params['c'])
+            return self._power(theta, self._warp_params['c'])
         else:
             return self._eval_forward_map(
-                name, self.warp_params, self._warp_forward_spline, theta)
+                name, self._warp_params, self._warp_forward_spline, theta)
 
 
     def get_neural_angle_inverse(self, theta):
@@ -1781,10 +1893,10 @@ class PerceptionModel:
         if name is None:
             return theta
         elif name == 'direct_power':
-            return self._power_inverse(theta, self.warp_params['c'])
+            return self._power_inverse(theta, self._warp_params['c'])
         else:
             return self._eval_inverse_map(
-                name, self.warp_params, self._warp_inverse_spline, theta)
+                name, self._warp_params, self._warp_inverse_spline, theta)
 
 
     def _get_target_signals(self, focal_angle=None, focal_loc=None, mesh_signal=False):
