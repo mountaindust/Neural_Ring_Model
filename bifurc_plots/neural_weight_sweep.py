@@ -88,8 +88,9 @@ DPI = 150
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Bumped whenever the cache layout or anything that would invalidate a
-# previously-saved npz changes. Mismatch forces a recompute.
-CACHE_VERSION = 2
+# previously-saved npz changes. Mismatch forces a recompute. Bumped to 3 for
+# the warp/weight decouple (full weighting is now angle_weight='neural_angle_dist').
+CACHE_VERSION = 3
 
 
 # ---- figure specifications ----
@@ -179,24 +180,31 @@ def build_models(row_spec):
     """Return (PerceptionModel, NeuralBandModel) configured per row_spec."""
     targets = model.Targets(locs=TARGET_LOCS, geom_name=TARGET_GEOM,
                             r=TARGET_RADIUS)
+    a_warp, b_warp = _warp_slots(row_spec)
+    # Full weighting: the weight is tied to the warp distribution.
     percep = model.PerceptionModel(
         targets, FOCAL_LOC, FOCAL_ANGLE,
-        neural_weight=row_spec['weight'], neural_angle='integral')
-    if row_spec['weight'] == 'cutoff':
-        percep.a = row_spec['a']
-        percep.b = row_spec['b']
-    elif row_spec['weight'] == 'vonmises':
-        percep.k = row_spec['k']
-    elif row_spec['weight'] == 'symmetric_beta':
-        percep.alpha = row_spec['alpha']
-        percep.b = row_spec['b']
-    elif row_spec['weight'] == 'reg_power':
-        percep.d = row_spec['d']
-        percep.e = row_spec['e']
-    else:
-        raise ValueError(f"unsupported weight: {row_spec['weight']!r}")
+        neural_angle_dist=row_spec['weight'],
+        angle_weight='neural_angle_dist',
+        a_warp=a_warp, b_warp=b_warp)
     nbm = model.NeuralBandModel(percep)
     return percep, nbm
+
+
+def _warp_slots(row_spec):
+    """Map a row_spec's family parameters onto the generic (a_warp, b_warp)
+    constructor slots."""
+    w = row_spec['weight']
+    if w == 'cutoff':
+        return row_spec['a'], row_spec['b']
+    elif w == 'vonmises':
+        return row_spec['k'], None
+    elif w == 'symmetric_beta':
+        return row_spec['alpha'], row_spec['b']
+    elif w == 'reg_power':
+        return row_spec['d'], row_spec['e']
+    else:
+        raise ValueError(f"unsupported weight: {w!r}")
 
 
 # ---- cache fingerprint helpers ----
@@ -228,7 +236,7 @@ def figure_fingerprint(rows):
     bifurcation rasters for this figure. Used as the cache key."""
     return dict(
         cache_version=CACHE_VERSION,
-        weight_angle_only=False,
+        angle_weight='neural_angle_dist',
         target_locs=TARGET_LOCS.tolist(),
         target_geom=TARGET_GEOM,
         target_radius=TARGET_RADIUS,

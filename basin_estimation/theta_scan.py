@@ -39,9 +39,9 @@ targets = model.Targets(locs=target_locs, geom_name='circle', r=0.5)
 percep = model.PerceptionModel(
     targets,
     focal_loc=(0, 0), focal_angle=0,
-    neural_weight='vonmises', neural_angle='integral',
+    neural_angle_dist='vonmises', angle_weight='neural_angle_dist',
+    a_warp=0.55,
 )
-percep.k = 0.55
 nbm = model.NeuralBandModel(percep)
 
 

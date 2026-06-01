@@ -232,7 +232,7 @@ print("\n=== _get_target_signals: capsule w=0 ===")
 tgt_two = Targets(locs=np.array([[10, 3], [10, -3]]), geom_name='capsule',
                   l=2, w=0, theta=pi/2)
 pm = PerceptionModel(tgt_two, focal_loc=(0, 0), focal_angle=0,
-                     neural_weight=None, neural_angle=None)
+                     neural_angle_dist=None, angle_weight=None)
 c_angles, rho = pm._get_target_signals()
 check("two capsules: equal rho", rho, [0.5, 0.5], tol=1e-6)
 
@@ -240,7 +240,7 @@ check("two capsules: equal rho", rho, [0.5, 0.5], tol=1e-6)
 tgt_block = Targets(locs=np.array([[5, 0], [10, 0]]), geom_name='capsule',
                     l=np.array([4, 2]), w=0, theta=np.array([pi/2, pi/2]))
 pm_block = PerceptionModel(tgt_block, focal_loc=(0, 0), focal_angle=0,
-                           neural_weight=None, neural_angle=None)
+                           neural_angle_dist=None, angle_weight=None)
 c_angles_b, rho_b = pm_block._get_target_signals()
 check("blocking w=0: only front visible", len(rho_b), 1)
 
@@ -248,7 +248,7 @@ check("blocking w=0: only front visible", len(rho_b), 1)
 tgt_partial = Targets(locs=np.array([[5, 0], [10, 0]]), geom_name='capsule',
                       l=np.array([1, 10]), w=0, theta=np.array([pi/2, pi/2]))
 pm_partial = PerceptionModel(tgt_partial, focal_loc=(0, 0), focal_angle=0,
-                             neural_weight=None, neural_angle=None)
+                             neural_angle_dist=None, angle_weight=None)
 c_angles_p, rho_p = pm_partial._get_target_signals()
 check("partial block w=0: both visible", len(rho_p), 2)
 
@@ -261,7 +261,7 @@ print("\n=== _get_target_signals: capsule w>0 ===")
 tgt_w2 = Targets(locs=np.array([[10, 3], [10, -3]]), geom_name='capsule',
                  l=2, w=1, theta=pi/2)
 pm_w = PerceptionModel(tgt_w2, focal_loc=(0, 0), focal_angle=0,
-                       neural_weight=None, neural_angle=None)
+                       neural_angle_dist=None, angle_weight=None)
 c_angles_w, rho_w = pm_w._get_target_signals()
 check("two capsules w=1: equal rho", rho_w, [0.5, 0.5], tol=1e-6)
 
@@ -269,7 +269,7 @@ check("two capsules w=1: equal rho", rho_w, [0.5, 0.5], tol=1e-6)
 tgt_end_sig = Targets(locs=np.array([[10, 0]]), geom_name='capsule',
                       l=4, w=1, theta=0)
 pm_end = PerceptionModel(tgt_end_sig, focal_loc=(0, 0), focal_angle=0,
-                         neural_weight=None, neural_angle=None)
+                         neural_angle_dist=None, angle_weight=None)
 c_end, rho_end = pm_end._get_target_signals()
 check("end-on w=1: visible", len(rho_end), 1)
 if len(rho_end) == 1:
@@ -283,7 +283,7 @@ print("\n=== _get_target_signals: capsule with cutoff weight ===")
 tgt_cut = Targets(locs=np.array([[10, 3], [10, -3]]), geom_name='capsule',
                   l=2, w=1, theta=pi/2)
 pm_cut = PerceptionModel(tgt_cut, focal_loc=(0, 0), focal_angle=0,
-                         neural_weight='cutoff', neural_angle='integral')
+                         neural_angle_dist='cutoff', angle_weight='neural_angle_dist')
 c_angles_c, rho_c = pm_cut._get_target_signals()
 check("cutoff capsule: equal rho", rho_c, [0.5, 0.5], tol=1e-6)
 
@@ -297,14 +297,14 @@ tgt_wide_front = Targets(locs=np.array([[5, 0], [10, 0]]), geom_name='capsule',
                          l=np.array([1, 10]), w=np.array([2, 0]),
                          theta=np.array([pi/2, pi/2]))
 pm_wide = PerceptionModel(tgt_wide_front, focal_loc=(0, 0), focal_angle=0,
-                          neural_weight=None, neural_angle=None)
+                          neural_angle_dist=None, angle_weight=None)
 c_wide, rho_wide = pm_wide._get_target_signals()
 
 tgt_thin_front = Targets(locs=np.array([[5, 0], [10, 0]]), geom_name='capsule',
                          l=np.array([1, 10]), w=np.array([0, 0]),
                          theta=np.array([pi/2, pi/2]))
 pm_thin = PerceptionModel(tgt_thin_front, focal_loc=(0, 0), focal_angle=0,
-                          neural_weight=None, neural_angle=None)
+                          neural_angle_dist=None, angle_weight=None)
 c_thin, rho_thin = pm_thin._get_target_signals()
 
 # Both should have 2 visible targets
@@ -327,7 +327,7 @@ tgt_on = Targets(locs=np.array([[0, 0], [10, 0]]), geom_name='capsule',
                  l=np.array([4, 2]), w=np.array([2, 1]),
                  theta=np.array([0, pi/2]))
 pm_on = PerceptionModel(tgt_on, focal_loc=(0, 0), focal_angle=0,
-                        neural_weight=None, neural_angle=None)
+                        neural_angle_dist=None, angle_weight=None)
 c_on, rho_on = pm_on._get_target_signals()
 # First capsule overlaps observer -> [-pi, pi], blocks everything
 check("on capsule: only overlapping visible", len(rho_on), 1)

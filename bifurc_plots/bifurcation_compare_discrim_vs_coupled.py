@@ -88,14 +88,14 @@ def weight_label():
 def build_model():
     targets = model.Targets(locs=TARGET_LOCS, geom_name='circle',
                             r=TARGET_RADIUS)
-    percep = model.PerceptionModel(targets, (0, 0), 0,
-                                   neural_weight=NEURAL_WEIGHT,
-                                   neural_angle='integral')
     if NEURAL_WEIGHT == 'vonmises':
-        percep.k = K_VONMISES
+        a_warp, b_warp = K_VONMISES, None
     else:
-        percep.a = A_CUTOFF
-        percep.b = B_CUTOFF
+        a_warp, b_warp = A_CUTOFF, B_CUTOFF
+    percep = model.PerceptionModel(targets, (0, 0), 0,
+                                   neural_angle_dist=NEURAL_WEIGHT,
+                                   angle_weight='neural_angle_dist',
+                                   a_warp=a_warp, b_warp=b_warp)
     return model.NeuralBandModel(percep)
 
 

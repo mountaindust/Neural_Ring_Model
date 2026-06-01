@@ -58,9 +58,9 @@ rng = np.random.default_rng(seed=20260423)
 print("=== Cutoff forward spline vs reference ===")
 # ========================================================
 
-pm_cutoff = PM(neural_weight='cutoff', neural_angle='integral')
-a = pm_cutoff.a
-b = pm_cutoff.b
+pm_cutoff = PM(neural_angle_dist='cutoff')
+a = pm_cutoff.warp_params['a']
+b = pm_cutoff.warp_params['b']
 
 # Random samples in [-pi, pi]
 theta_rand = rng.uniform(-pi, pi, size=5000)
@@ -73,7 +73,7 @@ theta_fixed = np.array([
 ])
 theta_all = np.concatenate([theta_rand, theta_fixed])
 
-spline_vals = pm_cutoff._neural_angle_cutoff(theta_all)
+spline_vals = pm_cutoff.get_neural_angle(theta_all)
 ref_vals = np.array([PM._smooth_cutoff_integral(t, a, b) for t in theta_all])
 check_array("cutoff forward: spline vs quad", spline_vals, ref_vals, tol=1e-10)
 
@@ -94,7 +94,7 @@ y_fixed = np.array([
 ])
 y_all = np.concatenate([y_rand, y_fixed])
 
-spline_inv = pm_cutoff._neural_angle_cutoff_inverse(y_all)
+spline_inv = pm_cutoff.get_neural_angle_inverse(y_all)
 ref_inv = np.array([PM._smooth_cutoff_int_inverse(y, a, b) for y in y_all])
 # Inverse accuracy is condition-limited: x-error = y-error / |dF/dx|, and
 # dF/dx -> 0 as |x| -> b. Forward (F) is accurate to ~5e-11, so inverse at
@@ -113,48 +113,48 @@ print("\n=== Cutoff roundtrip ===")
 # to ±b and cannot recover the original x. Even short of saturation, dF/dx
 # vanishes near the boundary so the inverse is ill-conditioned.
 x_rt = rng.uniform(-0.85*b, 0.85*b, size=5000)
-y_rt = pm_cutoff._neural_angle_cutoff(x_rt)
-x_back = pm_cutoff._neural_angle_cutoff_inverse(y_rt)
+y_rt = pm_cutoff.get_neural_angle(x_rt)
+x_back = pm_cutoff.get_neural_angle_inverse(y_rt)
 check_array("cutoff roundtrip x -> y -> x", x_back, x_rt, tol=1e-8)
 
 # y -> x -> y picks up two cubic-spline interpolation errors stacked on top
 # of brentq's quad tolerance; 1e-9 is the realistic achievable precision.
 y_dir = rng.uniform(-pi + 1e-3, pi - 1e-3, size=5000)
-x_mid = pm_cutoff._neural_angle_cutoff_inverse(y_dir)
-y_back = pm_cutoff._neural_angle_cutoff(x_mid)
+x_mid = pm_cutoff.get_neural_angle_inverse(y_dir)
+y_back = pm_cutoff.get_neural_angle(x_mid)
 check_array("cutoff roundtrip y -> x -> y", y_back, y_dir, tol=1e-9)
 
 # ========================================================
 print("\n=== Cutoff symmetry and endpoints ===")
 # ========================================================
 
-check_scalar("cutoff F(0) == 0", pm_cutoff._neural_angle_cutoff(0.0), 0.0,
+check_scalar("cutoff F(0) == 0", pm_cutoff.get_neural_angle(0.0), 0.0,
              tol=0.0)
-check_scalar("cutoff F(b) == pi", pm_cutoff._neural_angle_cutoff(b), pi,
+check_scalar("cutoff F(b) == pi", pm_cutoff.get_neural_angle(b), pi,
              tol=0.0)
-check_scalar("cutoff F(-b) == -pi", pm_cutoff._neural_angle_cutoff(-b), -pi,
+check_scalar("cutoff F(-b) == -pi", pm_cutoff.get_neural_angle(-b), -pi,
              tol=0.0)
 check_scalar("cutoff F(1.5*b) saturates to pi",
-             pm_cutoff._neural_angle_cutoff(1.5*b), pi, tol=0.0)
+             pm_cutoff.get_neural_angle(1.5*b), pi, tol=0.0)
 check_scalar("cutoff F(-1.5*b) saturates to -pi",
-             pm_cutoff._neural_angle_cutoff(-1.5*b), -pi, tol=0.0)
+             pm_cutoff.get_neural_angle(-1.5*b), -pi, tol=0.0)
 check_scalar("cutoff Finv(pi) == b",
-             pm_cutoff._neural_angle_cutoff_inverse(pi), b, tol=0.0)
+             pm_cutoff.get_neural_angle_inverse(pi), b, tol=0.0)
 check_scalar("cutoff Finv(-pi) == -b",
-             pm_cutoff._neural_angle_cutoff_inverse(-pi), -b, tol=0.0)
+             pm_cutoff.get_neural_angle_inverse(-pi), -b, tol=0.0)
 
 # Antisymmetry F(-x) = -F(x)
 theta_sym = rng.uniform(-b, b, size=500)
-f_pos = pm_cutoff._neural_angle_cutoff(theta_sym)
-f_neg = pm_cutoff._neural_angle_cutoff(-theta_sym)
+f_pos = pm_cutoff.get_neural_angle(theta_sym)
+f_neg = pm_cutoff.get_neural_angle(-theta_sym)
 check_array("cutoff antisymmetry F(-x) = -F(x)", f_neg, -f_pos, tol=1e-12)
 
 # ========================================================
 print("\n=== Vonmises forward spline vs reference ===")
 # ========================================================
 
-pm_vm = PM(neural_weight='vonmises', neural_angle='integral')
-k_val = pm_vm.k
+pm_vm = PM(neural_angle_dist='vonmises')
+k_val = pm_vm.warp_params['k']
 
 theta_rand = rng.uniform(-pi, pi, size=5000)
 # Stay within [-pi, pi]: outside that, the spline saturates to ±pi by design
@@ -166,7 +166,7 @@ theta_fixed = np.array([
 ])
 theta_all = np.concatenate([theta_rand, theta_fixed])
 
-spline_vals = pm_vm._neural_angle_vonmises(theta_all)
+spline_vals = pm_vm.get_neural_angle(theta_all)
 ref_vals = PM._vonmises_integral(theta_all, k_val)
 check_array("vonmises forward: spline vs scipy cdf", spline_vals, ref_vals,
             tol=1e-10)
@@ -182,7 +182,7 @@ y_fixed = np.array([
 ])
 y_all = np.concatenate([y_rand, y_fixed])
 
-spline_inv = pm_vm._neural_angle_vonmises_inverse(y_all)
+spline_inv = pm_vm.get_neural_angle_inverse(y_all)
 ref_inv = PM._vonmises_int_inverse(y_all, k_val)
 check_array("vonmises inverse: spline vs scipy ppf", spline_inv, ref_inv,
             tol=1e-10)
@@ -192,32 +192,32 @@ print("\n=== Vonmises roundtrip ===")
 # ========================================================
 
 theta_rt = rng.uniform(-pi, pi, size=5000)
-y_rt = pm_vm._neural_angle_vonmises(theta_rt)
-theta_back = pm_vm._neural_angle_vonmises_inverse(y_rt)
+y_rt = pm_vm.get_neural_angle(theta_rt)
+theta_back = pm_vm.get_neural_angle_inverse(y_rt)
 check_array("vonmises roundtrip theta -> y -> theta", theta_back, theta_rt,
             tol=1e-10)
 
 y_dir = rng.uniform(-pi, pi, size=5000)
-theta_mid = pm_vm._neural_angle_vonmises_inverse(y_dir)
-y_back = pm_vm._neural_angle_vonmises(theta_mid)
+theta_mid = pm_vm.get_neural_angle_inverse(y_dir)
+y_back = pm_vm.get_neural_angle(theta_mid)
 check_array("vonmises roundtrip y -> theta -> y", y_back, y_dir, tol=1e-10)
 
 # ========================================================
 print("\n=== Vonmises symmetry and endpoints ===")
 # ========================================================
 
-check_scalar("vonmises G(0) == 0", pm_vm._neural_angle_vonmises(0.0), 0.0,
+check_scalar("vonmises G(0) == 0", pm_vm.get_neural_angle(0.0), 0.0,
              tol=0.0)
-check_scalar("vonmises G(pi) == pi", pm_vm._neural_angle_vonmises(pi), pi,
+check_scalar("vonmises G(pi) == pi", pm_vm.get_neural_angle(pi), pi,
              tol=0.0)
-check_scalar("vonmises G(-pi) == -pi", pm_vm._neural_angle_vonmises(-pi), -pi,
+check_scalar("vonmises G(-pi) == -pi", pm_vm.get_neural_angle(-pi), -pi,
              tol=0.0)
 check_scalar("vonmises G(1.5*pi) saturates to pi",
-             pm_vm._neural_angle_vonmises(1.5*pi), pi, tol=0.0)
+             pm_vm.get_neural_angle(1.5*pi), pi, tol=0.0)
 
 theta_sym = rng.uniform(-pi, pi, size=500)
-g_pos = pm_vm._neural_angle_vonmises(theta_sym)
-g_neg = pm_vm._neural_angle_vonmises(-theta_sym)
+g_pos = pm_vm.get_neural_angle(theta_sym)
+g_neg = pm_vm.get_neural_angle(-theta_sym)
 check_array("vonmises antisymmetry G(-x) = -G(x)", g_neg, -g_pos, tol=1e-12)
 
 # ========================================================
@@ -226,23 +226,23 @@ print("\n=== Symmetric Beta roundtrip ===")
 
 # symmetric_beta uses scipy.stats.beta.cdf / .ppf directly (no spline cache),
 # so the only error source is scipy's internal accuracy. Tight tolerance.
-pm_sb = PM(neural_weight='symmetric_beta', neural_angle='integral')
-alpha_val = pm_sb.alpha
-b_sb = pm_sb.b
+pm_sb = PM(neural_angle_dist='symmetric_beta')
+alpha_val = pm_sb.warp_params['alpha']
+b_sb = pm_sb.warp_params['b']
 
 # Stay inside the well-conditioned interior. Near +/-b, scipy.beta.cdf
 # saturates to 0.0/1.0 in floating point (for alpha = 5, this happens
 # within ~1e-3 of the boundary), losing the information needed to roundtrip
 # back exactly. This is intrinsic to the floating-point cdf, not a wrapper bug.
 theta_rt = rng.uniform(-0.95*b_sb, 0.95*b_sb, size=5000)
-y_rt = pm_sb._neural_angle_symmetric_beta(theta_rt)
-theta_back = pm_sb._neural_angle_symmetric_beta_inverse(y_rt)
+y_rt = pm_sb.get_neural_angle(theta_rt)
+theta_back = pm_sb.get_neural_angle_inverse(y_rt)
 check_array("symmetric_beta roundtrip theta -> y -> theta", theta_back,
             theta_rt, tol=1e-11)
 
 y_dir = rng.uniform(-pi + 1e-3, pi - 1e-3, size=5000)
-theta_mid = pm_sb._neural_angle_symmetric_beta_inverse(y_dir)
-y_back = pm_sb._neural_angle_symmetric_beta(theta_mid)
+theta_mid = pm_sb.get_neural_angle_inverse(y_dir)
+y_back = pm_sb.get_neural_angle(theta_mid)
 check_array("symmetric_beta roundtrip y -> theta -> y", y_back, y_dir,
             tol=1e-11)
 
@@ -251,23 +251,23 @@ print("\n=== Symmetric Beta symmetry and endpoints ===")
 # ========================================================
 
 check_scalar("symmetric_beta G(0) == 0",
-             pm_sb._neural_angle_symmetric_beta(0.0), 0.0, tol=0.0)
+             pm_sb.get_neural_angle(0.0), 0.0, tol=0.0)
 check_scalar("symmetric_beta G(b) == pi",
-             pm_sb._neural_angle_symmetric_beta(b_sb), pi, tol=0.0)
+             pm_sb.get_neural_angle(b_sb), pi, tol=0.0)
 check_scalar("symmetric_beta G(-b) == -pi",
-             pm_sb._neural_angle_symmetric_beta(-b_sb), -pi, tol=0.0)
+             pm_sb.get_neural_angle(-b_sb), -pi, tol=0.0)
 check_scalar("symmetric_beta G(1.5*b) saturates to pi",
-             pm_sb._neural_angle_symmetric_beta(1.5*b_sb), pi, tol=0.0)
+             pm_sb.get_neural_angle(1.5*b_sb), pi, tol=0.0)
 check_scalar("symmetric_beta G(-1.5*b) saturates to -pi",
-             pm_sb._neural_angle_symmetric_beta(-1.5*b_sb), -pi, tol=0.0)
+             pm_sb.get_neural_angle(-1.5*b_sb), -pi, tol=0.0)
 check_scalar("symmetric_beta Ginv(pi) == b",
-             pm_sb._neural_angle_symmetric_beta_inverse(pi), b_sb, tol=0.0)
+             pm_sb.get_neural_angle_inverse(pi), b_sb, tol=0.0)
 check_scalar("symmetric_beta Ginv(-pi) == -b",
-             pm_sb._neural_angle_symmetric_beta_inverse(-pi), -b_sb, tol=0.0)
+             pm_sb.get_neural_angle_inverse(-pi), -b_sb, tol=0.0)
 
 theta_sym = rng.uniform(-b_sb, b_sb, size=500)
-g_pos = pm_sb._neural_angle_symmetric_beta(theta_sym)
-g_neg = pm_sb._neural_angle_symmetric_beta(-theta_sym)
+g_pos = pm_sb.get_neural_angle(theta_sym)
+g_neg = pm_sb.get_neural_angle(-theta_sym)
 check_array("symmetric_beta antisymmetry G(-x) = -G(x)", g_neg, -g_pos,
             tol=1e-12)
 
@@ -307,9 +307,9 @@ else:
 print("\n=== Reg_power forward spline vs reference ===")
 # ========================================================
 
-pm_rp = PM(neural_weight='reg_power', neural_angle='integral')
-d_val = pm_rp.d
-e_val = pm_rp.e
+pm_rp = PM(neural_angle_dist='reg_power')
+d_val = pm_rp.warp_params['d']
+e_val = pm_rp.warp_params['e']
 
 # Random samples plus stress points near 0 (where the integrand peaks).
 theta_rand = rng.uniform(-pi, pi, size=5000)
@@ -320,7 +320,7 @@ theta_fixed = np.array([
 ])
 theta_all = np.concatenate([theta_rand, theta_fixed])
 
-spline_vals = pm_rp._neural_angle_reg_power(theta_all)
+spline_vals = pm_rp.get_neural_angle(theta_all)
 ref_vals = PM._reg_power_integral(theta_all, d_val, e_val)
 # 2001-node cubic-power-stretched mesh has its accuracy floor set by the
 # u^3 concentration near 0; empirical max error on a random 5000-point
@@ -341,7 +341,7 @@ y_fixed = np.array([
 ])
 y_all = np.concatenate([y_rand, y_fixed])
 
-spline_inv = pm_rp._neural_angle_reg_power_inverse(y_all)
+spline_inv = pm_rp.get_neural_angle_inverse(y_all)
 ref_inv = PM._reg_power_int_inverse(y_all, d_val, e_val)
 # Inverse spline error is dominated by the forward-spline interpolation
 # error (~5e-7), amplified mildly by the inverse Jacobian away from 0.
@@ -353,15 +353,15 @@ print("\n=== Reg_power roundtrip ===")
 # ========================================================
 
 theta_rt = rng.uniform(-pi, pi, size=5000)
-y_rt = pm_rp._neural_angle_reg_power(theta_rt)
-theta_back = pm_rp._neural_angle_reg_power_inverse(y_rt)
+y_rt = pm_rp.get_neural_angle(theta_rt)
+theta_back = pm_rp.get_neural_angle_inverse(y_rt)
 # Two stacked cubic-spline interpolations: ~2x the forward floor.
 check_array("reg_power roundtrip theta -> y -> theta", theta_back, theta_rt,
             tol=1e-5)
 
 y_dir = rng.uniform(-pi + 1e-3, pi - 1e-3, size=5000)
-theta_mid = pm_rp._neural_angle_reg_power_inverse(y_dir)
-y_back = pm_rp._neural_angle_reg_power(theta_mid)
+theta_mid = pm_rp.get_neural_angle_inverse(y_dir)
+y_back = pm_rp.get_neural_angle(theta_mid)
 check_array("reg_power roundtrip y -> theta -> y", y_back, y_dir, tol=1e-5)
 
 # ========================================================
@@ -369,23 +369,23 @@ print("\n=== Reg_power symmetry and endpoints ===")
 # ========================================================
 
 check_scalar("reg_power F(0) == 0",
-             pm_rp._neural_angle_reg_power(0.0), 0.0, tol=0.0)
+             pm_rp.get_neural_angle(0.0), 0.0, tol=0.0)
 check_scalar("reg_power F(pi) == pi",
-             pm_rp._neural_angle_reg_power(pi), pi, tol=0.0)
+             pm_rp.get_neural_angle(pi), pi, tol=0.0)
 check_scalar("reg_power F(-pi) == -pi",
-             pm_rp._neural_angle_reg_power(-pi), -pi, tol=0.0)
+             pm_rp.get_neural_angle(-pi), -pi, tol=0.0)
 check_scalar("reg_power F(1.5*pi) saturates to pi",
-             pm_rp._neural_angle_reg_power(1.5*pi), pi, tol=0.0)
+             pm_rp.get_neural_angle(1.5*pi), pi, tol=0.0)
 check_scalar("reg_power F(-1.5*pi) saturates to -pi",
-             pm_rp._neural_angle_reg_power(-1.5*pi), -pi, tol=0.0)
+             pm_rp.get_neural_angle(-1.5*pi), -pi, tol=0.0)
 check_scalar("reg_power Finv(pi) == pi",
-             pm_rp._neural_angle_reg_power_inverse(pi), pi, tol=0.0)
+             pm_rp.get_neural_angle_inverse(pi), pi, tol=0.0)
 check_scalar("reg_power Finv(-pi) == -pi",
-             pm_rp._neural_angle_reg_power_inverse(-pi), -pi, tol=0.0)
+             pm_rp.get_neural_angle_inverse(-pi), -pi, tol=0.0)
 
 theta_sym = rng.uniform(-pi, pi, size=500)
-f_pos = pm_rp._neural_angle_reg_power(theta_sym)
-f_neg = pm_rp._neural_angle_reg_power(-theta_sym)
+f_pos = pm_rp.get_neural_angle(theta_sym)
+f_neg = pm_rp.get_neural_angle(-theta_sym)
 check_array("reg_power antisymmetry F(-x) = -F(x)", f_neg, -f_pos, tol=1e-12)
 
 # ========================================================
@@ -421,7 +421,7 @@ print("\n=== Reg_power approximation of _power (regression pin) ===")
 # This guards against accidental changes to the default e or normalization
 # convention; bumping the bound here is fine if the default genuinely changes.
 theta_grid = np.linspace(-pi, pi, 2001)
-F_default = pm_rp._neural_angle_reg_power(theta_grid)
+F_default = pm_rp.get_neural_angle(theta_grid)
 P_target = PM._power(theta_grid, 1.0 - d_val)
 limit_err = float(np.max(np.abs(F_default - P_target)))
 if limit_err < 1e-2:
@@ -437,23 +437,26 @@ else:
 print("\n=== _integrate_neural_weight invariance (cutoff) ===")
 # ========================================================
 
-# End-to-end check: the routing swap should preserve rho to within spline
-# accuracy. Build a small Targets scenario with circles and compare rho
-# against a temporarily monkey-patched reference path.
+# End-to-end check: the weight-side arc-integral (rho) should match a
+# reference path built from the quad/brentq/scipy antiderivatives. Build a
+# small Targets scenario with circles. The weight is an INDEPENDENT family
+# (angle_weight=<family>) so this exercises the decoupled weight spline; with
+# an identity warp the warp role does not interfere.
 tgts = Targets(locs=np.array([[10.0, 8.0], [12.0, 12.0], [8.0, 13.0]]),
                geom_name='circle', r=0.5)
 pm_e2e = PM(targets=tgts, focal_loc=(5.0, 10.0), focal_angle=0.1,
-            neural_weight='cutoff', neural_angle='integral')
+            neural_angle_dist=None, angle_weight='cutoff')
 
 c_spline, rho_spline = pm_e2e._get_target_signals()
 
-# Monkey-patch to force the reference path
-a_e, b_e = pm_e2e.a, pm_e2e.b
-orig_fn = pm_e2e._neural_angle_cutoff
-pm_e2e._neural_angle_cutoff = lambda t: PM._smooth_cutoff_integral(
-    float(t), a_e, b_e)
+# Monkey-patch the weight forward map to the quad reference antiderivative.
+a_e = pm_e2e.weight_params['a']
+b_e = pm_e2e.weight_params['b']
+orig_eval = pm_e2e._eval_forward_map
+pm_e2e._eval_forward_map = lambda name, params, fwd, t: \
+    PM._smooth_cutoff_integral(float(t), a_e, b_e)
 c_ref, rho_ref = pm_e2e._get_target_signals()
-pm_e2e._neural_angle_cutoff = orig_fn
+pm_e2e._eval_forward_map = orig_eval
 
 check_array("e2e cutoff: c_angles unchanged", c_spline, c_ref, tol=1e-14)
 check_array("e2e cutoff: rho matches reference path", rho_spline, rho_ref,
@@ -464,15 +467,15 @@ print("\n=== _integrate_neural_weight invariance (vonmises) ===")
 # ========================================================
 
 pm_e2e_vm = PM(targets=tgts, focal_loc=(5.0, 10.0), focal_angle=0.1,
-               neural_weight='vonmises', neural_angle='integral')
+               neural_angle_dist=None, angle_weight='vonmises')
 c_spline_vm, rho_spline_vm = pm_e2e_vm._get_target_signals()
 
-k_e = pm_e2e_vm.k
-orig_fn = pm_e2e_vm._neural_angle_vonmises
-pm_e2e_vm._neural_angle_vonmises = lambda t: PM._vonmises_integral(
-    np.asarray(t, dtype=float), k_e)
+k_e = pm_e2e_vm.weight_params['k']
+orig_eval = pm_e2e_vm._eval_forward_map
+pm_e2e_vm._eval_forward_map = lambda name, params, fwd, t: \
+    PM._vonmises_integral(np.asarray(t, dtype=float), k_e)
 c_ref_vm, rho_ref_vm = pm_e2e_vm._get_target_signals()
-pm_e2e_vm._neural_angle_vonmises = orig_fn
+pm_e2e_vm._eval_forward_map = orig_eval
 
 check_array("e2e vonmises: c_angles unchanged", c_spline_vm, c_ref_vm,
             tol=1e-14)
@@ -484,15 +487,16 @@ print("\n=== _integrate_neural_weight invariance (reg_power) ===")
 # ========================================================
 
 pm_e2e_rp = PM(targets=tgts, focal_loc=(5.0, 10.0), focal_angle=0.1,
-               neural_weight='reg_power', neural_angle='integral')
+               neural_angle_dist=None, angle_weight='reg_power')
 c_spline_rp, rho_spline_rp = pm_e2e_rp._get_target_signals()
 
-d_e, e_e = pm_e2e_rp.d, pm_e2e_rp.e
-orig_fn = pm_e2e_rp._neural_angle_reg_power
-pm_e2e_rp._neural_angle_reg_power = lambda t: PM._reg_power_integral(
-    np.asarray(t, dtype=float), d_e, e_e)
+d_e = pm_e2e_rp.weight_params['d']
+e_e = pm_e2e_rp.weight_params['e']
+orig_eval = pm_e2e_rp._eval_forward_map
+pm_e2e_rp._eval_forward_map = lambda name, params, fwd, t: \
+    PM._reg_power_integral(np.asarray(t, dtype=float), d_e, e_e)
 c_ref_rp, rho_ref_rp = pm_e2e_rp._get_target_signals()
-pm_e2e_rp._neural_angle_reg_power = orig_fn
+pm_e2e_rp._eval_forward_map = orig_eval
 
 check_array("e2e reg_power: c_angles unchanged", c_spline_rp, c_ref_rp,
             tol=1e-14)
@@ -507,7 +511,7 @@ print("\n=== _get_target_signals dispatch (symmetric_beta) ===")
 # only need to verify that the dispatch in _integrate_neural_weight reaches
 # the symmetric_beta branch and produces a normalized rho of the right shape.
 pm_e2e_sb = PM(targets=tgts, focal_loc=(5.0, 10.0), focal_angle=0.1,
-               neural_weight='symmetric_beta', neural_angle='integral')
+               neural_angle_dist=None, angle_weight='symmetric_beta')
 c_sb, rho_sb = pm_e2e_sb._get_target_signals()
 check_scalar("e2e symmetric_beta: rho.sum() == 1", float(rho_sb.sum()), 1.0,
              tol=1e-12)
@@ -522,11 +526,11 @@ print("\n=== Parameter sweep (cutoff) ===")
 
 for a_test, b_test in [(0.2, 1.0), (0.5, 1.5), (pi/4, 3*pi/4),
                        (0.01, pi - 0.1), (1.0, 2.8)]:
-    pm_sweep = PM(neural_weight='cutoff', neural_angle='integral')
-    pm_sweep.a = a_test
-    pm_sweep.b = b_test
+    pm_sweep = PM(neural_angle_dist='cutoff')
+    pm_sweep.a_warp = a_test
+    pm_sweep.b_warp = b_test
     theta_sweep = rng.uniform(-b_test, b_test, size=500)
-    sp = pm_sweep._neural_angle_cutoff(theta_sweep)
+    sp = pm_sweep.get_neural_angle(theta_sweep)
     rf = np.array([PM._smooth_cutoff_integral(t, a_test, b_test)
                    for t in theta_sweep])
     check_array(f"cutoff sweep a={a_test:.3f}, b={b_test:.3f}", sp, rf,
@@ -537,10 +541,10 @@ print("\n=== Parameter sweep (vonmises) ===")
 # ========================================================
 
 for k_test in [0.5, 1.0, 3.0, 5.0, 10.0]:
-    pm_sweep = PM(neural_weight='vonmises', neural_angle='integral')
-    pm_sweep.k = k_test
+    pm_sweep = PM(neural_angle_dist='vonmises')
+    pm_sweep.a_warp = k_test
     theta_sweep = rng.uniform(-pi, pi, size=500)
-    sp = pm_sweep._neural_angle_vonmises(theta_sweep)
+    sp = pm_sweep.get_neural_angle(theta_sweep)
     rf = PM._vonmises_integral(theta_sweep, k_test)
     check_array(f"vonmises sweep k={k_test}", sp, rf, tol=1e-10)
 
@@ -554,11 +558,11 @@ print("\n=== Parameter sweep (symmetric_beta) ===")
 for alpha_test, b_test in [(1.0, pi), (1.25, pi), (1.5, pi), (1.75, pi),
                            (2.0, pi), (3.0, pi), (5.0, pi), (10.0, pi),
                            (3.0, 0.8*pi), (5.0, 0.5*pi)]:
-    pm_sweep = PM(neural_weight='symmetric_beta', neural_angle='integral')
-    pm_sweep.alpha = alpha_test
-    pm_sweep.b = b_test
+    pm_sweep = PM(neural_angle_dist='symmetric_beta')
+    pm_sweep.a_warp = alpha_test
+    pm_sweep.b_warp = b_test
     theta_sweep = rng.uniform(-b_test, b_test, size=500)
-    sp = pm_sweep._neural_angle_symmetric_beta(theta_sweep)
+    sp = pm_sweep.get_neural_angle(theta_sweep)
     rf = PM._symmetric_beta_integral(theta_sweep, alpha_test, b_test)
     check_array(f"symmetric_beta sweep alpha={alpha_test:.3f}, b={b_test:.3f}",
                 sp, rf, tol=1e-12)
@@ -573,11 +577,11 @@ print("\n=== Parameter sweep (reg_power) ===")
 for d_test, e_test in [(0.3, 1e-2), (0.5, 1e-3), (0.5, 1e-2),
                        (0.7, 1e-3), (0.7, 1e-2), (1.0, 1e-3),
                        (0.5, 1e-1)]:
-    pm_sweep = PM(neural_weight='reg_power', neural_angle='integral')
-    pm_sweep.d = d_test
-    pm_sweep.e = e_test
+    pm_sweep = PM(neural_angle_dist='reg_power')
+    pm_sweep.a_warp = d_test
+    pm_sweep.b_warp = e_test
     theta_sweep = rng.uniform(-pi, pi, size=500)
-    sp = pm_sweep._neural_angle_reg_power(theta_sweep)
+    sp = pm_sweep.get_neural_angle(theta_sweep)
     rf = PM._reg_power_integral(theta_sweep, d_test, e_test)
     check_array(f"reg_power sweep d={d_test:.3f}, e={e_test:.0e}",
                 sp, rf, tol=1e-6)
@@ -586,73 +590,75 @@ for d_test, e_test in [(0.3, 1e-2), (0.5, 1e-3), (0.5, 1e-2),
 print("\n=== Property-setter rebuild ===")
 # ========================================================
 
-# The a/b/k setters must trigger a spline rebuild; the accuracy checks after
-# each setter verify this by comparing against the freshly parameterised
+# assigning a_warp/b_warp must trigger a warp-spline rebuild; the accuracy checks
+# after each call verify this by comparing against the freshly parameterised
 # reference. (id()-based identity checks are unreliable — CPython can reuse
 # freed memory slots immediately for the new CubicSpline instance.)
-pm_rb = PM(neural_weight='cutoff', neural_angle='integral')
-pm_rb.a = 0.8
+pm_rb = PM(neural_angle_dist='cutoff')
+pm_rb.a_warp = 0.8
 check_scalar(
     "cutoff a-setter accuracy",
-    pm_rb._neural_angle_cutoff(0.5),
-    PM._smooth_cutoff_integral(0.5, 0.8, pm_rb.b),
+    pm_rb.get_neural_angle(0.5),
+    PM._smooth_cutoff_integral(0.5, 0.8, pm_rb.warp_params['b']),
     tol=1e-10,
 )
 
-pm_rb.b = 2.5
+pm_rb.b_warp = 2.5
 check_scalar(
     "cutoff b-setter accuracy",
-    pm_rb._neural_angle_cutoff(1.2),
-    PM._smooth_cutoff_integral(1.2, pm_rb.a, 2.5),
+    pm_rb.get_neural_angle(1.2),
+    PM._smooth_cutoff_integral(1.2, pm_rb.warp_params['a'], 2.5),
     tol=1e-10,
 )
 
-pm_rb_vm = PM(neural_weight='vonmises', neural_angle='integral')
-pm_rb_vm.k = 4.0
+pm_rb_vm = PM(neural_angle_dist='vonmises')
+pm_rb_vm.a_warp = 4.0
 check_scalar(
     "vonmises k-setter accuracy",
-    pm_rb_vm._neural_angle_vonmises(0.7),
+    pm_rb_vm.get_neural_angle(0.7),
     float(PM._vonmises_integral(0.7, 4.0)),
     tol=1e-10,
 )
 
-pm_rb_sb = PM(neural_weight='symmetric_beta', neural_angle='integral')
-pm_rb_sb.alpha = 3.0
+pm_rb_sb = PM(neural_angle_dist='symmetric_beta')
+pm_rb_sb.a_warp = 3.0
 check_scalar(
     "symmetric_beta alpha-setter accuracy",
-    pm_rb_sb._neural_angle_symmetric_beta(0.7),
-    float(PM._symmetric_beta_integral(0.7, 3.0, pm_rb_sb.b)),
+    pm_rb_sb.get_neural_angle(0.7),
+    float(PM._symmetric_beta_integral(0.7, 3.0, pm_rb_sb.warp_params['b'])),
     tol=0.0,
 )
 
-pm_rb_sb.b = 0.7*pi
+pm_rb_sb.b_warp = 0.7*pi
 check_scalar(
     "symmetric_beta b-setter accuracy",
-    pm_rb_sb._neural_angle_symmetric_beta(0.4),
-    float(PM._symmetric_beta_integral(0.4, pm_rb_sb.alpha, 0.7*pi)),
+    pm_rb_sb.get_neural_angle(0.4),
+    float(PM._symmetric_beta_integral(0.4, pm_rb_sb.warp_params['alpha'],
+                                      0.7*pi)),
     tol=0.0,
 )
 
-pm_rb_rp = PM(neural_weight='reg_power', neural_angle='integral')
-pm_rb_rp.d = 0.7
+pm_rb_rp = PM(neural_angle_dist='reg_power')
+pm_rb_rp.a_warp = 0.7
 check_scalar(
     "reg_power d-setter accuracy",
-    pm_rb_rp._neural_angle_reg_power(0.7),
-    float(PM._reg_power_integral(0.7, 0.7, pm_rb_rp.e)),
+    pm_rb_rp.get_neural_angle(0.7),
+    float(PM._reg_power_integral(0.7, 0.7, pm_rb_rp.warp_params['e'])),
     tol=1e-10,
 )
 
-pm_rb_rp.e = 1e-2
+pm_rb_rp.b_warp = 1e-2
 check_scalar(
     "reg_power e-setter accuracy",
-    pm_rb_rp._neural_angle_reg_power(0.4),
-    float(PM._reg_power_integral(0.4, pm_rb_rp.d, 1e-2)),
+    pm_rb_rp.get_neural_angle(0.4),
+    float(PM._reg_power_integral(0.4, pm_rb_rp.warp_params['d'], 1e-2)),
     tol=1e-10,
 )
 
-# Single build during __init__: patch the counter and confirm exactly one call.
+# Single warp-spline build during __init__: patch the counter and confirm
+# exactly one call. (angle_weight=None here, so no weight spline is built.)
 build_count = {'n': 0}
-orig_build = PM._build_integral_splines
+orig_build = PM._build_warp_splines
 
 
 def counting_build(self):
@@ -660,34 +666,20 @@ def counting_build(self):
     return orig_build(self)
 
 
-PM._build_integral_splines = counting_build
+PM._build_warp_splines = counting_build
 try:
-    build_count['n'] = 0
-    _ = PM(neural_weight='cutoff', neural_angle='integral')
-    check_scalar("cutoff __init__ builds splines exactly once",
-                 build_count['n'], 1, tol=0.0)
+    for fam in ['cutoff', 'vonmises', 'symmetric_beta', 'reg_power']:
+        build_count['n'] = 0
+        _ = PM(neural_angle_dist=fam)
+        check_scalar(f"{fam} __init__ builds warp spline exactly once",
+                     build_count['n'], 1, tol=0.0)
 
     build_count['n'] = 0
-    _ = PM(neural_weight='vonmises', neural_angle='integral')
-    check_scalar("vonmises __init__ builds splines exactly once",
-                 build_count['n'], 1, tol=0.0)
-
-    build_count['n'] = 0
-    _ = PM(neural_weight='symmetric_beta', neural_angle='integral')
-    check_scalar("symmetric_beta __init__ builds splines exactly once",
-                 build_count['n'], 1, tol=0.0)
-
-    build_count['n'] = 0
-    _ = PM(neural_weight='reg_power', neural_angle='integral')
-    check_scalar("reg_power __init__ builds splines exactly once",
-                 build_count['n'], 1, tol=0.0)
-
-    build_count['n'] = 0
-    _ = PM(neural_weight=None, neural_angle=None)
-    check_scalar("plain __init__ builds splines exactly once",
+    _ = PM(neural_angle_dist=None, angle_weight=None)
+    check_scalar("plain __init__ builds warp spline exactly once",
                  build_count['n'], 1, tol=0.0)
 finally:
-    PM._build_integral_splines = orig_build
+    PM._build_warp_splines = orig_build
 
 
 # ========================================================

@@ -31,10 +31,11 @@ grid_locs = [(x, y) for x in xs for y in ys]
 
 def _compare_worker(args):
     """Worker for compare_models. Solves both NBM and IEM at one grid point."""
-    loc, geom, r, neural_angle = args
+    loc, geom, r, neural_angle_dist = args
     tgts = Targets(locs=locs, geom_name=geom, r=r)
     pm = PerceptionModel(tgts, focal_loc=loc, focal_angle=0,
-                         neural_weight='cutoff', neural_angle=neural_angle)
+                         neural_angle_dist=neural_angle_dist,
+                         angle_weight='cutoff')
     nbm = NeuralBandModel(pm)
     iem = IsingExtModel(pm)
 
@@ -53,12 +54,12 @@ def _compare_worker(args):
     return loc, nbm_angles, nbm_stab, iem_angles, iem_stab
 
 
-def compare_models(geom, r, label, neural_angle=None, pool=None):
+def compare_models(geom, r, label, neural_angle_dist=None, pool=None):
     """Compare NBM and IEM at all grid points. Return mismatch count."""
     mismatches = 0
 
     t0 = time.time()
-    args_list = [(loc, geom, r, neural_angle) for loc in grid_locs]
+    args_list = [(loc, geom, r, neural_angle_dist) for loc in grid_locs]
     if pool is not None:
         results = pool.map(_compare_worker, args_list)
     else:
@@ -95,8 +96,8 @@ def _warping_worker(args):
     loc, geom, r, c = args
     tgts = Targets(locs=locs, geom_name=geom, r=r)
     pm = PerceptionModel(tgts, focal_loc=loc, focal_angle=0,
-                         neural_weight='cutoff', neural_angle='power')
-    pm.c = c
+                         neural_angle_dist='direct_power', a_warp=c,
+                         angle_weight='cutoff')
     nbm = NeuralBandModel(pm)
 
     angles, stab = nbm.sc_equilib(focal_loc=loc)
