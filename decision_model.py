@@ -2287,9 +2287,9 @@ class NeuralBandModel:
     Relies on get_neural_signals from the PerceptionModel to obtain 
     neural angles and relative neural group size.'''
 
-    def __init__(self, percep_model=None, T=0.2, K=1):
-        '''From a PerceptionModel with its Targets object, establishes a model 
-        for chosing direction based on discrete Ising. Relies on get_neural_signals 
+    def __init__(self, percep_model=None, T=0.2, K=2):
+        '''From a PerceptionModel with its Targets object, establishes a model
+        for chosing direction based on discrete Ising. Relies on get_neural_signals
         from the PerceptionModel to obtain neural angles and relative neural 
         group size.
         
@@ -2303,8 +2303,12 @@ class NeuralBandModel:
         T : float
             Temperature for the neural ring representing amount of noise in the system.
         K : float
-            Coupling strength for Kuramoto turning speed. Used in models of 
-            walkers only.
+            Coupling strength for Kuramoto turning speed. Used in models of
+            walkers only. Default 2: the half-angle torque law
+            dtheta/dt = K*R*sin(ego/2) has slope K/2 near ego=0, so K=2
+            preserves the near-front turning gain (and, exactly, the coupled
+            3x3 Jacobian at self-consistent equilibria) of the old
+            K=1 * sin(ego) law.
         '''
 
         self.T = T
@@ -2694,7 +2698,7 @@ class NeuralBandModel:
         '''Turning rate based on the neural band model coherence value.
 
         Runs dgamma_dt to steady state, applies the inverse neural-to-egocentric
-        mapping, and returns the Kuramoto-style torque K*R*sin(ego_angle).
+        mapping, and returns the Kuramoto-style torque K*R*sin(ego_angle/2).
 
         Parameters
         ----------
@@ -2724,13 +2728,20 @@ class NeuralBandModel:
             gamma = self.gamma
         # Convert from neural space to egocentric physical angle
         ego_angle, R = self.convert_gamma(gamma)
-        return self.K * R * np.sin(ego_angle)
+        # Half-angle torque: zero only when consensus is straight ahead
+        # (ego_angle=0), maximal when consensus is directly behind
+        # (ego_angle=+-pi). ego_angle is already in [-pi, pi] (from
+        # convert_gamma via np.angle), so no extra wrapping is needed before
+        # halving. The +-pi point carries an intentional +K*R <-> -K*R jump
+        # discontinuity (the physical left/right fork facing away), resolved
+        # by roundoff/noise.
+        return self.K * R * np.sin(ego_angle/2)
 
 
     def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
                          h=1e-6, tol=1e-8):
         '''Stability test using the full 3x3 coupled Jacobian of
-        (gamma_re, gamma_im, theta) where dtheta/dt = K*R*sin(ego_angle).
+        (gamma_re, gamma_im, theta) where dtheta/dt = K*R*sin(ego_angle/2).
 
         Built by central finite differences. Returns True iff every
         eigenvalue has real part < -tol. This is the physically correct
@@ -2747,7 +2758,7 @@ class NeuralBandModel:
             dg = self.dgamma_dt(gamma=gamma, focal_angle=th,
                                 focal_loc=focal_loc)
             ego_angle, R = self.convert_gamma(gamma)
-            dth = self.K * R * np.sin(ego_angle)
+            dth = self.K * R * np.sin(ego_angle/2)
             return np.array([dg.real, dg.imag, dth])
 
         J = np.zeros((3, 3))
@@ -3259,7 +3270,8 @@ class NeuralBandModel:
 
     def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
-                     plot_tracks=False, ax=None, title=None, wb_plot=False):
+                     plot_tracks=False, ax=None, title=None, wb_plot=False,
+                     blind_search_std=np.pi/2):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the neural band torque model on
@@ -3270,7 +3282,7 @@ class NeuralBandModel:
         At each step, dgamma_dt is run to steady state to find the local
         equilibrium, which is then mapped from neural angle space back to an
         egocentric physical angle via the inverse neural mapping. The resulting
-        torque K*R*sin(ego_angle) drives the heading update.
+        torque K*R*sin(ego_angle/2) drives the heading update.
 
         The walker stops when it is within target_tol of a target surface,
         when its trajectory passes through a target, or after max_steps.
@@ -3309,6 +3321,15 @@ class NeuralBandModel:
             Title for the plot. If not provided, a default title is used.
         wb_plot : bool
             Whether or not plotting in a Jupyter notebook (adjusts size of figure)
+        blind_search_std : float, optional (default pi/2)
+            Heading-noise standard deviation used on steps where NO target is
+            visible (get_neural_signals returns empty, e.g. all targets in a
+            cutoff-weight blind spot with b_weight < pi). On such steps gamma
+            collapses to 0 and the deterministic torque vanishes, so the walker
+            would otherwise drift nearly straight under the small std and never
+            re-acquire. Applying a large heading kick (NOT scaled by dt) turns
+            the blind walker into a diffusive search walk until a target re-
+            enters view. Set to 0 to recover the old frozen-drift behavior.
 
         Returns
         -------
@@ -3340,11 +3361,24 @@ class NeuralBandModel:
                           self.percep_model.focal_loc) < target_tol):
                     break
                 old_loc = self.percep_model.focal_loc.copy()
-                if std > 0:
-                    noise = self.rng.normal(scale=std)
+                # Blind-spot search: if no target is visible at all, gamma
+                # collapses to 0 and the deterministic torque vanishes. Drive a
+                # diffusive search walk (large heading kick, un-scaled by dt)
+                # instead of the near-frozen drift the small std would give.
+                neur, _ = self.percep_model.get_neural_signals()
+                if neur.size == 0:
+                    self.gamma = 0 + 0j
+                    if blind_search_std > 0:
+                        theta = convert_angles(self.percep_model.focal_angle
+                                               + self.rng.normal(scale=blind_search_std))
+                    else:
+                        theta = self.percep_model.focal_angle
                 else:
-                    noise = 0
-                theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
+                    if std > 0:
+                        noise = self.rng.normal(scale=std)
+                    else:
+                        noise = 0
+                    theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)
@@ -3400,8 +3434,11 @@ class NeuralBandModel:
         xcenters = (xedges[:-1] + xedges[1:]) / 2
         ycenters = (yedges[:-1] + yedges[1:]) / 2
         # Interpolate to finer grid for smoother plotting
-        # Guard against degenerate bin centers
-        if xcenters.size < 2 or ycenters.size < 2:
+        # Guard against degenerate bin centers: RectBivariateSpline defaults to
+        # bicubic (kx=ky=3) and needs at least 4 points per axis. Walks with
+        # little spatial spread (e.g. a single near-straight track) produce
+        # fewer bins, so fall back to a plain imshow in that case.
+        if xcenters.size < 4 or ycenters.size < 4:
             # fall back to simple imshow without interpolation
             default_title = 'Random walker paths\n and histogram'
             if local_plot:
@@ -3465,10 +3502,10 @@ class IsingExtModel:
     center. Hard to know if this is better or worse.
     '''
 
-    def __init__(self, percep_model=None, T=0.2, K=1, nu=1):
-        '''From a PerceptionModel with its Targets object, establishes a model 
-        for chosing direction based on discrete Ising. Relies on get_neural_signals 
-        from the PerceptionModel to obtain neural angles and relative neural 
+    def __init__(self, percep_model=None, T=0.2, K=2, nu=1):
+        '''From a PerceptionModel with its Targets object, establishes a model
+        for chosing direction based on discrete Ising. Relies on get_neural_signals
+        from the PerceptionModel to obtain neural angles and relative neural
         group size.
         
         Parameters
@@ -3481,7 +3518,10 @@ class IsingExtModel:
         T : float
             Temperature for Ising model
         K : float
-            Coupling strength for Kuramoto turning speed.
+            Coupling strength for Kuramoto turning speed. Default 2 to match
+            the near-heading gain of the half-angle torque law
+            dtheta/dt = K*|gamma|*sin((angle(gamma)-theta)/2); see
+            NeuralBandModel.__init__.
         nu : float
             Exponent for cosine weighting kernel in Sridhar et al. (2018). 
             Higher values lead to sharper peaks. This should be 1 unless you are 
@@ -3715,7 +3755,12 @@ class IsingExtModel:
             gamma = self.run_dgamma_dt(focal_angle=theta, focal_loc=focal_loc, 
                                        init_gamma=0.1*np.exp(1j*theta), 
                                        t_Final=t_Final)
-        return self.K*np.abs(gamma)*np.sin(np.angle(gamma)-theta)
+        # Half-angle torque (see NBM.dtheta_dt). The egocentric consensus
+        # angle (np.angle(gamma) - theta) is NOT pre-wrapped, so it must be
+        # wrapped to (-pi, pi] before halving: sin(x/2) is 4*pi-periodic and
+        # would otherwise be discontinuous/incorrect across 2*pi boundaries.
+        ego = convert_angles(np.angle(gamma) - theta)
+        return self.K*np.abs(gamma)*np.sin(ego/2)
     
 
     def plot_dtheta_dt(self, gamma=None, focal_loc=None, wb_plot=False):
@@ -3894,7 +3939,7 @@ class IsingExtModel:
     def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
                          h=1e-6, tol=1e-8):
         '''Stability test using the full 3x3 coupled Jacobian of
-        (gamma_re, gamma_im, theta) where dtheta/dt = K*|gamma|*sin(angle(gamma)-theta).
+        (gamma_re, gamma_im, theta) where dtheta/dt = K*|gamma|*sin((angle(gamma)-theta)/2).
 
         Built by central finite differences. Returns True iff every
         eigenvalue has real part < -tol. This is the physically correct
@@ -3912,7 +3957,8 @@ class IsingExtModel:
             dg = self.dgamma_dt(gamma=gamma, focal_angle=th,
                                 focal_loc=focal_loc)
             R = np.abs(gamma)
-            dth = self.K * R * np.sin(np.angle(gamma) - th)
+            ego = convert_angles(np.angle(gamma) - th)
+            dth = self.K * R * np.sin(ego/2)
             return np.array([dg.real, dg.imag, dth])
 
         J = np.zeros((3, 3))
@@ -4385,7 +4431,8 @@ class IsingExtModel:
 
     def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
-                     plot_tracks=False, ax=None, title=None, wb_plot=False):
+                     plot_tracks=False, ax=None, title=None, wb_plot=False,
+                     blind_search_std=np.pi/2):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the Ising torque model on a dt
@@ -4430,6 +4477,15 @@ class IsingExtModel:
             Title for the plot. If not provided, a default title is used.
         wb_plot : bool
             Whether or not plotting in a Jupyter notebook (adjusts size of figure)
+        blind_search_std : float, optional (default pi/2)
+            Heading-noise standard deviation used on steps where NO target is
+            visible (get_neural_signals returns empty, e.g. all targets in a
+            cutoff-weight blind spot with b_weight < pi). On such steps gamma
+            collapses to 0 and the deterministic torque vanishes, so the walker
+            would otherwise drift nearly straight under the small std and never
+            re-acquire. Applying a large heading kick (NOT scaled by dt) turns
+            the blind walker into a diffusive search walk until a target re-
+            enters view. Set to 0 to recover the old frozen-drift behavior.
 
         Returns
         -------
@@ -4459,6 +4515,25 @@ class IsingExtModel:
                           self.percep_model.focal_loc) < target_tol):
                     break
                 old_loc = self.percep_model.focal_loc.copy()
+                # Blind-spot search: if no target is visible at all, gamma
+                # collapses to 0 and the deterministic torque vanishes. Drive a
+                # diffusive search walk (large heading kick, un-scaled by dt).
+                neur, _ = self.percep_model.get_neural_signals()
+                if neur.size == 0:
+                    self.gamma = 0 + 0j
+                    if blind_search_std > 0:
+                        theta = convert_angles(self.percep_model.focal_angle
+                                               + self.rng.normal(scale=blind_search_std))
+                    else:
+                        theta = self.percep_model.focal_angle
+                    mv_vec = v*dt*np.array([np.cos(theta), np.sin(theta)])
+                    self.percep_model.focal_loc += mv_vec
+                    self.percep_model.focal_angle = convert_angles(theta)
+                    walk.append(self.percep_model.focal_loc.copy())
+                    if np.any(targets.check_trajectory_intersection(
+                              old_loc, self.percep_model.focal_loc)):
+                        break
+                    continue
                 if std > 0:
                     noise = self.rng.normal(scale=std)
                 else:
