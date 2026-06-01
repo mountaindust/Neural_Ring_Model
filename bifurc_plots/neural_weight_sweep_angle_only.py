@@ -90,8 +90,9 @@ DPI = 150
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Bumped whenever the cache layout or anything that would invalidate a
-# previously-saved npz changes.
-CACHE_VERSION = 1
+# previously-saved npz changes. Bumped to 2 for the warp/weight decouple
+# (warping-only is now angle_weight=None).
+CACHE_VERSION = 2
 
 
 # ---- figure specifications ----
@@ -177,22 +178,33 @@ def build_models(row_spec):
     with ``weight_angle_only=WEIGHT_ANGLE_ONLY``."""
     targets = model.Targets(locs=TARGET_LOCS, geom_name=TARGET_GEOM,
                             r=TARGET_RADIUS)
+    # Angle-warping only: the warp uses row_spec's distribution, but the
+    # rho-weighting is uniform (angle_weight=None). WEIGHT_ANGLE_ONLY is kept
+    # as a flag asserting that intent (it must be True for this script).
+    assert WEIGHT_ANGLE_ONLY, "this script isolates warping; expects uniform weight"
+    a_warp, b_warp = _warp_slots(row_spec)
     percep = model.PerceptionModel(
         targets, FOCAL_LOC, FOCAL_ANGLE,
-        neural_weight=row_spec['weight'], neural_angle='integral',
-        weight_angle_only=WEIGHT_ANGLE_ONLY)
-    if row_spec['weight'] == 'cutoff':
-        percep.a = row_spec['a']
-        percep.b = row_spec['b']
-    elif row_spec['weight'] == 'vonmises':
-        percep.k = row_spec['k']
-    elif row_spec['weight'] == 'symmetric_beta':
-        percep.alpha = row_spec['alpha']
-        percep.b = row_spec['b']
-    else:
-        raise ValueError(f"unsupported weight: {row_spec['weight']!r}")
+        neural_angle_dist=row_spec['weight'], angle_weight=None,
+        a_warp=a_warp, b_warp=b_warp)
     nbm = model.NeuralBandModel(percep)
     return percep, nbm
+
+
+def _warp_slots(row_spec):
+    """Map a row_spec's family parameters onto the generic (a_warp, b_warp)
+    constructor slots."""
+    w = row_spec['weight']
+    if w == 'cutoff':
+        return row_spec['a'], row_spec['b']
+    elif w == 'vonmises':
+        return row_spec['k'], None
+    elif w == 'symmetric_beta':
+        return row_spec['alpha'], row_spec['b']
+    elif w == 'reg_power':
+        return row_spec['d'], row_spec['e']
+    else:
+        raise ValueError(f"unsupported weight: {w!r}")
 
 
 # ---- cache fingerprint helpers ----
@@ -217,7 +229,7 @@ def row_param_signature(row_spec):
 def figure_fingerprint(rows):
     return dict(
         cache_version=CACHE_VERSION,
-        weight_angle_only=bool(WEIGHT_ANGLE_ONLY),
+        angle_weight=None,
         target_locs=TARGET_LOCS.tolist(),
         target_geom=TARGET_GEOM,
         target_radius=TARGET_RADIUS,

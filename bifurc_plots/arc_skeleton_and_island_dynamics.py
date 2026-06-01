@@ -53,9 +53,9 @@ from parallel_config import get_n_workers
 TARGET_LOCS = np.array([[4.33, 2.5], [4.33, -2.5]])
 targets = model.Targets(locs=TARGET_LOCS, geom_name='circle', r=0.5)
 percep = model.PerceptionModel(targets, (0, 0), 0,
-                               neural_weight='vonmises',
-                               neural_angle='integral')
-percep.k = 0.55
+                               neural_angle_dist='vonmises',
+                               angle_weight='neural_angle_dist',
+                               a_warp=0.55)
 nbm = model.NeuralBandModel(percep)
 K = nbm.K
 

@@ -8,7 +8,7 @@ Mathematical model of collective decision-making based on Ising-type dynamics on
 - Jupyter notebooks (`compare_sc_vm.ipynb`, `compare_sc_beta.ipynb`, `neural_band.ipynb`, `neural_band_walker.ipynb`, `ising_workbook.ipynb`, `debug_all_unstable.ipynb`) — testing, exploration, and visualization.
 - [VM_bifurcations/](VM_bifurcations/) — diagnostic scripts and the [VERDICT.md](VM_bifurcations/VERDICT.md) write-up of the Hopf-island / saddle-node bifurcation skeleton near (2.1, ±2.45) in the vonmises-k0.55 / two-target setup.
 - [bifurc_plots/](bifurc_plots/) — exploratory parameter-sweep scripts. `neural_weight_sweep.py` (full weighting) and `neural_weight_sweep_angle_only.py` (warping-only) are companions; `bifurcation_compare_discrim_vs_coupled.py` compares stability criteria; `arc_skeleton_and_island_dynamics.py` is the upper-arc / island-dynamics combined figure. Not publication-quality — settings are sized for fast iteration on a many-core machine. More function-space exploration is needed before any of these can be locked in for publication.
-- [basin_estimation/](basin_estimation/) — vetting work for the basin-of-attraction estimator that supports the two-panel bifurcation+basin plot TODO. Eleven-step vetting plan complete; public API ready but **not yet wired into `decision_model.py`** (deferred behind pending modeling changes — see "Basin-of-attraction estimator" section below). Running mathematical findings in [basin_estimation/findings.md](basin_estimation/findings.md).
+- [basin_estimation/](basin_estimation/) — vetting work for the basin-of-attraction estimator that supports the two-panel bifurcation+basin plot TODO. Eleven-step vetting plan complete; public API ready but **not yet wired into `decision_model.py`** (deferred behind the pending sin(Θ*/2) modeling change — see "Basin-of-attraction estimator" section below). Running mathematical findings in [basin_estimation/findings.md](basin_estimation/findings.md).
 - [tests/](tests/) — unit tests (e.g. `test_broad_validation.py`, `test_intervals.py`, `test_segments.py`).
 - [Matlab/](Matlab/), [early_ideas/](early_ideas/) — legacy / prototype code, not part of the active model.
 - [PARALLEL_CONFIG.md](PARALLEL_CONFIG.md), [parallel_config.py](parallel_config.py), [machine_config.py](machine_config.py) — per-machine worker-count settings for multiprocessing.
@@ -54,13 +54,20 @@ Closest to the published PNAS paper. γ lives in **allocentric** space.
 
 Key methods: [`sc_equilib`](decision_model.py#L3567) (self-consistent finder, returns gammas; bifurcation diagrams), [`gamma_equilib`](decision_model.py#L3502) (fixed-heading γ-finder), [`run_dgamma_dt`](decision_model.py#L3337), [`dtheta_dt`](decision_model.py#L3390), [`plot_bifurcation_diagram`](decision_model.py#L3668), [`plot_direction_mesh`](decision_model.py#L3891), [`plot_walkers`](decision_model.py#L4057).
 
-### Model usage constraint — read this before configuring `PerceptionModel`
+### `PerceptionModel` API — warp and weight are decoupled
 
-**IEM must be used with `neural_weight=None, neural_angle=None`.** In IEM, γ lives in allocentric/physical coordinates; the model assumes the observer perceives target angles directly without neural warping. Running IEM with `neural_angle='integral'` (or any non-identity warp) is a category error — the math behind IEM's `dγ/dt` doesn't apply.
+`PerceptionModel` has **two independent roles**, set by two constructor args:
+
+- **`neural_angle_dist`** (WARP): the distribution integrated CDF-like to map egocentric→neural angles. One of `{'cutoff','vonmises','symmetric_beta','reg_power','direct_power', None}`. `'direct_power'` is the power angle map `f(θ)=π·sign(θ)(|θ|/π)^c` (NOT a CDF-integral); `None` is identity (no warp).
+- **`angle_weight`** (WEIGHT): the density integrated over each target's visible arc to set ρ. One of `{'cutoff','vonmises','symmetric_beta','reg_power','neural_angle_dist', None}`. `'neural_angle_dist'` ties the weight to the warp (old full-weighting behavior); `None` (the **default**) is uniform weight (old `weight_angle_only=True` behavior). `'direct_power'` is **disallowed** as a weight (it is a signed angle map, not a density — use `reg_power`).
+
+Per-role parameters use generic two-slot kwargs `a_warp/b_warp` and `a_weight/b_weight`, mapped per family by `_FAMILY_INFO` (cutoff: a,b; vonmises: k; symmetric_beta: alpha,b; reg_power: d,e; direct_power: c). Unset slots take family defaults. Change parameters post-init via `set_warp_params(**realnames)` / `set_weight_params(**realnames)` (e.g. `set_warp_params(k=0.55)`), which rebuild only the affected role's splines. The old `neural_weight`/`neural_angle`/`weight_angle_only` args and the `a/b/k/alpha/d/e` properties were **removed** (non-backward-compatible; see git history for the decouple session). Old→new: `neural_weight=W, neural_angle='integral'` (full weighting) → `neural_angle_dist=W, angle_weight='neural_angle_dist'`; `weight_angle_only=True` → `angle_weight=None`; `neural_angle='power'` → `neural_angle_dist='direct_power'`.
+
+**IEM must be used with `neural_angle_dist=None, angle_weight=None`.** In IEM, γ lives in allocentric/physical coordinates; the model assumes the observer perceives target angles directly without neural warping. Running IEM with a non-identity `neural_angle_dist` is a category error — the math behind IEM's `dγ/dt` doesn't apply.
 
 **NBM is the model for warped perception.** If you need foveal density, egocentric warping, or any non-identity neural mapping, use NBM. The two are *not* substitutes for each other under warping; they were designed to handle the warping nonlinearity in incompatible ways.
 
-**Diagnostic note:** if an IEM bifurcation diagram or direction mesh comes back almost entirely zero/empty, the most likely cause is accidentally driving IEM with `neural_angle='integral'`. IEM's polar-init multistart in `sc_equilib` doesn't find roots under that (invalid) configuration. This is *not* a solver bug — it's the model rejecting an invalid input. Switch to `neural_angle=None` to confirm.
+**Diagnostic note:** if an IEM bifurcation diagram or direction mesh comes back almost entirely zero/empty, the most likely cause is accidentally driving IEM with a non-identity `neural_angle_dist`. IEM's polar-init multistart in `sc_equilib` doesn't find roots under that (invalid) configuration. This is *not* a solver bug — it's the model rejecting an invalid input. Switch to `neural_angle_dist=None` to confirm.
 
 ## Self-consistent equilibria
 
@@ -91,12 +98,12 @@ The `full_signal` parameter was renamed to `mesh_signal` (the mesh path is still
 
 ### Integral antiderivatives precomputed as splines
 
-[`PerceptionModel._build_integral_splines`](decision_model.py#L615) tabulates forward + inverse `CubicSpline`s at 2001 nodes for both `'cutoff'` (F(θ; a, b)) and `'vonmises'` (G(θ; k)) weights. Built once at `__init__`; the `a`, `b`, `k` attributes are properties whose setters trigger a rebuild.
+`PerceptionModel._make_integral_spline(name, params)` tabulates forward + inverse `CubicSpline`s at 2001 nodes for the CDF-like integral map of a density family (`'cutoff'` F(θ; a, b), `'vonmises'` G(θ; k), `'reg_power'` F(θ; d, e); `'symmetric_beta'` is analytic, no spline). Since the warp/weight decouple there are **two** spline sets built once at `__init__`: `_build_warp_splines` (forward+inverse, for `get_neural_angle`/`_inverse`) and `_build_weight_splines` (forward only, the ρ arc-integral antiderivative — skipped when the weight is uniform or tied to the warp, in which case the warp forward spline is reused). `set_warp_params`/`set_weight_params` rebuild only the affected role's splines. The generic forward/inverse evaluators are `_eval_forward_map`/`_eval_inverse_map`.
 
 - **Accuracy:** forward direction matches the reference `quad`/`cdf` to ~5e-11 everywhere; end-to-end `_get_target_signals` ρ values match the reference path to ~1e-16 (machine precision).
 - **Inverse direction is condition-limited to ~1e-8 near `y = ±π`** because `dF/dx → 0` at the boundary. This only affects `get_neural_angle_inverse` via `convert_gamma(γ)` with `np.angle(γ)`; 1e-8 error in `ego_angle` is negligible for walker dynamics and the walker rotates out of the poorly-conditioned region whenever it matters.
 - **Performance:** circle/cutoff `test_broad_validation` went from 91.8s → 34.8s (~2.6×). Per-point cost for circle targets now comparable to delta targets (~7ms vs ~15ms).
-- **Cutoff spline construction (non-obvious):** `F(x)` saturates to ±π in floating point once `b − |x| < ~0.05` (the `exp(−norm/(b−x))` tail underflows). Naïve `CubicSpline` fails the strict-monotonicity requirement. `_build_integral_splines` uses a greedy monotone filter to drop saturated boundary nodes while preserving exact ±π endpoints.
+- **Cutoff spline construction (non-obvious):** `F(x)` saturates to ±π in floating point once `b − |x| < ~0.05` (the `exp(−norm/(b−x))` tail underflows). Naïve `CubicSpline` fails the strict-monotonicity requirement. `_make_integral_spline` uses a greedy monotone filter (in the cutoff branch) to drop saturated boundary nodes while preserving exact ±π endpoints.
 - **Domain restriction:** inverse splines raise `ValueError` on `y` outside `[−π, π]`; forward splines saturate safely. Callers are domain-clean by construction.
 - **Reference kernels retained for testing:** `_smooth_cutoff_integral` and `_smooth_cutoff_int_inverse` (static methods) are still used by tests to validate the splines against `quad`/`brentq`. `scipy.stats.vonmises.cdf/ppf` are the vonmises reference.
 
@@ -111,7 +118,7 @@ Simplified from an earlier two-pass `brentq + multistart` to a single-pass strat
 5. Residual threshold **1e-4**. The `hybr+logistic` combination can produce residuals up to ~2e-5 due to exponential amplification; a tighter 1e-6 threshold was silently dropping ~10% of valid equilibria and creating apparent holes in direction meshes.
 6. Deduplicate with both circular angle distance < 0.02 **and** R distance < 0.01. Both axes are required: near a saddle-node bifurcation, two genuine equilibria of opposite stability can share θ to within ~1e-3 rad while differing in R by ~0.02, so θ-only dedup silently discards one of the pair. Which one survives depends on the brentq sign-change scan order, which flips under coordinate symmetries — producing visible chirality (anti-symmetric "1-stable invading 2-stable" intrusions) in bifurcation diagrams that should be y-symmetric. `IEM.sc_equilib` was always correct here because it dedups by full complex `|γ_eq − existing_γ|`; NBM regressed in the cf6af66 self-consistent rewrite when the kept-list became θ-only (γ = R+0j made θ feel like the natural identifier). The broad-validation grid in [tests/test_broad_validation.py](tests/test_broad_validation.py) doesn't reach near-SN configurations, so this kind of regression won't show up there — y-symmetry of `plot_bifurcation_diagram` output on a symmetric target setup is the real diagnostic.
 
-**Residual asymmetry (known):** even with full (θ, R) dedup, ~25–30% of the y-flip pixel asymmetry persists in `weight_angle_only=True` cutoff/beta/vonmises sweeps. Traced to `scipy.optimize.root(method='hybr')` itself: `_self_consistent_eq` is y-flip symmetric to 1e-20, but hybr's internal Jacobian estimation uses positive forward-difference steps, so the trajectory from a starting point is not the mirror of its trajectory from the sign-flipped starting point. Two scaffolds for fixing this if it ever matters: symmetrize the multistart by also trying mirrored starts for every candidate, or densify the brentq candidate seeding so both members of a near-SN pair are reachable from independent starts.
+**Residual asymmetry (known):** even with full (θ, R) dedup, ~25–30% of the y-flip pixel asymmetry persists in uniform-weight (`angle_weight=None`) cutoff/beta/vonmises sweeps. Traced to `scipy.optimize.root(method='hybr')` itself: `_self_consistent_eq` is y-flip symmetric to 1e-20, but hybr's internal Jacobian estimation uses positive forward-difference steps, so the trajectory from a starting point is not the mirror of its trajectory from the sign-flipped starting point. Two scaffolds for fixing this if it ever matters: symmetrize the multistart by also trying mirrored starts for every candidate, or densify the brentq candidate seeding so both members of a near-SN pair are reachable from independent starts.
 
 ### IEM `sc_equilib`: multistart polar-init
 
@@ -195,11 +202,39 @@ In the parameter window analyzed in [VM_bifurcations/VERDICT.md](VM_bifurcations
 
 **How to apply:** in similar parameter regimes, expect to see Hopf-unstable foci coexisting with stable limit cycles, not just simple "decision paralysis." [VERDICT.md](VM_bifurcations/VERDICT.md) is the authoritative write-up with reproducibility, scripts, and PNGs.
 
+### Weighting vs warping: does angle weighting matter qualitatively? (the "ears")
+
+`neural_weight` plays two roles in NBM: (1) **weighting** -- integrated over each
+target's visible angular extent to set rho (the perceptual mass driving gamma); (2)
+**warping** -- its integral maps egocentric->neural angles. `weight_angle_only=True`
+keeps role (2) and drops role (1) (rho-integration sees flat weight). Full write-up,
+figures, and reproduction live in [weighting_analysis/README.md](weighting_analysis/README.md).
+
+**Finding (two-circle symmetric setup).** FULL (weighting+warping) and ANGLE-only
+(warping-only) bifurcation rasters agree on ~85-97% of pixels; most disagreement is
+1-2px boundary jitter. The one genuine structural difference is two **"ears"** of extra
+bistability at off-axis observer positions behind the targets (x~4-6, y~+/-2): present
+under FULL, absent under ANGLE-only. Ear area grows monotonically with weighting peakedness.
+
+**Why it matters.** The ear's extra stable equilibrium is a *commitment to the far
+target*, not a compromise heading. At a heading facing the far target the close target
+sits far off-axis but still has large visual extent, so ANGLE-only (extent-only rho)
+keeps it dominant and no far-target equilibrium exists; FULL's front-bias squashes the
+off-axis target enough to make the far-target commitment self-consistent. So weighting
+changes equilibrium counts qualitatively **only where visual extent and front-bias
+disagree** (close/big target off-axis at the candidate heading); everywhere else warping
+alone reproduces the structure. For **delta** targets there are no ears at all -- same
+qualitative structure in both modes, FULL merely pushes bifurcation arcs slightly outward
+(midway/compromise heading destabilizes sooner because FULL has d(rho)/d(theta) != 0 at
+the midway equilibrium, while ANGLE-only has it identically 0). The README also covers a
+delta+ANGLE Hopf follow-up (Hopf-unstable foci but no limit cycle) and the cutoff
+blind-spot trap.
+
 ## Basin-of-attraction estimator (vetted in basin_estimation/, not yet wired in)
 
 An end-to-end vetting effort for the basin-estimation machinery that supports the two-panel bifurcation+basin plot TODO lives in [basin_estimation/](basin_estimation/). The eleven-step vetting plan is complete; everything load-bearing is documented in [basin_estimation/findings.md](basin_estimation/findings.md) (§1–§13). The folder also contains [free_energy_derivation.md](basin_estimation/free_energy_derivation.md) (the F̂(γ) derivation), [README.md](basin_estimation/README.md) (the vetting plan), and standalone test scripts that all pass.
 
-**Status:** not wired into `decision_model.py`. The user has chosen to make the modeling changes described in the next subsection *before* integrating, so the integration doesn't have to be redone.
+**Status:** not wired into `decision_model.py`. The user chose to make the modeling changes described in the next subsection *before* integrating, so the integration doesn't have to be redone. Change (2) (warp/weight decouple) is done; Change (1) (sin(Θ*/2) dθ/dt) remains.
 
 **Public API.** The vetted entry point is
 
@@ -242,7 +277,7 @@ What changes:
 
 Code that needs updating for Change (1): `decision_model.py` (`dtheta_dt`, `_discrim_coupled`, and the analogous IEM functions); `basin_estimation/theta_scan.py`, `basin_estimation/basin_via_theta.py`, `basin_estimation/mc_escape.py` (the `_eval_f` formula and the θ-update in the MC integrator).
 
-**Change (2): default `weight_angle_only=True` in `PerceptionModel`; possibly decouple weighting from warping entirely.** Motivation: cleaner API, more interpretable defaults.
+**Change (2) [DONE]: decoupled weighting from warping.** Implemented via the two-role `PerceptionModel` API (`neural_angle_dist` for the warp, `angle_weight` for the ρ-weight; see "`PerceptionModel` API" section above). `angle_weight` defaults to `None` (uniform weight = old `weight_angle_only=True`), so the asymmetric far-target "ears" are now opt-in (`angle_weight='neural_angle_dist'` or an explicit weight family). This is the decoupled-weighting option from the ears analysis (see the "Weighting vs warping" finding above). The decouple was verified during implementation to reproduce all pre-refactor numerics to machine precision when configured equivalently (via a golden-master baseline, since removed once it passed); new-capability coverage is in `tests/test_warp_weight_decouple.py`, and the existing spline/interval tests validate against analytic references.
 
 What is unchanged in the vetting:
 - F̂ derivation, ∇F̂, Hessian formulas — all are functions of (θ̂_j, ρ_j), the perception-model outputs. New defaults give different (θ̂_j, ρ_j) values but the closed forms are identical.
@@ -253,7 +288,7 @@ What changes:
 - Bifurcation structure on (x, y) shifts. Multistable regions probably shrink (less perception nonlinearity); Hopf islands may move or disappear under default uniform-weighting.
 - The blind-spot trap (see Open TODOs) becomes an opt-in scenario rather than the default behavior. The Step 7 BlindSpot test is still valid as a stress test of the perception-collapse detector but requires explicit cutoff weighting.
 
-Code that needs updating for Change (2): `PerceptionModel` constructor defaults; possible factoring of weighting and warping into separate optional callables. The basin_estimation/ scripts don't need code changes for Change (2); they just need new calibration points re-identified.
+Code updated for Change (2): `PerceptionModel` constructor + per-role state, spline builders, and the four dispatch chains in `decision_model.py`; all call sites in `bifurc_plots/`, `VM_bifurcations/`, `basin_estimation/`, and `tests/`. The basin_estimation/ scripts were migrated to the new API (warp+weight tied via `angle_weight='neural_angle_dist'`, preserving their VM-k055 numerics) but still need new calibration points re-identified *if/when* the default uniform weighting is adopted for that work — the scripts themselves currently pin the old full-weighting behavior explicitly.
 
 **Bottom line.** The vetting *framework* (every methodology and test script in basin_estimation/) survives both changes intact. The specific *numerical results* at the calibration points used in Steps 5–9 would change under either change. Doing the model work first and then wiring the basin estimator avoids re-vetting against parameters that are about to move.
 
@@ -262,15 +297,15 @@ Code that needs updating for Change (2): `PerceptionModel` constructor defaults;
 - **`IEM.run_dgamma_dt` LSODA port** — same restarted-RK45 pattern as the old NBM version; apply matching real-valued LSODA fix when warnings appear.
 - **Cell-center sampling for bifurcation refinement** — deferred; propose if `boundary_dilation` + grid increases are insufficient for thin features.
 - **Walker blind-spot trap under cutoff weighting.** With `a=0, b=pi` cutoff + integral neural mapping and delta targets, walkers that overshoot a target and get all targets behind them lose the ability to navigate back. The integral neural mapping collapses all behind-the-walker ego angles to ±180° in neural space, gamma locks onto -1+0j (the ±π branch cut), and `sin(±180°) ≈ 0` kills the restoring torque. The walker enters a pure random walk. Detailed analysis in [weighting_analysis/README.md](weighting_analysis/README.md). Possible remedies: minimum torque floor / U-turn behavior, wider neural mapping (`a > 0`), or heading-dependent noise. Not yet implemented.
-- **Two-panel bifurcation + basin-of-attraction plot.** The vetting work for the basin estimator is complete in [basin_estimation/](basin_estimation/); see the "Basin-of-attraction estimator" section above for status, public API, and key results. ΔF_γ (γ-noise free-energy barrier from the F̂ Lyapunov function) is the empirically validated noise-robustness scalar in multistable cells. Public API `compute_basins_at_focal_loc` ready to call from a new `NeuralBandModel` method. **Pending modeling changes (sin/2 dθ/dt and weighting/warping defaults) before integration** — see the next TODO and the "How the proposed modeling changes affect the basin-estimation findings" subsection above.
+- **Two-panel bifurcation + basin-of-attraction plot.** The vetting work for the basin estimator is complete in [basin_estimation/](basin_estimation/); see the "Basin-of-attraction estimator" section above for status, public API, and key results. ΔF_γ (γ-noise free-energy barrier from the F̂ Lyapunov function) is the empirically validated noise-robustness scalar in multistable cells. Public API `compute_basins_at_focal_loc` ready to call from a new `NeuralBandModel` method. **Change (2) (warp/weight decouple) is now DONE; Change (1) (sin(Θ*/2) dθ/dt) is still pending before integration** — see the next TODO and the "How the proposed modeling changes affect the basin-estimation findings" subsection above.
 
-- **Modeling changes pending before basin-estimator integration:**
-  - **(1) Change `dθ/dt` from `K·R·sin(Θ*)` to `K·R·sin(Θ*/2)`.** Gives the walker maximum torque when consensus is directly behind (instead of zero torque, the current "undecided" pathology). Introduces a deliberate left/right discontinuity in f(θ) at the facing-away configuration — this is intrinsic to sin(Θ*/2) on a single-valued angle representation and represents a real physical fork in the dynamics, not a numerical artifact. Affects `dtheta_dt`, `_discrim_coupled` in NBM (and IEM analogs); affects a few basin_estimation/ test scripts. Impact analysis: see "Basin-of-attraction estimator" section above.
-  - **(2) Default `weight_angle_only=True` in `PerceptionModel`; possibly decouple weighting from warping entirely** (warping as user-specified neural-angle map; weighting as user-specified μ(θ) defaulting to uniform). Purely parametric API improvement from the basin-estimator framework's perspective — the math machinery is parameter-agnostic — but numerical values at calibration points shift, and the blind-spot trap (next TODO) becomes opt-in rather than default. Impact analysis: see "Basin-of-attraction estimator" section above.
+- **Modeling changes before basin-estimator integration:**
+  - **(1) [PENDING] Change `dθ/dt` from `K·R·sin(Θ*)` to `K·R·sin(Θ*/2)`.** Gives the walker maximum torque when consensus is directly behind (instead of zero torque, the current "undecided" pathology). Introduces a deliberate left/right discontinuity in f(θ) at the facing-away configuration — this is intrinsic to sin(Θ*/2) on a single-valued angle representation and represents a real physical fork in the dynamics, not a numerical artifact. Affects `dtheta_dt`, `_discrim_coupled` in NBM (and IEM analogs); affects a few basin_estimation/ test scripts. Impact analysis: see "Basin-of-attraction estimator" section above.
+  - **(2) [DONE] Decoupled weighting from warping in `PerceptionModel`.** New two-role API (`neural_angle_dist` warp, `angle_weight` weight; default `angle_weight=None` = uniform). Non-backward-compatible; all call sites migrated; reproduces old numerics to machine precision when configured equivalently. See the "`PerceptionModel` API" section and the Change (2) impact subsection above.
 
 ## Common gotchas
 
 - When modifying `sc_equilib`, `gamma_equilib`, or `_get_target_signals`, preserve exact interval arithmetic. Mesh-based fallback paths exist for plotting only.
-- When changing the neural-angle transform, the `a`/`b`/`k` setters trigger `_build_integral_splines` rebuild automatically — don't bypass them.
+- When changing warp or weight parameters, use `set_warp_params(...)` / `set_weight_params(...)` — they trigger the correct (and only the affected) spline rebuild. Don't write to `warp_params`/`weight_params` dicts directly (bypasses the rebuild).
 - When modifying `run_dgamma_dt`, preserve the real-valued reformulation for LSODA compatibility.
 - When discussing model differences or debugging warping-related issues, always check which coordinate system each quantity lives in. Most subtle bugs trace back to a coordinate-frame mismatch.

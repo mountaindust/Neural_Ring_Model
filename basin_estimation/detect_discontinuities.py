@@ -195,8 +195,8 @@ def setup_VM_k055():
     targets = model.Targets(locs=target_locs, geom_name='circle', r=0.5)
     percep = model.PerceptionModel(
         targets, focal_loc=(0, 0), focal_angle=0,
-        neural_weight='vonmises', neural_angle='integral')
-    percep.k = 0.55
+        neural_angle_dist='vonmises', angle_weight='neural_angle_dist',
+        a_warp=0.55)
     return model.NeuralBandModel(percep)
 
 
@@ -217,9 +217,8 @@ def setup_BlindSpot():
     targets = model.Targets(locs=target_locs, geom_name=None)  # delta
     percep = model.PerceptionModel(
         targets, focal_loc=(0, 0), focal_angle=0,
-        neural_weight='cutoff', neural_angle='integral')
-    percep.a = 0.0
-    percep.b = np.pi / 2
+        neural_angle_dist='cutoff', angle_weight='neural_angle_dist',
+        a_warp=0.0, b_warp=np.pi / 2)
     return model.NeuralBandModel(percep)
 
 

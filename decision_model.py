@@ -504,6 +504,21 @@ class Targets:
 
 
 
+# Per-family metadata for PerceptionModel's two roles (warp + weight). Maps the
+# generic two-slot constructor params (a_warp/b_warp, a_weight/b_weight) onto
+# each distribution family's real parameter names, with defaults. 'slots' gives
+# the real name for the (a_*, b_*) slots; None means that slot is unused by the
+# family. The same families serve as warp (CDF-integrated angle map) and as
+# weight (rho attractiveness), except 'direct_power' which is warp-only.
+_FAMILY_INFO = {
+    'cutoff':         {'slots': ('a', 'b'),     'defaults': {'a': np.pi/3, 'b': 4*np.pi/5}},
+    'vonmises':       {'slots': ('k', None),    'defaults': {'k': 1.0}},
+    'symmetric_beta': {'slots': ('alpha', 'b'), 'defaults': {'alpha': 5.0, 'b': np.pi}},
+    'reg_power':      {'slots': ('d', 'e'),     'defaults': {'d': 0.5, 'e': 1e-3}},
+    'direct_power':   {'slots': ('c', None),    'defaults': {'c': 0.5}},
+}
+
+
 class PerceptionModel:
     '''This class takes in a Targets object and a focal location and angle for an
     observer, and then translates that into a neural angular position and a neural 
@@ -516,15 +531,28 @@ class PerceptionModel:
     negative egocentric angles are to the right.'''
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0,
-                 neural_weight='cutoff', neural_angle='integral',
-                 weight_angle_only=False, theta_mesh=2000):
+                 neural_angle_dist='cutoff', angle_weight=None,
+                 a_warp=None, b_warp=None, a_weight=None, b_weight=None,
+                 theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction
-        given by focal_angle, at targets given by the targets object. The
-        attributes focal_loc, focal_angle, targets, a, b, and k can be changed
-        at any time; reassigning a, b, or k automatically rebuilds the internal
-        integral splines used by get_neural_angle / get_neural_angle_inverse.
-        In contrast, neural_weight and neural_angle are NOT mutable post-init
-        (changing them would require a different set of splines, or none at all).
+        given by focal_angle, at targets given by the targets object.
+
+        The perception model has two independent roles:
+
+          1. WARPING (neural_angle_dist): a distribution that is integrated in a
+             CDF-like fashion to produce the egocentric -> neural angle map.
+          2. WEIGHTING (angle_weight): a distribution integrated over each
+             target's visible angular extent to set rho (the relative neural
+             group size / attractiveness driving gamma).
+
+        The two roles were a single coupled function in earlier versions; they
+        are now decoupled so warp shape and weight shape/parameters can be tuned
+        independently. The default (angle_weight=None) gives uniform weighting.
+
+        Mutable post-init: focal_loc, focal_angle, targets. Warp and weight
+        parameters are changed via set_warp_params(...) / set_weight_params(...),
+        which rebuild only the affected role's splines. The roles
+        (neural_angle_dist, angle_weight) themselves are not mutable post-init.
 
         Parameters
         ----------
@@ -536,115 +564,108 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        neural_weight : {'cutoff', 'vonmises', 'symmetric_beta', 'reg_power', 'tanh_plus', None} (default = 'cutoff')
-            Weighting function for the neural band.
-                - 'cutoff' : a smooth cutoff function that is 1 in front and
-                             0 in back, with a smooth transition in between.
-                             It is parameterized by a and b, which control the
-                             angles at which the cutoff starts and ends, respectively.
-                             See _smooth_cutoff for details.
-                - 'vonmises' : a von Mises pdf, exp(k*cos(theta))/(2*pi*I0(k)).
-                             The single parameter k controls the width: larger k
-                             gives a narrower peak (stronger front bias). See
-                             _vonmises for details.
-                - 'symmetric_beta' : a symmetric Beta(alpha, alpha) pdf rescaled
-                             to the support [-b, b]. Parameters alpha (>= 1) and
-                             b (> 0); alpha = 1 is uniform on [-b, b], larger
-                             alpha gives a narrower peak. See _symmetric_beta
-                             for details.
-                - 'reg_power' : a regularized power weight 1/(|theta|^d + e),
-                             with d, e > 0. Smaller d weights the front
-                             relatively less heavily; smaller e is a sharper
-                             peak at 0. As e -> 0 the normalized integral
-                             (used as the angle map) converges to
-                             _power(theta, c=1-d); e regularizes the singularity
-                             at 0 so a spline can resolve the integral. See
-                             _reg_power for details.
-                - None : no weighting, i.e. flat. All angles are weighted equally.
-        neural_angle : {'integral', 'power', None} (default = 'integral')
-            This defines a mapping between perceived center of each target and
-            the neural position of the corresponding spin group.
-            Options are:
-                - 'integral' : the neural position is given by integrating the
-                               neural weight function like a CDF to the perceived
-                               center of the target.
-                - 'power' : the neural position is given by applying a power
-                            function to the perceived center of the target:
-                            f(theta) = pi * sign(theta) * (|theta|/pi)^c.
-                            The parameter c controls the exponent; c = 1 gives
-                            the identity, c < 1 expands front angles, c > 1
-                            compresses them.
-                - None : no transformation, i.e. identity. The neural position is
-                         the same as the perceived center of the target.
-        weight_angle_only : bool (default = False)
-            If True, the neural_weight function is used only inside
-            get_neural_angle / get_neural_angle_inverse (i.e. for the
-            'integral' neural_angle transformation). Everywhere else
-            (group-size integration in _get_target_signals, the
-            get_neural_weight accessor, and any plotting that consults it)
-            behaves as if neural_weight had been set to None. This isolates
-            the contribution of the neural-angle warping from the
-            front-bias attractiveness weighting.
+        neural_angle_dist : {'cutoff', 'vonmises', 'symmetric_beta', 'reg_power', 'direct_power', None} (default = 'cutoff')
+            WARP role. A named distribution is integrated CDF-like to map
+            egocentric angles to neural angles (denser neural representation
+            where the distribution is concentrated). The families:
+                - 'cutoff' : smooth cutoff, 1 in front and 0 in back with a
+                             smooth transition. Params a (inner), b (outer);
+                             0 <= a < b. See _smooth_cutoff.
+                - 'vonmises' : von Mises pdf exp(k*cos(theta))/(2*pi*I0(k)).
+                             Param k > 0 (larger k = narrower peak). See _vonmises.
+                - 'symmetric_beta' : Beta(alpha, alpha) rescaled to [-b, b].
+                             Params alpha >= 1, b > 0 (alpha = 1 is uniform on
+                             [-b, b]). See _symmetric_beta.
+                - 'reg_power' : regularized power weight 1/(|theta|^d + e),
+                             d, e > 0. The normalized integral converges to
+                             _power(theta, c=1-d) as e -> 0. See _reg_power.
+                - 'direct_power' : the power angle map directly (NOT a
+                             CDF-integral of a density):
+                             f(theta) = pi * sign(theta) * (|theta|/pi)^c, c > 0.
+                             c = 1 is identity, c < 1 expands front angles, c > 1
+                             compresses them. WARP ONLY -- not valid as a weight
+                             (it is a signed angle map, not a density).
+                - None : identity warp (neural angle = egocentric angle).
+        angle_weight : {'cutoff', 'vonmises', 'symmetric_beta', 'reg_power', 'neural_angle_dist', None} (default = None)
+            WEIGHT role. A named density family (same families as the warp,
+            EXCEPT 'direct_power', which is disallowed) integrated over each
+            target's visible arc to set rho. Plus:
+                - 'neural_angle_dist' : tie the weight to the warp -- use the
+                             same family and parameters as neural_angle_dist.
+                             Reproduces the old full-weighting behavior.
+                - None : uniform weight (rho from visible arc length / visible
+                             count only). Reproduces the old weight_angle_only
+                             behavior. This is the default.
+        a_warp, b_warp : float, optional
+            Parameters for the warp family, by slot. The real meaning of each
+            slot depends on the family (see _FAMILY_INFO):
+                cutoff: a_warp=a, b_warp=b;  vonmises: a_warp=k;
+                symmetric_beta: a_warp=alpha, b_warp=b;
+                reg_power: a_warp=d, b_warp=e;  direct_power: a_warp=c.
+            If left None, the family default is used. Unused slots (e.g. b_warp
+            for vonmises/direct_power) must be left None.
+        a_weight, b_weight : float, optional
+            Parameters for the weight family, same slot convention as the warp
+            params. Must be None when angle_weight is None or
+            'neural_angle_dist' (no independent weight family to parameterize).
         theta_mesh : float or 1D ndarray
-            the number of equally spaced mesh points on [-pi,pi) to evaluate at 
+            the number of equally spaced mesh points on [-pi,pi) to evaluate at
             or a mesh of theta values to evaluate at
         '''
 
         self.focal_loc = np.array(focal_loc, dtype=float)
         self.focal_angle = focal_angle
-        self.neural_weight = neural_weight
-        self.neural_angle = neural_angle
-        self.weight_angle_only = weight_angle_only
 
-        if weight_angle_only and (neural_angle != 'integral'
-                                  or neural_weight is None):
-            warnings.warn(
-                "weight_angle_only=True has no effect when neural_angle is "
-                f"{neural_angle!r} with neural_weight={neural_weight!r}: the "
-                "weight function is not consulted by this configuration in "
-                "any code path. Set neural_angle='integral' with a non-None "
-                "neural_weight, or leave weight_angle_only=False.",
-                stacklevel=2,
-            )
+        # --- Resolve and validate the WARP role. ---
+        if neural_angle_dist is not None and neural_angle_dist not in _FAMILY_INFO:
+            raise ValueError(
+                f"neural_angle_dist must be one of "
+                f"{sorted(_FAMILY_INFO)} or None, got {neural_angle_dist!r}.")
+        self.warp_name = neural_angle_dist
+        self.warp_params = self._resolve_params(
+            neural_angle_dist, a_warp, b_warp, role='warp')
 
-        # Set default parameters for the weighting function.
-        # Write to the backing attributes directly so the property setters
-        # (which would trigger a spline rebuild) are bypassed during init.
-        self._a = None
-        self._b = None
-        self._k = None
-        self._alpha = None
-        self._d = None
-        self._e = None
-        if neural_weight == 'cutoff':
-            # = 1 when |theta|<self.a, = 0 when |theta|>self.b, smooth in between
-            self._a = np.pi/3
-            self._b = 4*np.pi/5
-        elif neural_weight == 'vonmises':
-            # f(theta) = exp(k*cos(theta))/(2*pi*I0(k)); larger k = narrower peak.
-            self._k = 1.0
-        elif neural_weight == 'symmetric_beta':
-            # Beta(alpha, alpha) rescaled to [-b, b]; larger alpha = narrower peak.
-            self._alpha = 5.0
-            self._b = np.pi
-        elif neural_weight == 'reg_power':
-            # 1/(|theta|^d + e); the normalized integral converges to
-            # _power(theta, c=1-d) as e -> 0. Default e = 1e-3 gives a
-            # ~8e-3 max difference from _power(theta, c=0.5) on [-pi, pi]
-            # (see analyze_reg_power_e.py) while keeping the spline
-            # well-conditioned (slope at 0 is 1/e = 1000).
-            self._d = 0.5
-            self._e = 1e-3
-        # elif neural_weight == 'tanh_plus':
-        #     self._a = 2
-        #     self._b = 2*np.pi/3
-
-        # Set default parameters for the neural position transformation function.
-        if neural_angle == 'power':
-            # f(theta) = pi * sign(theta) * (|theta|/pi)^c. c=1 is identity.
-            self.c = 0.5
+        # --- Resolve and validate the WEIGHT role. ---
+        # 'direct_power' is a signed angle map, not a density: disallow.
+        if angle_weight == 'direct_power':
+            raise ValueError(
+                "angle_weight='direct_power' is not allowed: the power map is a "
+                "signed angle map, not a non-negative density, so it cannot be "
+                "integrated over visible arcs as a weight. Use 'reg_power' "
+                "(whose density is the power-map derivative) instead.")
+        self._weight_tied_to_warp = (angle_weight == 'neural_angle_dist')
+        if self._weight_tied_to_warp:
+            if a_weight is not None or b_weight is not None:
+                raise ValueError(
+                    "a_weight/b_weight must be None when "
+                    "angle_weight='neural_angle_dist' (the weight reuses the "
+                    "warp family and parameters). Set the parameters via "
+                    "a_warp/b_warp instead.")
+            if self.warp_name == 'direct_power' or self.warp_name is None:
+                raise ValueError(
+                    "angle_weight='neural_angle_dist' requires neural_angle_dist "
+                    f"to be a density family, got {self.warp_name!r}. "
+                    "'direct_power' and None have no associated density to "
+                    "weight with.")
+            # Weight uses the warp family + params.
+            self.weight_name = self.warp_name
+            self.weight_params = dict(self.warp_params)
+        elif angle_weight is None:
+            if a_weight is not None or b_weight is not None:
+                raise ValueError(
+                    "a_weight/b_weight must be None when angle_weight is None "
+                    "(uniform weighting has no parameters).")
+            self.weight_name = None
+            self.weight_params = {}
         else:
-            self.c = None
+            if angle_weight not in _FAMILY_INFO:
+                raise ValueError(
+                    f"angle_weight must be one of "
+                    f"{sorted(k for k in _FAMILY_INFO if k != 'direct_power')}, "
+                    f"'neural_angle_dist', or None, got {angle_weight!r}.")
+            self.weight_name = angle_weight
+            self.weight_params = self._resolve_params(
+                angle_weight, a_weight, b_weight, role='weight')
 
         if targets is None:
             self.targets = Targets()
@@ -656,99 +677,164 @@ class PerceptionModel:
         else:
             self.theta_mesh = theta_mesh
 
-        # Build spline lookups for the integral transforms exactly once,
-        # using the final values of the backing attributes.
-        self._build_integral_splines()
+        # Build spline lookups for each role exactly once. The weight splines
+        # are skipped when the weight is uniform or tied to the warp (the warp
+        # antiderivative is reused in that case).
+        self._build_warp_splines()
+        self._build_weight_splines()
 
-    # --- a, b, k as properties: reassignment triggers a spline rebuild ---
+    # --- per-role parameter handling ---
 
-    @property
-    def a(self):
-        return self._a
+    @staticmethod
+    def _resolve_params(name, a_slot, b_slot, role):
+        """Map the generic (a_slot, b_slot) constructor params onto a family's
+        real parameter dict, filling family defaults for any slot left None and
+        validating per-family constraints.
 
-    @a.setter
-    def a(self, value):
-        self._a = value
-        self._build_integral_splines()
+        Parameters
+        ----------
+        name : str or None
+            family name (key of _FAMILY_INFO) or None (identity/uniform).
+        a_slot, b_slot : float or None
+            the generic slot values (a_warp/b_warp or a_weight/b_weight).
+        role : {'warp', 'weight'}
+            used only for clearer error messages.
 
-    @property
-    def b(self):
-        return self._b
-
-    @b.setter
-    def b(self, value):
-        self._b = value
-        self._build_integral_splines()
-
-    @property
-    def k(self):
-        return self._k
-
-    @k.setter
-    def k(self, value):
-        self._k = value
-        self._build_integral_splines()
-
-    @property
-    def alpha(self):
-        return self._alpha
-
-    @alpha.setter
-    def alpha(self, value):
-        self._alpha = value
-        self._build_integral_splines()
-
-    @property
-    def d(self):
-        return self._d
-
-    @d.setter
-    def d(self, value):
-        self._d = value
-        self._build_integral_splines()
-
-    @property
-    def e(self):
-        return self._e
-
-    @e.setter
-    def e(self, value):
-        self._e = value
-        self._build_integral_splines()
-
-    def _build_integral_splines(self):
-        """Precompute spline lookups for the 'integral' neural-angle transform.
-
-        Builds forward and inverse CubicSplines for the current configuration
-        so that get_neural_angle / get_neural_angle_inverse (and the
-        antiderivative calls inside _integrate_neural_weight) can evaluate
-        in O(1) instead of calling scipy.integrate.quad or brentq on every
-        invocation.
-
-        Only 'integral' + ('cutoff' | 'vonmises' | 'reg_power') configurations
-        build splines; everything else is identity or analytical and the spline
-        attributes stay None.
+        Returns
+        -------
+        dict : real parameter names -> values (empty dict for name=None).
         """
-        self._cutoff_forward_spline = None
-        self._cutoff_inverse_spline = None
-        self._vonmises_forward_spline = None
-        self._vonmises_inverse_spline = None
-        self._reg_power_forward_spline = None
-        self._reg_power_inverse_spline = None
-        # symmetric_beta uses scipy.stats.beta.cdf directly (machine
-        # precision for any alpha; no spline cache).
+        if name is None:
+            if a_slot is not None or b_slot is not None:
+                raise ValueError(
+                    f"a_{role}/b_{role} must be None when the {role} family is "
+                    "None (identity warp / uniform weight has no parameters).")
+            return {}
 
-        # Splines are used both by the 'integral' neural-angle transformation
-        # (forward + inverse) and by _integrate_neural_weight (forward only,
-        # as an antiderivative for integrating the weight over angular
-        # intervals). Build whenever neural_weight is 'cutoff', 'vonmises',
-        # or 'reg_power', independent of neural_angle.
+        info = _FAMILY_INFO[name]
+        a_key, b_key = info['slots']
+        params = dict(info['defaults'])
 
-        if self.neural_weight == 'cutoff':
-            if self._a is None or self._b is None:
-                return
-            a = self._a
-            b = self._b
+        if a_slot is not None:
+            if a_key is None:
+                raise ValueError(
+                    f"a_{role} is not used by {name!r}; leave it None.")
+            params[a_key] = a_slot
+        if b_slot is not None:
+            if b_key is None:
+                raise ValueError(
+                    f"b_{role} is not used by {name!r} (it has a single "
+                    f"parameter {a_key!r}); leave b_{role} None.")
+            params[b_key] = b_slot
+
+        PerceptionModel._validate_params(name, params, role)
+        return params
+
+    @staticmethod
+    def _validate_params(name, params, role):
+        """Validate a family's resolved parameter dict, naming the real
+        parameter (and the generic slot) in any error message."""
+        if name == 'cutoff':
+            a, b = params['a'], params['b']
+            if not (0 <= a < b):
+                raise ValueError(
+                    f"for cutoff {role}, a_{role} (a) and b_{role} (b) must "
+                    f"satisfy 0 <= a < b (got a={a}, b={b}).")
+        elif name == 'vonmises':
+            if not (params['k'] > 0):
+                raise ValueError(
+                    f"for vonmises {role}, a_{role} (k) must be > 0 "
+                    f"(got k={params['k']}).")
+        elif name == 'symmetric_beta':
+            if not (params['alpha'] >= 1):
+                raise ValueError(
+                    f"for symmetric_beta {role}, a_{role} (alpha) must be >= 1 "
+                    f"(got alpha={params['alpha']}).")
+            if not (params['b'] > 0):
+                raise ValueError(
+                    f"for symmetric_beta {role}, b_{role} (b) must be > 0 "
+                    f"(got b={params['b']}).")
+        elif name == 'reg_power':
+            if not (params['d'] > 0):
+                raise ValueError(
+                    f"for reg_power {role}, a_{role} (d) must be > 0 "
+                    f"(got d={params['d']}).")
+            if not (params['e'] > 0):
+                raise ValueError(
+                    f"for reg_power {role}, b_{role} (e) must be > 0 "
+                    f"(got e={params['e']}).")
+        elif name == 'direct_power':
+            if not (params['c'] > 0):
+                raise ValueError(
+                    f"for direct_power {role}, a_{role} (c) must be > 0 "
+                    f"(got c={params['c']}).")
+
+    def set_warp_params(self, **kwargs):
+        """Update the warp family's parameters (by real name, e.g. k=..., a=...,
+        b=..., alpha=..., d=..., e=..., c=...) and rebuild the warp splines.
+
+        Does not touch the weight splines unless the weight is tied to the warp
+        (angle_weight='neural_angle_dist'), in which case the weight tracks the
+        warp and its splines are rebuilt too.
+        """
+        if self.warp_name is None:
+            raise ValueError(
+                "no warp parameters to set: neural_angle_dist is None "
+                "(identity warp).")
+        self._update_params(self.warp_params, self.warp_name, 'warp', kwargs)
+        self._build_warp_splines()
+        if self._weight_tied_to_warp:
+            self.weight_params = dict(self.warp_params)
+            self._build_weight_splines()
+
+    def set_weight_params(self, **kwargs):
+        """Update the weight family's parameters (by real name) and rebuild only
+        the weight splines. Errors when the weight is uniform (None) or tied to
+        the warp (set those via set_warp_params instead)."""
+        if self._weight_tied_to_warp:
+            raise ValueError(
+                "weight is tied to the warp (angle_weight='neural_angle_dist'); "
+                "change parameters via set_warp_params instead.")
+        if self.weight_name is None:
+            raise ValueError(
+                "no weight parameters to set: angle_weight is None "
+                "(uniform weight).")
+        self._update_params(self.weight_params, self.weight_name, 'weight',
+                            kwargs)
+        self._build_weight_splines()
+
+    @staticmethod
+    def _update_params(params, name, role, kwargs):
+        """In-place update of a role's param dict from real-name kwargs, with
+        validation. Rejects parameter names not used by the family."""
+        a_key, b_key = _FAMILY_INFO[name]['slots']
+        allowed = {k for k in (a_key, b_key) if k is not None}
+        for key, val in kwargs.items():
+            if key not in allowed:
+                raise ValueError(
+                    f"{name!r} {role} takes parameter(s) {sorted(allowed)}; "
+                    f"got unexpected {key!r}.")
+            params[key] = val
+        PerceptionModel._validate_params(name, params, role)
+
+    @staticmethod
+    def _make_integral_spline(name, params):
+        """Build (forward, inverse) CubicSplines for the CDF-like integral map
+        of a density family, or (None, None) for families with no spline
+        (symmetric_beta is evaluated analytically; direct_power / None have no
+        integral map).
+
+        Used by both roles: the warp uses both returned splines; the weight
+        uses only the forward spline (as an antiderivative for the rho
+        arc-integral). The per-family node construction is preserved verbatim
+        from the original single-spline builder to protect numerics: cutoff
+        uses a saturated-tail monotone filter; reg_power uses a cubic node mesh
+        with a monotonicity assert; vonmises uses plain equispaced nodes via
+        scipy's cdf.
+        """
+        if name == 'cutoff':
+            a = params['a']
+            b = params['b']
             n_nodes = 2001
             x_nodes = np.linspace(-b, b, n_nodes)
             # Snap the center node to 0 exactly (should already hold for an
@@ -780,14 +866,10 @@ class PerceptionModel:
             kept = np.array(kept)
             x_kept = x_nodes[kept]
             y_kept = y_nodes[kept]
-            self._cutoff_forward_spline = CubicSpline(
-                x_kept, y_kept, bc_type='natural')
-            self._cutoff_inverse_spline = CubicSpline(
-                y_kept, x_kept, bc_type='natural')
-        elif self.neural_weight == 'vonmises':
-            if self._k is None:
-                return
-            k_val = self._k
+            return (CubicSpline(x_kept, y_kept, bc_type='natural'),
+                    CubicSpline(y_kept, x_kept, bc_type='natural'))
+        elif name == 'vonmises':
+            k_val = params['k']
             n_nodes = 2001
             theta_nodes = np.linspace(-np.pi, np.pi, n_nodes)
             center = n_nodes // 2
@@ -796,15 +878,11 @@ class PerceptionModel:
             y_nodes[0] = -np.pi
             y_nodes[-1] = np.pi
             y_nodes[center] = 0.0
-            self._vonmises_forward_spline = CubicSpline(
-                theta_nodes, y_nodes, bc_type='natural')
-            self._vonmises_inverse_spline = CubicSpline(
-                y_nodes, theta_nodes, bc_type='natural')
-        elif self.neural_weight == 'reg_power':
-            if self._d is None or self._e is None:
-                return
-            d = self._d
-            e = self._e
+            return (CubicSpline(theta_nodes, y_nodes, bc_type='natural'),
+                    CubicSpline(y_nodes, theta_nodes, bc_type='natural'))
+        elif name == 'reg_power':
+            d = params['d']
+            e = params['e']
             # Cubic mesh: theta = pi * sign(u) * |u|^3 with u = linspace(-1, 1).
             # Concentrates nodes near 0, where the integrand 1/(|x|^d + e) is
             # peaked (value 1/e there) and F has very high curvature
@@ -833,103 +911,88 @@ class PerceptionModel:
             assert np.all(np.diff(y_nodes) > 0), (
                 "reg_power integral nodes are not strictly increasing; "
                 "check d, e parameters and quad tolerance.")
-            self._reg_power_forward_spline = CubicSpline(
-                theta_nodes, y_nodes, bc_type='natural')
-            self._reg_power_inverse_spline = CubicSpline(
-                y_nodes, theta_nodes, bc_type='natural')
+            return (CubicSpline(theta_nodes, y_nodes, bc_type='natural'),
+                    CubicSpline(y_nodes, theta_nodes, bc_type='natural'))
+        else:
+            # symmetric_beta (analytic), direct_power, None: no spline.
+            return (None, None)
 
-    def _neural_angle_cutoff(self, theta):
-        """Spline evaluation of F(theta; a, b) for the smooth-cutoff weight.
+    def _build_warp_splines(self):
+        """Build the warp role's forward+inverse integral splines (left None for
+        analytic symmetric_beta, identity None, or the direct_power map)."""
+        self._warp_forward_spline, self._warp_inverse_spline = \
+            self._make_integral_spline(self.warp_name, self.warp_params)
 
-        Saturates to +-pi outside [-b, b] to match the analytical antiderivative.
-        """
-        theta_arr = np.asarray(theta, dtype=float)
-        scalar = theta_arr.ndim == 0
-        b = self._b
-        clamped = np.clip(theta_arr, -b, b)
-        result = self._cutoff_forward_spline(clamped)
-        result = np.where(theta_arr >= b, np.pi, result)
-        result = np.where(theta_arr <= -b, -np.pi, result)
-        return float(result) if scalar else result
+    def _build_weight_splines(self):
+        """Build the weight role's forward integral spline (the antiderivative
+        used by the rho arc-integral). Left None when the weight is uniform
+        (weight_name is None), tied to the warp (the warp antiderivative is
+        reused), or analytic (symmetric_beta)."""
+        if self.weight_name is None or self._weight_tied_to_warp:
+            self._weight_forward_spline = None
+            return
+        self._weight_forward_spline, _ = \
+            self._make_integral_spline(self.weight_name, self.weight_params)
 
-    def _neural_angle_cutoff_inverse(self, y):
-        """Spline evaluation of F^{-1}(y; a, b) for the smooth-cutoff weight."""
-        y_arr = np.asarray(y, dtype=float)
-        scalar = y_arr.ndim == 0
-        if np.any((y_arr < -np.pi) | (y_arr > np.pi)):
-            raise ValueError("y must satisfy -pi <= y <= pi.")
-        result = self._cutoff_inverse_spline(y_arr)
-        result = np.where(y_arr == np.pi, self._b, result)
-        result = np.where(y_arr == -np.pi, -self._b, result)
-        return float(result) if scalar else result
+    @staticmethod
+    def _eval_forward_map(name, params, fwd_spline, theta):
+        """Forward CDF-like angle map F(theta) for a density family, saturating
+        to +-pi outside the support. Uses the supplied precomputed forward
+        spline for cutoff/vonmises/reg_power; analytic scipy cdf for
+        symmetric_beta. (The same evaluator serves the warp and, as an
+        antiderivative for the rho arc-integral, the weight.)"""
+        if name == 'cutoff':
+            theta_arr = np.asarray(theta, dtype=float)
+            scalar = theta_arr.ndim == 0
+            b = params['b']
+            clamped = np.clip(theta_arr, -b, b)
+            result = fwd_spline(clamped)
+            result = np.where(theta_arr >= b, np.pi, result)
+            result = np.where(theta_arr <= -b, -np.pi, result)
+            return float(result) if scalar else result
+        elif name == 'vonmises' or name == 'reg_power':
+            theta_arr = np.asarray(theta, dtype=float)
+            scalar = theta_arr.ndim == 0
+            clamped = np.clip(theta_arr, -np.pi, np.pi)
+            result = fwd_spline(clamped)
+            result = np.where(theta_arr >= np.pi, np.pi, result)
+            result = np.where(theta_arr <= -np.pi, -np.pi, result)
+            return float(result) if scalar else result
+        elif name == 'symmetric_beta':
+            return PerceptionModel._symmetric_beta_integral(
+                theta, params['alpha'], params['b'])
+        else:
+            raise NotImplementedError(
+                f"no forward integral map for family {name!r}.")
 
-    def _neural_angle_vonmises(self, theta):
-        """Spline evaluation of G(theta; k) for the von Mises weight.
-
-        Saturates to +-pi outside [-pi, pi] (the natural domain of the mapping).
-        """
-        theta_arr = np.asarray(theta, dtype=float)
-        scalar = theta_arr.ndim == 0
-        clamped = np.clip(theta_arr, -np.pi, np.pi)
-        result = self._vonmises_forward_spline(clamped)
-        result = np.where(theta_arr >= np.pi, np.pi, result)
-        result = np.where(theta_arr <= -np.pi, -np.pi, result)
-        return float(result) if scalar else result
-
-    def _neural_angle_vonmises_inverse(self, y):
-        """Spline evaluation of G^{-1}(y; k) for the von Mises weight."""
-        y_arr = np.asarray(y, dtype=float)
-        scalar = y_arr.ndim == 0
-        if np.any((y_arr < -np.pi) | (y_arr > np.pi)):
-            raise ValueError("y must satisfy -pi <= y <= pi.")
-        result = self._vonmises_inverse_spline(y_arr)
-        result = np.where(y_arr == np.pi, np.pi, result)
-        result = np.where(y_arr == -np.pi, -np.pi, result)
-        return float(result) if scalar else result
-
-    def _neural_angle_reg_power(self, theta):
-        """Spline evaluation of F(theta; d, e) for the regularized power weight.
-
-        Saturates to +-pi outside [-pi, pi] (the natural domain of the
-        mapping; the support of the weight is the full circle).
-        """
-        theta_arr = np.asarray(theta, dtype=float)
-        scalar = theta_arr.ndim == 0
-        clamped = np.clip(theta_arr, -np.pi, np.pi)
-        result = self._reg_power_forward_spline(clamped)
-        result = np.where(theta_arr >= np.pi, np.pi, result)
-        result = np.where(theta_arr <= -np.pi, -np.pi, result)
-        return float(result) if scalar else result
-
-    def _neural_angle_reg_power_inverse(self, y):
-        """Spline evaluation of F^{-1}(y; d, e) for the regularized power weight."""
-        y_arr = np.asarray(y, dtype=float)
-        scalar = y_arr.ndim == 0
-        if np.any((y_arr < -np.pi) | (y_arr > np.pi)):
-            raise ValueError("y must satisfy -pi <= y <= pi.")
-        result = self._reg_power_inverse_spline(y_arr)
-        result = np.where(y_arr == np.pi, np.pi, result)
-        result = np.where(y_arr == -np.pi, -np.pi, result)
-        return float(result) if scalar else result
-
-    def _neural_angle_symmetric_beta(self, theta):
-        """Direct evaluation of G(theta; alpha, b) for the symmetric Beta weight.
-
-        Calls scipy.stats.beta.cdf via _symmetric_beta_integral. Machine-precision
-        accurate for any alpha >= 1; saturates to +-pi outside [-b, b] (scipy's
-        cdf is exactly 0 below -b and 1 above b, which carries through). No
-        spline cache: for symmetric Beta with low alpha (1 < alpha < 3), the
-        cdf is only C^(alpha-1) at +-b, and a global cubic spline cannot
-        resolve that. Direct scipy is ~10x slower than a spline lookup but
-        machine-precision everywhere.
-        """
-        return PerceptionModel._symmetric_beta_integral(
-            theta, self._alpha, self._b)
-
-    def _neural_angle_symmetric_beta_inverse(self, y):
-        """Direct evaluation of G^{-1}(y; alpha, b) for the symmetric Beta weight."""
-        return PerceptionModel._symmetric_beta_int_inverse(
-            y, self._alpha, self._b)
+    @staticmethod
+    def _eval_inverse_map(name, params, inv_spline, y):
+        """Inverse of _eval_forward_map. Domain y in [-pi, pi]."""
+        if name == 'cutoff':
+            y_arr = np.asarray(y, dtype=float)
+            scalar = y_arr.ndim == 0
+            if np.any((y_arr < -np.pi) | (y_arr > np.pi)):
+                raise ValueError("y must satisfy -pi <= y <= pi.")
+            b = params['b']
+            result = inv_spline(y_arr)
+            result = np.where(y_arr == np.pi, b, result)
+            result = np.where(y_arr == -np.pi, -b, result)
+            return float(result) if scalar else result
+        elif name == 'vonmises' or name == 'reg_power':
+            y_arr = np.asarray(y, dtype=float)
+            scalar = y_arr.ndim == 0
+            if np.any((y_arr < -np.pi) | (y_arr > np.pi)):
+                raise ValueError("y must satisfy -pi <= y <= pi.")
+            result = inv_spline(y_arr)
+            result = np.where(y_arr == np.pi, np.pi, result)
+            result = np.where(y_arr == -np.pi, -np.pi, result)
+            return float(result) if scalar else result
+        elif name == 'symmetric_beta':
+            return PerceptionModel._symmetric_beta_int_inverse(
+                y, params['alpha'], params['b'])
+        else:
+            raise NotImplementedError(
+                f"no inverse integral map for family {name!r}.")
 
     @staticmethod
     def _smooth_cutoff(x, a, b):
@@ -974,7 +1037,7 @@ class PerceptionModel:
         norm = 2*pi/(a+b). The normalization makes F(+/-b) = +/-pi so F
         plays the role of a CDF-like transformation. Used as the
         reference implementation; hot-path callers use the precomputed
-        spline in PerceptionModel._neural_angle_cutoff instead.
+        forward spline (via _eval_forward_map) instead.
         """
         if theta < 0:
             NEG = True
@@ -1038,8 +1101,8 @@ class PerceptionModel:
         """
         Compute F^{-1}(y; a, b) for a single float y (the inverse of
         _smooth_cutoff_integral). Used as the reference implementation;
-        hot-path callers use the precomputed spline in
-        PerceptionModel._neural_angle_cutoff_inverse instead.
+        hot-path callers use the precomputed inverse spline (via
+        _eval_inverse_map) instead.
         """
         if not (0 <= a < b):
             raise ValueError(f"Parameters must satisfy 0 <= a < b (a={a}, b={b}).")
@@ -1306,7 +1369,7 @@ class PerceptionModel:
         the antiderivative becomes |theta|^(1-d)/(1-d) for d != 1).
 
         Used as the reference implementation; hot-path callers use the
-        precomputed spline in PerceptionModel._neural_angle_reg_power instead.
+        precomputed forward spline (via _eval_forward_map) instead.
 
         Parameters
         ----------
@@ -1377,8 +1440,7 @@ class PerceptionModel:
         Compute F^{-1}(y; d, e): the value of theta such that
         F(theta; d, e) = y, for y in [-pi, pi]. Pins y = +-pi to +-pi.
         Used as the reference implementation; hot-path callers use the
-        precomputed spline in PerceptionModel._neural_angle_reg_power_inverse
-        instead.
+        precomputed inverse spline (via _eval_inverse_map) instead.
 
         Parameters
         ----------
@@ -1622,39 +1684,30 @@ class PerceptionModel:
         if not intervals:
             return 0.0
 
-        if self.neural_weight is None or self.weight_angle_only:
-            # Uniform weight: integral is arc length
+        name = self.weight_name
+        if name is None:
+            # Uniform weight: integral is arc length.
             return sum(hi - lo for lo, hi in intervals)
-        elif self.neural_weight == 'cutoff':
-            # F(theta) = norm * integral_0^theta cutoff(x) dx with
-            # norm = 2*pi/(a+b). The constant cancels in rho = G/G.sum(),
-            # so F(hi) - F(lo) is what we need. Use the precomputed spline.
-            F = self._neural_angle_cutoff
-            return sum(F(hi) - F(lo) for lo, hi in intervals)
-        elif self.neural_weight == 'vonmises':
-            # G(theta) = 2*pi*(vonmises.cdf(theta, k) - 0.5); the constant
-            # factor cancels in rho. Use the precomputed spline.
-            F = self._neural_angle_vonmises
-            return sum(F(hi) - F(lo) for lo, hi in intervals)
-        elif self.neural_weight == 'symmetric_beta':
-            # G(theta) = 2*pi*(beta.cdf(theta, alpha, alpha, loc=-b, scale=2b) - 0.5);
-            # the constant factor cancels in rho. Use the precomputed spline.
-            F = self._neural_angle_symmetric_beta
-            return sum(F(hi) - F(lo) for lo, hi in intervals)
-        elif self.neural_weight == 'reg_power':
-            # F(theta) = pi * sign(theta) * I(|theta|) / I(pi); the constant
-            # factor cancels in rho. Use the precomputed spline.
-            F = self._neural_angle_reg_power
-            return sum(F(hi) - F(lo) for lo, hi in intervals)
+
+        # Weighted: integrate the weight density via its CDF-like antiderivative
+        # F. The constant normalization factor in F cancels in rho = G/G.sum(),
+        # so F(hi) - F(lo) is the relevant quantity. When the weight is tied to
+        # the warp, reuse the warp's forward spline (no separate weight spline
+        # was built); otherwise use the weight's own forward spline.
+        if self._weight_tied_to_warp:
+            fwd = self._warp_forward_spline
         else:
-            raise NotImplementedError("Unknown neural weight function name.")
+            fwd = self._weight_forward_spline
+        F = lambda x: self._eval_forward_map(name, self.weight_params, fwd, x)
+        return sum(F(hi) - F(lo) for lo, hi in intervals)
 
 
     def get_neural_weight(self, theta):
-        '''Returns the neural weight for given angles theta based on the
-        weighting function. This is a proxy for the density of neurons in the
-        ring as a function of angle, and weights things in front more highly than
-        in back. Uses a standard cuttoff function or tanh_plus or returns ones.
+        '''Returns the neural weight density for given angles theta based on the
+        weighting function (angle_weight). This is a proxy for the relative
+        attractiveness / neural group size contributed per unit visible arc, and
+        (for front-biased families) weights things in front more highly than in
+        back. Returns ones for uniform weighting (angle_weight=None).
 
         Parameters
         ----------
@@ -1666,28 +1719,28 @@ class PerceptionModel:
         neural weight(s) corresponding to input theta value(s)
         '''
 
-        if self.neural_weight is None or self.weight_angle_only:
+        name = self.weight_name
+        p = self.weight_params
+        if name is None:
             return np.ones_like(theta)
-        elif self.neural_weight == 'cutoff':
-            return self._smooth_cutoff(theta, self.a, self.b)
-        elif self.neural_weight == 'vonmises':
-            return self._vonmises(theta, self.k)
-        elif self.neural_weight == 'symmetric_beta':
-            return self._symmetric_beta(theta, self.alpha, self.b)
-        elif self.neural_weight == 'reg_power':
-            return self._reg_power(theta, self.d, self.e)
-        # elif self.neural_weight == 'tanh_plus':
-        #     return self._tanh_plus(theta, self.a, self.b)
+        elif name == 'cutoff':
+            return self._smooth_cutoff(theta, p['a'], p['b'])
+        elif name == 'vonmises':
+            return self._vonmises(theta, p['k'])
+        elif name == 'symmetric_beta':
+            return self._symmetric_beta(theta, p['alpha'], p['b'])
+        elif name == 'reg_power':
+            return self._reg_power(theta, p['d'], p['e'])
         else:
-            raise NotImplementedError("Unknown neural weight function name.")
-        
+            raise NotImplementedError(
+                f"Unknown neural weight family {name!r}.")
+
 
     def get_neural_angle(self, theta):
-        '''Returns the neural position for a given angle theta based on the 
-        neural position transformation function. This is a mapping between the 
-        perceived center of each target and the neural position of the 
-        corresponding spin group. Uses an integral of the neural weight or a 
-        smooth power function or returns identity.
+        '''Returns the neural position for a given angle theta based on the
+        warp (neural_angle_dist). This maps the perceived center of each target
+        to the neural position of the corresponding spin group, via the CDF-like
+        integral of a density family, the direct power map, or identity.
 
         Parameters
         ----------
@@ -1699,29 +1752,20 @@ class PerceptionModel:
         neural position(s) corresponding to input theta value(s)
         '''
 
-        if self.neural_angle is None:
+        name = self.warp_name
+        if name is None:
             return theta
-        elif self.neural_angle == 'integral' and self.neural_weight is None:
-            return theta
-        elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
-            return self._neural_angle_cutoff(theta)
-        elif self.neural_angle == 'integral' and self.neural_weight == 'vonmises':
-            return self._neural_angle_vonmises(theta)
-        elif self.neural_angle == 'integral' and self.neural_weight == 'symmetric_beta':
-            return self._neural_angle_symmetric_beta(theta)
-        elif self.neural_angle == 'integral' and self.neural_weight == 'reg_power':
-            return self._neural_angle_reg_power(theta)
-        elif self.neural_angle == 'power':
-            return self._power(theta, self.c)
+        elif name == 'direct_power':
+            return self._power(theta, self.warp_params['c'])
         else:
-            raise NotImplementedError("Unknown neural position function name.")
+            return self._eval_forward_map(
+                name, self.warp_params, self._warp_forward_spline, theta)
 
 
     def get_neural_angle_inverse(self, theta):
-        '''Returns the angle corresponding to a given neural position theta based on the 
-        inverse of the neural position transformation function. This is a mapping 
-        from neural position back to perceived center of each target. Uses an 
-        integral of the neural weight or a smooth power function or returns identity.
+        '''Returns the angle corresponding to a given neural position theta,
+        the inverse of the warp (neural_angle_dist). Maps neural position back to
+        the perceived center of each target.
 
         Parameters
         ----------
@@ -1733,22 +1777,14 @@ class PerceptionModel:
         angle(s) corresponding to input neural position value(s)
         '''
 
-        if self.neural_angle is None:
+        name = self.warp_name
+        if name is None:
             return theta
-        elif self.neural_angle == 'integral' and self.neural_weight is None:
-            return theta
-        elif self.neural_angle == 'integral' and self.neural_weight == 'cutoff':
-            return self._neural_angle_cutoff_inverse(theta)
-        elif self.neural_angle == 'integral' and self.neural_weight == 'vonmises':
-            return self._neural_angle_vonmises_inverse(theta)
-        elif self.neural_angle == 'integral' and self.neural_weight == 'symmetric_beta':
-            return self._neural_angle_symmetric_beta_inverse(theta)
-        elif self.neural_angle == 'integral' and self.neural_weight == 'reg_power':
-            return self._neural_angle_reg_power_inverse(theta)
-        elif self.neural_angle == 'power':
-            return self._power_inverse(theta, self.c)
+        elif name == 'direct_power':
+            return self._power_inverse(theta, self.warp_params['c'])
         else:
-            raise NotImplementedError("Unknown neural position function name.")
+            return self._eval_inverse_map(
+                name, self.warp_params, self._warp_inverse_spline, theta)
 
 
     def _get_target_signals(self, focal_angle=None, focal_loc=None, mesh_signal=False):
@@ -1942,7 +1978,7 @@ class PerceptionModel:
         else:
             local_plot = False
 
-        weight_label = f'{self.neural_weight} weight'
+        weight_label = f'{self.weight_name or "uniform"} weight'
         weight_line, = ax.plot(theta, weights, label=weight_label)
 
         if polar:
@@ -1984,7 +2020,7 @@ class PerceptionModel:
             ax2.set_ylim(-np.pi, np.pi)
 
         neural_theta = self.get_neural_angle(theta)
-        angle_label = f'{self.neural_weight} angle map'
+        angle_label = f'{self.warp_name or "identity"} angle map'
         ax2.plot(theta, neural_theta, color=weight_line.get_color(),
                  linestyle='--', label=angle_label)
 

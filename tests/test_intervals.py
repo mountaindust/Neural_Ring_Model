@@ -317,10 +317,10 @@ from decision_model import Targets
 tgts = Targets(locs=np.array([[10.0, 10.0]]))
 
 # Uniform weight model
-pm_uniform = PM(tgts, neural_weight=None)
+pm_uniform = PM(tgts, neural_angle_dist=None, angle_weight=None)
 
-# Cutoff weight model (uses default a=pi/3, b=4*pi/5)
-pm_cutoff = PM(tgts, neural_weight='cutoff')
+# Cutoff weight model (independent cutoff weight, default a=pi/3, b=4*pi/5)
+pm_cutoff = PM(tgts, neural_angle_dist=None, angle_weight='cutoff')
 
 
 def check_scalar(name, result, expected, tol=1e-10):
@@ -356,8 +356,8 @@ check_scalar("uniform: tiny interval",
 
 # --- Cutoff weight: F(hi) - F(lo) via antiderivative ---
 
-a_val = pm_cutoff.a  # pi/3
-b_val = pm_cutoff.b  # 4*pi/5
+a_val = pm_cutoff.weight_params['a']  # pi/3
+b_val = pm_cutoff.weight_params['b']  # 4*pi/5
 
 # Single interval in the flat region (|theta| < a => weight=1)
 # F(x) = x * 2*pi/(a+b) in flat region, so integral = (hi-lo) * 2*pi/(a+b)
