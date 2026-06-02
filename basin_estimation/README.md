@@ -6,8 +6,7 @@ for stable self-consistent equilibria in NBM, before any changes to
 diagnostic scripts here, design and findings in markdown, no
 modifications to the main model code until conclusions justify them.
 
-Background and rationale: see
-[../basin_estimation_planning.md](../basin_estimation_planning.md).
+Running mathematical findings and results: see [findings.md](findings.md).
 
 ## Design decisions in scope
 

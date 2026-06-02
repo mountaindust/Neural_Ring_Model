@@ -640,18 +640,17 @@ conversation.
 
 - This file: `theory_background.md`
 - Project guide (architecture, conventions, gotchas): `CLAUDE.md`
-- Basin-of-attraction planning context:
-  `basin_estimation_planning.md`
+- Basin-of-attraction vetting findings and results:
+  `basin_estimation/findings.md`
 - F̂ derivation (the one this file supports):
   `basin_estimation/free_energy_derivation.md`
 - Vetting plan: `basin_estimation/README.md`
-- The user's writeup of model derivation: not in repo yet — was pasted
-  into the planning session that produced
-  `basin_estimation/free_energy_derivation.md`.
+- The user's writeup of model derivation: not in repo yet — was the
+  basis for `basin_estimation/free_energy_derivation.md`.
 - Code: `decision_model.py` (NeuralBandModel class around lines
   2135–3300, especially `dgamma_dt` at 2182, `sc_equilib` at 2354,
   `_discrim_coupled` at 2582).
 
 A fresh session can load `CLAUDE.md`, `theory_background.md`, and
-`basin_estimation_planning.md` to recover full context with a single
+`basin_estimation/findings.md` to recover full context with a single
 read of three files.

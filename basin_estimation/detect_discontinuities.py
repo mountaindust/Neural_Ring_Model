@@ -25,24 +25,44 @@ Three types of basin-boundary events are recognized:
       throughout, a basin-boundary mechanism distinct from γ-folds
       and saddles.
 
-NOTE on static vs dynamical "blind-spot trap":
-  weighting_analysis/README.md documents a dynamical trap that
-  emerges with cutoff a=0/b=π + integral neural mapping: a walker
-  that rotates such that all targets get behind it has γ collapse
-  onto the ±π branch cut where sin(±π)≈0 kills the torque. In a
-  STATIC slow-manifold scan, however, this signature (R near 1,
-  arg(γ)≈±π, |f|≈0) is *the same* as a perfectly normal SC saddle
-  at θ=±π with γ = −R + 0j. We can't distinguish trap from saddle
-  on a static scan; that's a dynamical question. So Step 7's
-  perception-collapse detector targets the R→0 case (perception
-  discontinuity), not the branch-cut signature.
+  (d) Branch-cut f-jump — under the half-angle torque law
+      f = K·R·sin(ego/2), wherever γ_eq crosses the negative real
+      axis (arg(γ_eq) through ±π, i.e. consensus directly behind the
+      observer), f jumps from +K·R to −K·R while γ_eq itself moves
+      continuously (|Δγ| stays at typical scale; only arg flips sign
+      across the cut). This is the intentional left/right fork at the
+      facing-away heading, not a numerical artifact. It is detected by
+      the SAME |Δf|-while-|Δγ|-small signature as a perception (b)
+      f-jump; the distinguishing marks of the branch-cut variant are
+      |Δf| ≈ 2·K·R and γ_eq on the negative real axis at the event.
 
-These three events together (plus the simple saddle bounding from
-Step 5) cover the basin boundary mechanisms documented in
-basin_estimation_planning.md.
+NOTE on the ±π heading under the half-angle law:
+  weighting_analysis/README.md documents a dynamical trap that emerges
+  with cutoff a=0/b=π + integral neural mapping: a walker that rotates
+  such that all targets get behind it has γ collapse onto the ±π branch
+  cut. Under the OLD sin(ego) torque, sin(±π)≈0 killed the torque, so a
+  STATIC scan saw a normal SC saddle at θ=±π (R near 1, arg≈±π, |f|≈0)
+  and the trap was indistinguishable from a saddle. Under the CURRENT
+  sin(ego/2) law this is no longer true: at θ=±π, sin(±π/2)=±1, so |f|
+  is *maximal* (≈K·R), not zero, and the static scan now sees the
+  type-(d) branch-cut f-jump there instead of a saddle. The half-angle
+  law thus removed the static torque dead-zone at the facing-away
+  heading (cf. the CLAUDE.md "Half-angle heading torque" note); a basin
+  boundary that sat at ±π under the old law is now a branch-cut, not a
+  saddle. The perception-collapse detector still targets the R→0 case
+  (type c), a separate mechanism from the branch cut.
+
+These four events together (plus the simple saddle bounding from
+Step 5) cover the basin boundary mechanisms cataloged in
+findings.md §4.4 and §7.
 
 Tests:
-  T1 — (0.5, 0) smooth scan: no spurious detections.
+  T1 — (0.5, 0) smooth scan: exactly one detection, the type-(d)
+       branch-cut f-jump at the facing-away heading θ≈±π (no γ-folds,
+       no perception collapse). Under the old sin(ego) law this scan
+       had zero detections; the single f-jump is the expected new
+       physics of the half-angle torque, verified to sit at |θ|≈π with
+       γ_eq on the negative real axis and |Δf| ≈ 2·K·R.
   T2 — (1.2, 0) and (2.0, 0): γ-folds detected at θ values matching
        Step 5's basin extraction.
   T3 — BlindSpot setup (4 delta targets, cutoff a=0/b=π, integral
@@ -258,7 +278,7 @@ if __name__ == "__main__":
     # T1 — smooth, no false positives
     # =====================
     print("=" * 65)
-    print("T1: smooth scan at (0.5, 0), expect no detections")
+    print("T1: smooth scan at (0.5, 0), expect only the branch-cut f-jump")
     print("=" * 65)
     nbm_vm = setup_VM_k055()
     focal_loc = np.array([0.5, 0.0])
@@ -277,9 +297,29 @@ if __name__ == "__main__":
     print(f"  γ-folds: {len(folds)}")
     print(f"  f-jumps: {len(fjumps)}")
     print(f"  perception collapse zones: {len(pcs)}")
-    t1_pass = (len(folds) == 0 and len(fjumps) == 0 and len(pcs) == 0)
+    # Under the half-angle torque law, a full-circle scan necessarily
+    # crosses the facing-away heading θ≈±π where γ_eq passes through the
+    # negative real axis, producing exactly one type-(d) branch-cut
+    # f-jump (|Δf|≈2·K·R, γ_eq on the negative real axis). No γ-folds and
+    # no perception collapse in this smooth 1-stable cell.
+    t1_basic = (len(folds) == 0 and len(fjumps) == 1 and len(pcs) == 0)
+    if len(fjumps) == 1:
+        ev = fjumps[0]
+        i = ev['index']
+        g_at = scan['gamma_eq'][i]
+        R_at = abs(g_at)
+        expected_jump = 2.0 * nbm_vm.K * R_at
+        at_pi = abs(abs(ev['theta_before']) - np.pi) < 0.05
+        neg_real = g_at.real < 0 and abs(g_at.imag) < 0.1 * R_at
+        big_jump = abs(ev['delta_f'] - expected_jump) < 0.15 * expected_jump
+        print(f"    branch-cut at θ≈{ev['theta_before']:+.4f} (|θ|≈π: {at_pi}), "
+              f"γ_eq={g_at.real:+.4f}{g_at.imag:+.4f}j (neg-real: {neg_real}), "
+              f"|Δf|={ev['delta_f']:.3f} vs 2KR={expected_jump:.3f} ({big_jump})")
+        t1_pass = t1_basic and at_pi and neg_real and big_jump
+    else:
+        t1_pass = False
     print(f"  T1: {'PASS' if t1_pass else 'FAIL'}")
-    results.append(("T1 no spurious detection at (0.5, 0)", t1_pass))
+    results.append(("T1 only branch-cut f-jump at (0.5, 0)", t1_pass))
 
     # =====================
     # T2 — γ-folds at multistable VM-k055 points
