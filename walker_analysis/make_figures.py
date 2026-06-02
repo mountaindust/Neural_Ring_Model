@@ -39,7 +39,7 @@ def make_model(locs, geom, K, r=None):
     pm = dm.PerceptionModel(targets=targets, focal_loc=(0.0, 0.0),
                             focal_angle=0.0,
                             neural_angle_dist='cutoff', a_warp=0.0, b_warp=np.pi,
-                            angle_weight='neural_angle_dist')
+                            angle_weight=None)
     return dm.NeuralBandModel(percep_model=pm, T=0.2, K=K)
 
 
