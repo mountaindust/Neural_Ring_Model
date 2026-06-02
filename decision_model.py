@@ -2304,11 +2304,7 @@ class NeuralBandModel:
             Temperature for the neural ring representing amount of noise in the system.
         K : float
             Coupling strength for Kuramoto turning speed. Used in models of
-            walkers only. Default 2: the half-angle torque law
-            dtheta/dt = K*R*sin(ego/2) has slope K/2 near ego=0, so K=2
-            preserves the near-front turning gain (and, exactly, the coupled
-            3x3 Jacobian at self-consistent equilibria) of the old
-            K=1 * sin(ego) law.
+            walkers only. Default of 2 in order to match sine argument of ego/2.
         '''
 
         self.T = T
@@ -2731,10 +2727,9 @@ class NeuralBandModel:
         # Half-angle torque: zero only when consensus is straight ahead
         # (ego_angle=0), maximal when consensus is directly behind
         # (ego_angle=+-pi). ego_angle is already in [-pi, pi] (from
-        # convert_gamma via np.angle), so no extra wrapping is needed before
-        # halving. The +-pi point carries an intentional +K*R <-> -K*R jump
-        # discontinuity (the physical left/right fork facing away), resolved
-        # by roundoff/noise.
+        # convert_gamma via np.angle). The +-pi point carries an intentional 
+        # +K*R <-> -K*R jump discontinuity (the physical left/right fork facing 
+        # away), resolved by roundoff/noise.
         return self.K * R * np.sin(ego_angle/2)
 
 
