@@ -3378,7 +3378,10 @@ class NeuralBandModel:
                         noise = self.rng.normal(scale=std)
                     else:
                         noise = 0
-                    theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
+                    # dtheta_dt() is a turning RATE (angular velocity), not an
+                    # angle: it must not be wrapped to (-pi, pi]. 
+                    # Only the resulting heading is wrapped (next focal_angle assign).
+                    theta = self.percep_model.focal_angle + self.dtheta_dt()*dt + noise*dt
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)
@@ -4538,8 +4541,10 @@ class IsingExtModel:
                     noise = self.rng.normal(scale=std)
                 else:
                     noise = 0
-                # Use an Euler (TODO: Honeycutt) step instead of solving the theta equation
-                theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
+                # Use an Euler (TODO: Honeycutt) step instead of solving the theta equation.
+                # dtheta_dt() is a turning RATE, not an angle: do NOT wrap it to (-pi, pi]. 
+                # The resulting heading is wrapped (next focal_angle assignment).
+                theta = self.percep_model.focal_angle + self.dtheta_dt()*dt + noise*dt
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)

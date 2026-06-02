@@ -48,7 +48,7 @@ def figure(locs, geom, K, fname, title, *, r=None, max_steps=1500,
     nbm = make_model(locs, geom, K, r=r)
     nbm.rng = np.random.default_rng(SEED)
     fig, ax = plt.subplots(figsize=(5.0, 5.0))
-    nbm.plot_walkers(dt=0.1, v=1, std=0.5, repetitions=30, max_steps=max_steps,
+    nbm.plot_walkers(dt=0.1, v=1, std=0.1, repetitions=30, max_steps=max_steps,
                      start_loc=(0.0, 0.0), start_angle=0.0,
                      plot_tracks=True, ax=ax, title=title)
     # mark target positions for clarity
@@ -75,7 +75,7 @@ def main():
     figure(FOUR, 'circle', 2, 'walkers_4circle_K2.png',
            '4 circle targets (r=0.5), K=2', r=0.5)
     figure(FOUR, None, 10, 'walkers_4delta_K10.png',
-           '4 delta targets, K=10 (wide orbits)')
+           '4 delta targets, K=10') 
     figure(TWO, None, 2, 'walkers_2delta_K2.png',
            '2 delta targets, K=2')
     figure(TWO, 'circle', 2, 'walkers_2circle_K2.png',
@@ -92,16 +92,16 @@ def main():
     figure(TWO, 'circle', 4, 'walkers_2circle_K4.png',
            '2 circle targets (r=0.5), K=4', r=0.5, xlim=(-1, 7), ylim=(-5, 5))
 
-    # K=1 (below the default): gentler turning. Same clamped view for
+    # K=6 (above the default): sharper turning. Same clamped view for
     # comparability across the K series.
-    figure(FOUR, None, 1, 'walkers_4delta_K1.png',
-           '4 delta targets, K=1', xlim=(-1, 7), ylim=(-5, 5))
-    figure(FOUR, 'circle', 1, 'walkers_4circle_K1.png',
-           '4 circle targets (r=0.5), K=1', r=0.5, xlim=(-1, 7), ylim=(-5, 5))
-    figure(TWO, None, 1, 'walkers_2delta_K1.png',
-           '2 delta targets, K=1', xlim=(-1, 7), ylim=(-5, 5))
-    figure(TWO, 'circle', 1, 'walkers_2circle_K1.png',
-           '2 circle targets (r=0.5), K=1', r=0.5, xlim=(-1, 7), ylim=(-5, 5))
+    figure(FOUR, None, 6, 'walkers_4delta_K6.png',
+           '4 delta targets, K=6', xlim=(-1, 7), ylim=(-5, 5))
+    figure(FOUR, 'circle', 6, 'walkers_4circle_K6.png',
+           '4 circle targets (r=0.5), K=6', r=0.5, xlim=(-1, 7), ylim=(-5, 5))
+    figure(TWO, None, 6, 'walkers_2delta_K6.png',
+           '2 delta targets, K=6', xlim=(-1, 7), ylim=(-5, 5))
+    figure(TWO, 'circle', 6, 'walkers_2circle_K6.png',
+           '2 circle targets (r=0.5), K=6', r=0.5, xlim=(-1, 7), ylim=(-5, 5))
     print("done.")
 
 
