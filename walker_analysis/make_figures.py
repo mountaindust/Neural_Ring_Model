@@ -1,20 +1,23 @@
 """Representative walker figures for the half-angle (sin(ego/2)) model.
 
-Produces five heatmap-with-tracks figures documenting walker behavior as it
-now stands (default heading torque dtheta/dt = K*R*sin(ego/2)):
+Produces 13 heatmap-with-tracks figures documenting walker behavior under the
+half-angle heading torque dtheta/dt = K*R*sin(ego/2). The figures sweep the
+turning gain K to show how it shapes the approach; with the corrected turning
+step (the rate is no longer wrapped before the Euler update) every
+configuration homes all 30/30 walkers, so the differences are in trajectory
+shape, not capture success:
 
-  1. 4 delta  targets, K=2   -- clean homing
-  2. 4 circle targets, K=2   -- clean homing
-  3. 4 delta  targets, K=10  -- strong-coupling wide orbits (artifact of large K
-                                + zero-radius point targets)
-  4. 2 delta  targets, K=2
-  5. 2 circle targets, K=2
+  - K=2  (default):  4 delta, 4 circle, 2 delta, 2 circle   
+  - K=4:             4 delta, 4 circle, 2 delta, 2 circle   
+  - K=6:             4 delta, 4 circle, 2 delta, 2 circle   
+  - K=10:            4 delta                                
 
 All: observer starts at (0,0) facing +x (east); cutoff warp a=0,b=pi with
-full (tied) weighting; std=0.5 angular noise; v=1, dt=0.1; 30 walkers.
-Titles are labelled with the K value.
+uniform weighting (angle_weight=None); std=0.1 angular noise; v=1, dt=0.1;
+30 walkers; seed 0. Titles are labelled with the K value. The K=4 and K=6
+figures use a clamped view so a single wide track does not blow up the axes.
 
-Run:  python walker_analysis/make_figures.py
+See README.md for the shared setup and K-series summary.
 """
 import os
 import sys
