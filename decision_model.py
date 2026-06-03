@@ -2693,8 +2693,9 @@ class NeuralBandModel:
                   t_Final=100):
         '''Turning rate based on the neural band model coherence value.
 
-        Runs dgamma_dt to steady state, applies the inverse neural-to-egocentric
-        mapping, and returns the Kuramoto-style torque K*R*sin(ego_angle/2).
+        Runs dgamma_dt to steady state and returns the Kuramoto-style torque
+        K*R*sin(Theta/2), where Theta = arg(gamma) is the neural consensus
+        angle and R = |gamma|.
 
         Parameters
         ----------
@@ -2722,21 +2723,26 @@ class NeuralBandModel:
             self.gamma = self.run_dgamma_dt(focal_angle=theta, focal_loc=focal_loc,
                                              init_gamma=None, t_Final=t_Final)
             gamma = self.gamma
-        # Convert from neural space to egocentric physical angle
-        ego_angle, R = self.convert_gamma(gamma)
-        # Half-angle torque: zero only when consensus is straight ahead
-        # (ego_angle=0), maximal when consensus is directly behind
-        # (ego_angle=+-pi). ego_angle is already in [-pi, pi] (from
-        # convert_gamma via np.angle). The +-pi point carries an intentional 
-        # +K*R <-> -K*R jump discontinuity (the physical left/right fork facing 
-        # away), resolved by roundoff/noise.
-        return self.K * R * np.sin(ego_angle/2)
+        # Half-angle torque in the NEURAL consensus angle Theta = arg(gamma).
+        # Theta is the canonical [-pi, pi] coordinate (the warp maps the
+        # facing-away heading to +-pi for every perception model), so the
+        # "/2" normalization is perception-model-independent and the torque
+        # is zero only when consensus is straight ahead (Theta=0) and maximal
+        # +-K*R when consensus is directly behind (Theta=+-pi). The +-pi point
+        # carries an intentional +K*R <-> -K*R jump discontinuity (the physical
+        # left/right fork facing away), resolved by roundoff/noise. We use
+        # arg(gamma) directly rather than its inverse-warped egocentric angle:
+        # the turning law is then a direct function of gamma* with no
+        # dependence on the perception model's inverse mapping.
+        Theta = np.angle(gamma)
+        R = np.abs(gamma)
+        return self.K * R * np.sin(Theta/2)
 
 
     def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
                          h=1e-6, tol=1e-8):
         '''Stability test using the full 3x3 coupled Jacobian of
-        (gamma_re, gamma_im, theta) where dtheta/dt = K*R*sin(ego_angle/2).
+        (gamma_re, gamma_im, theta) where dtheta/dt = K*R*sin(arg(gamma)/2).
 
         Built by central finite differences. Returns True iff every
         eigenvalue has real part < -tol. This is the physically correct
@@ -2752,8 +2758,8 @@ class NeuralBandModel:
             gamma = gr + 1j*gi
             dg = self.dgamma_dt(gamma=gamma, focal_angle=th,
                                 focal_loc=focal_loc)
-            ego_angle, R = self.convert_gamma(gamma)
-            dth = self.K * R * np.sin(ego_angle/2)
+            R = np.abs(gamma)
+            dth = self.K * R * np.sin(np.angle(gamma)/2)
             return np.array([dg.real, dg.imag, dth])
 
         J = np.zeros((3, 3))
@@ -3275,9 +3281,8 @@ class NeuralBandModel:
         heat map of these walks in 2D space.
 
         At each step, dgamma_dt is run to steady state to find the local
-        equilibrium, which is then mapped from neural angle space back to an
-        egocentric physical angle via the inverse neural mapping. The resulting
-        torque K*R*sin(ego_angle/2) drives the heading update.
+        equilibrium gamma; the resulting torque K*R*sin(arg(gamma)/2) in the
+        neural consensus angle arg(gamma) drives the heading update.
 
         The walker stops when it is within target_tol of a target surface,
         when its trajectory passes through a target, or after max_steps.

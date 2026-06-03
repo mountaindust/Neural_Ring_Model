@@ -8,7 +8,7 @@ Two noise modes:
 
   γ-Langevin only:
       dγ = -∇F̂(γ; θ) dt + sqrt(2 D) dW
-      dθ = K · R(γ) · sin(ego_angle(γ)/2) dt    [deterministic]
+      dθ = K · R(γ) · sin(arg(γ)/2) dt    [deterministic]
     Escape criterion: γ enters a small ball around a *different*
     γ-equilibrium of F̂(·; θ_s) (i.e. crosses a γ-saddle).
 
@@ -92,9 +92,9 @@ def _gamma_langevin_one(args):
         gamma_c = gr + 1j * gi
         R = abs(gamma_c)
         arg_g = np.angle(gamma_c)
-        ego = nbm.percep_model.get_neural_angle_inverse(arg_g)
-        # Half-angle torque law (matches NeuralBandModel.dtheta_dt).
-        theta = theta + K_val * R * np.sin(ego/2) * dt
+        # Half-angle torque law in the NEURAL consensus angle arg(gamma)
+        # (matches NeuralBandModel.dtheta_dt).
+        theta = theta + K_val * R * np.sin(arg_g/2) * dt
 
         # Escape: γ enters a ball around any other γ-equilibrium
         for j in range(len(other_re)):

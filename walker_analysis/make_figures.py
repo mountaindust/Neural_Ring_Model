@@ -1,7 +1,7 @@
-"""Representative walker figures for the half-angle (sin(ego/2)) model.
+"""Representative walker figures for the half-angle (sin(arg(gamma)/2)) model.
 
 Produces 13 heatmap-with-tracks figures documenting walker behavior under the
-half-angle heading torque dtheta/dt = K*R*sin(ego/2). The figures sweep the
+half-angle heading torque dtheta/dt = K*R*sin(arg(gamma)/2). The figures sweep the
 turning gain K to show how it shapes the approach; with the corrected turning
 step (the rate is no longer wrapped before the Euler update) every
 configuration homes all 30/30 walkers, so the differences are in trajectory

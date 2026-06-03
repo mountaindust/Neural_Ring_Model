@@ -87,8 +87,10 @@ def coupled_rhs(y, focal_loc):
     gr, gi, th = y
     gamma = gr + 1j * gi
     dg = nbm.dgamma_dt(gamma=gamma, focal_angle=th, focal_loc=focal_loc)
-    ego, R = nbm.convert_gamma(gamma)
-    return np.array([dg.real, dg.imag, K * R * np.sin(ego)])
+    R = np.abs(gamma)
+    # Half-angle torque in the neural consensus angle arg(gamma), matching
+    # NeuralBandModel.dtheta_dt / _discrim_coupled (K*R*sin(arg(gamma)/2)).
+    return np.array([dg.real, dg.imag, K * R * np.sin(np.angle(gamma) / 2)])
 
 
 # =========================================================================

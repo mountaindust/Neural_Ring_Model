@@ -37,6 +37,24 @@ step contributed each section.
 
 ## 0. Re-vetting under the K=2, sin(Θ*/2) torque law (2026-06-01)
 
+> **⚠️ PARTLY SUPERSEDED (2026-06-02): dθ/dt moved to the NEURAL angle.**
+> The torque law changed again, from `K·R·sin(ego/2)` (ego = inverse-warp of
+> arg(γ)) to **`K·R·sin(arg(γ)/2)`** — the half-angle law in the neural
+> consensus angle directly, dropping the inverse-warp mapping. The
+> basin_estimation/ torque sites (`theta_scan`, `basin_via_theta`, `mc_escape`)
+> were updated to match. Effect on the numbers in this file:
+> - **γ-side numbers are INVARIANT** (still correct): ΔF_γ, γ-saddles, γ-folds,
+>   F̂, SC-equilibrium locations, stable/unstable counts, and geometric basin
+>   widths bounded by saddles/folds. dγ/dt is untouched.
+> - **θ-side magnitudes are STALE — they rescale by the warp factor
+>   `W'(0)=ν(0)`** (the neural density at center): slow eigenvalues, V''(θ_s),
+>   θ-relaxation timescales, and θ-noise barrier heights ΔV. For the calibration
+>   warp here (vonmises k=0.55) ν(0)≈1.609, e.g. the slow eig at SC eq (0.5,0)
+>   moves −0.419 → −0.674 (×1.609, confirmed numerically). The branch-cut jump
+>   magnitude stays 2·K·R (arg=±π ⇒ sin(±π/2)=±1, warp-independent).
+> Not re-run in full: further dθ/dt changes are under consideration, so the
+> θ-side numbers will be refreshed once the turning law settles.
+
 **The original Steps 1–11 below were vetted under the old heading torque
 `dθ/dt = K·R·sin(ego)` with `K=1`. The model has since changed to the
 half-angle law `dθ/dt = K·R·sin(ego/2)` with default `K=2`** (see the

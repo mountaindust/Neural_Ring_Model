@@ -32,7 +32,7 @@ The model lives in three distinct angular coordinate frames. Keeping them straig
 The current/preferred model. γ lives in **egocentric/neural** space.
 
 - The coupling kernel *and* the pull direction in `dγ/dt` both use neural (warped egocentric) angles.
-- Walker torque: `dθ/dt = K·R·sin(ego_angle/2)` where `(ego_angle, R) = convert_gamma(γ)`. **Half-angle law** (see "Half-angle heading torque" below). No subtraction because `convert_gamma` applies the inverse neural mapping to get an egocentric angle already relative to the current heading. Neural angle 0 always corresponds to egocentric angle 0 (straight ahead). `ego_angle ∈ [−π, π]` (from `np.angle`), so it is already wrapped before halving. Default `K=2`.
+- Walker torque: `dθ/dt = K·R·sin(Θ/2)` where `Θ = arg(γ)` is the **neural** consensus angle and `R = |γ|`. **Half-angle law in the neural angle directly** (see "Half-angle heading torque" below) — no inverse-warp mapping. `Θ ∈ (−π, π]` (from `np.angle`) is already wrapped before halving; neural angle 0 is straight ahead (the SC equilibrium), `±π` is facing-away. Default `K=2`. (Earlier the torque used the inverse-warped egocentric angle, `sin(ego/2)` via `convert_gamma`; see the dated note in "Half-angle heading torque" for the change and its consequences.)
 - Self-consistent equilibria have γ = R + 0j (real positive): heading=consensus ⇒ egocentric consensus = 0 ⇒ Θ_neural = f(0) = 0 ⇒ γ = R + 0j.
 
 Key methods:
@@ -40,7 +40,7 @@ Key methods:
 - [`gamma_equilib`](decision_model.py#L2181) — γ-equilibrium finder at a fixed observer heading. *Not* the self-consistent finder.
 - [`run_dgamma_dt`](decision_model.py#L2360) — ODE to steady state.
 - [`dtheta_dt`](decision_model.py#L2411) — heading dynamics.
-- [`convert_gamma`](decision_model.py#L2339) — inverse neural mapping from γ to `(ego_angle, R)`.
+- [`convert_gamma`](decision_model.py#L2339) — inverse neural mapping from γ to `(ego_angle, R)`. Introspection only — **no longer on the torque path** (dθ/dt uses `arg(γ)` directly); kept for external analysis/diagnostics that want the egocentric direction.
 - [`plot_walkers`](decision_model.py#L2979) — SDE walker simulation.
 - [`plot_direction_mesh`](decision_model.py#L2549), [`plot_bifurcation_diagram`](decision_model.py#L2734).
 
@@ -81,7 +81,7 @@ Three approaches were considered for handling neural warping with self-consisten
 
 The allocentric consensus direction *is* `θ` (the heading) at a self-consistent equilibrium — no inverse mapping needed to recover the physical direction. `NBM.sc_equilib(focal_loc=..., stability_criterion=...)` returns `(allocentric_angles, stability_booleans)`. (`NBM.gamma_equilib` is a separate method that finds γ-eqs at a fixed observer heading; it is *not* the self-consistent finder.)
 
-For NBM, the mathematical proof that only `θ = n·π` self-consistent equilibria exist for turning: `sin(power_inverse(Θ)) = 0` requires `Θ = n·π`. Only `n=0` is stable for turning; `n=±1` corresponds to facing directly *away* from consensus.
+For NBM, the SC turning equilibria are where `dθ/dt = K·R·sin(Θ/2) = 0` with `Θ = arg(γ)` the neural consensus angle: the smooth zero is `Θ = 0` (heading = consensus, stable); `Θ = ±π` (facing directly *away*) is the intentional branch-cut fork, not a smooth equilibrium.
 
 ## Solver architecture
 
@@ -159,18 +159,20 @@ If a walker exhausts `max_steps` (default 1500) without finding a target, a `war
 
 Default stability test is the **3×3 coupled Jacobian** on `(γ_re, γ_im, θ)`, built numerically with `h=1e-6`, `tol=1e-8`.
 
-- NBM uses `dθ/dt = K·R·sin(ego_angle/2)` (via `convert_gamma`).
+- NBM uses `dθ/dt = K·R·sin(arg(γ)/2)` (the neural consensus angle directly).
 - IEM uses `dθ/dt = K·|γ|·sin(convert_angles(angle(γ) − θ)/2)`.
 
 Implemented in [`NBM._discrim_coupled`](decision_model.py#L2449) and [`IEM._discrim_coupled`](decision_model.py#L3565). `sc_equilib`, `gamma_equilib`, `_count_stable_at`, `_process_point`, `plot_direction_mesh`, and `plot_bifurcation_diagram` all accept `stability_criterion='coupled'` (default) or `'discrim_a'` (legacy 2D test, kept for side-by-side comparison plots). (NBM only — `IEM.sc_equilib` and `IEM.gamma_equilib` return just gammas without a stability list; the IEM plot/count helpers do their own stability test.)
 
 **Why the coupled criterion is correct:** for self-consistent equilibria, the physically meaningful question is stability of the **coupled 3D system**, not the 2D γ subsystem at fixed `focal_angle`. The two criteria disagree wherever the heading dimension contributes a positive eigenvalue while the γ subsystem alone is stable.
 
-**Self-consistent equilibria are exactly equilibria of the 3-eq system.** Proof: γ = R+0j gives `angle(γ) = 0`, so `ego_angle = inv_neural(0) = 0` (integral neural map sends 0→0 by symmetry), so `dθ/dt = K·R·sin(0/2) = 0`. Combined with `dγ/dt = 0` from the search, all three RHS components vanish. So "saddles" by the coupled criterion are real 3-eq equilibria with positive Jacobian eigenvalues, not numerical artifacts.
+**Self-consistent equilibria are exactly equilibria of the 3-eq system.** Proof: γ = R+0j gives `arg(γ) = 0`, so `dθ/dt = K·R·sin(0/2) = 0`. Combined with `dγ/dt = 0` from the search, all three RHS components vanish. So "saddles" by the coupled criterion are real 3-eq equilibria with positive Jacobian eigenvalues, not numerical artifacts.
 
-### Half-angle heading torque (`sin(ego/2)`) and the `K=2` default
+### Half-angle heading torque and the `K=2` default
 
-The heading torque is the **half-angle** law `dθ/dt = K·R·sin(ego/2)` (NBM) / `K·|γ|·sin(ego/2)` with `ego = convert_angles(angle(γ)−θ)` (IEM). Rationale: a walker that has committed to a neural direction should turn *faster* the farther that direction is from its heading. `sin(ego)` was zero both straight-ahead (ego=0, the wanted SC equilibrium) and directly-behind (ego=±π) — the behind-zero was a spurious "dead zone" that let overshooting walkers wander off. `sin(ego/2)` is zero only at ego=0 and maximal at the facing-away point, so a walker facing away turns hard back toward consensus. There is an intentional **jump discontinuity** at ego=±π (torque flips `+K·R ↔ −K·R`), a real left/right fork resolved by roundoff/noise; the existing Step-7 `|Δf|` detector treats it as a basin-boundary event.
+The heading torque is the **half-angle** law `dθ/dt = K·R·sin(arg(γ)/2)` (NBM — the neural consensus angle) / `K·|γ|·sin(ego/2)` with `ego = convert_angles(angle(γ)−θ)` (IEM — physical angle difference). Rationale: a walker that has committed to a neural direction should turn *faster* the farther that direction is from its heading. `sin(ego)` was zero both straight-ahead (ego=0, the wanted SC equilibrium) and directly-behind (ego=±π) — the behind-zero was a spurious "dead zone" that let overshooting walkers wander off. `sin(ego/2)` is zero only at ego=0 and maximal at the facing-away point, so a walker facing away turns hard back toward consensus. There is an intentional **jump discontinuity** at ego=±π (torque flips `+K·R ↔ −K·R`), a real left/right fork resolved by roundoff/noise; the existing Step-7 `|Δf|` detector treats it as a basin-boundary event.
+
+**Update (2026-06-02) — NBM torque moved to the neural angle.** NBM now uses the neural consensus angle `arg(γ)` directly (`sin(arg(γ)/2)`), dropping the inverse-warp mapping `ego = get_neural_angle_inverse(arg(γ))` that the old `sin(ego/2)` form applied. *Why:* in neural coordinates the facing-away heading is always `±π`, so the `÷2` normalization (zero ahead, maximal `±K·R` facing away) is **perception-model-independent** — the old ego form's effective normalization was instead the warp-dependent `ν(0)=W'(0)` (the neural density at center; ≈ "÷b" for a cutoff of half-width `b`). It also makes dθ/dt a direct function of γ with no ill-conditioned inverse near `±π`. *Invariant under the change:* SC-equilibrium locations, stability classification, stable/unstable counts, saddle-node curves, and the branch-cut jump magnitude `2·K·R` — the change rescales only the θ-row of the coupled Jacobian by the positive constant `ν(0)`, preserving eigenvalue signs. *Changed (θ-side magnitudes):* slow eigenvalues, `V''(θ_s)`, θ-relaxation timescales, θ-noise barriers `ΔV`, and Hopf-curve fine structure all rescale by `ν(0)` under a non-identity warp (e.g. vonmises k=0.55: ×1.609, confirmed). **dθ/dt is phenomenological and actively evolving:** treat θ-side calibration numbers in [basin_estimation/findings.md](basin_estimation/findings.md) and [VM_bifurcation_old_dtheta/](VM_bifurcation_old_dtheta/VERDICT.md) as needing a re-run to be current; γ-side outputs (F̂, ΔF_γ, γ-folds, basin counts/widths) are turning-law-invariant and stand. IEM is unchanged (its `ego` is a physical angle difference, not warped). The `K=2` invariance note below concerns the earlier `sin(ego)`→`sin(ego/2)` half-angle change and still holds.
 
 **Default `K` was raised 1 → 2.** `sin(x/2)` has slope ½ at x=0 vs 1 for `sin(x)`, so K=2 restores the near-front turning gain. This is exact, not cosmetic: **at every SC equilibrium (ego=0) the K-doubling cancels the ½ in the full 3×3 coupled Jacobian** (the surviving partials are `K·R·cos(0)·½·∂ego/∂·`; the `sin(0)=0` terms drop), so eigenvalues — and therefore stability classification, Hopf and saddle-node locations, and every `plot_bifurcation_diagram` stable-count — are **identical to the old `K=1, sin(ego)` model**. Verified two ways in [tests/test_half_angle_torque.py](tests/test_half_angle_torque.py): a per-eq Jacobian-eigenvalue equality test, and an end-to-end stable-count raster that is bit-identical before/after. Only the *global* flow (walker trajectories, basin shapes off ego=0) changes. The IEM `convert_angles` wrap is load-bearing: `sin(x/2)` is 4π-periodic, so omitting it would make the torque wrong across 2π boundaries (regression-tested).
 
@@ -237,7 +239,7 @@ End-to-end vetting of the basin-estimation machinery for the two-panel bifurcati
 
 **Load-bearing facts** (full detail in findings.md):
 - **ΔF_γ** — the F̂-barrier from a stable to a γ-saddle at fixed θ — is the γ-noise robustness scalar, MC-validated against Kramers within a factor of 2, **but only in multistable cells**; 1-stable cells have no second basin, so the deliverable there is a direction arrow + optional stiffness glyph, not a robustness color (§6, §8, §13.6). F̂ is Hamiltonian/Glauber-derived, independent of dθ/dt.
-- **Basin boundaries** come in four kinds: smooth saddle, γ-fold (γ-branch jump), perception-collapse (R→0 under tight cutoffs), and — under sin(ego/2) — a **branch-cut** at the facing-away heading (f jumps ±K·R as γ_eq crosses the negative real axis). The first three are γ-side / turning-law-invariant; the branch-cut's existence is set by dθ/dt at the antipode (§4, §7).
+- **Basin boundaries** come in four kinds: smooth saddle, γ-fold (γ-branch jump), perception-collapse (R→0 under tight cutoffs), and — under the half-angle law — a **branch-cut** at the facing-away heading (f jumps ±K·R as γ_eq crosses the negative real axis). The first three are γ-side / turning-law-invariant; the branch-cut's existence is set by dθ/dt at the antipode (§4, §7).
 - **Cost**: ~4.2 min parallel (32 cores) for a 41×41 grid with basins; multistable cells dominate, 1-stable/Hopf cells are nearly free (§11).
 
 **Open, and dθ/dt-dependent.** dγ/dt is Hamiltonian-derived; dθ/dt is a phenomenological turning law (K and possibly its form may still move). This decouples cleanly: the γ-side outputs (slow manifold, γ-folds, ΔF_γ, SC-eq locations, basin counts/widths bounded by saddles/folds) are insulated from the turning-law uncertainty, as is γ-noise robustness. What stays tied to dθ/dt: θ-noise barrier magnitudes, and two specific open items — (a) whether θ-noise (the `std` knob in `plot_walkers`) is a faithful proxy for physical γ-noise (Glauber T, 1/N), deferred from Step 8 and only resolvable once dθ/dt is fixed (§13.4); (b) the θ-noise basin "depth" at the branch-cut/antipode, which needs its own first-passage treatment (the branch-cut is a repelling fork, not a Kramers barrier) once dθ/dt is fixed.

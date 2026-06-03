@@ -26,7 +26,7 @@ Three types of basin-boundary events are recognized:
       and saddles.
 
   (d) Branch-cut f-jump — under the half-angle torque law
-      f = K·R·sin(ego/2), wherever γ_eq crosses the negative real
+      f = K·R·sin(arg(γ)/2), wherever γ_eq crosses the negative real
       axis (arg(γ_eq) through ±π, i.e. consensus directly behind the
       observer), f jumps from +K·R to −K·R while γ_eq itself moves
       continuously (|Δγ| stays at typical scale; only arg flips sign
@@ -43,7 +43,8 @@ NOTE on the ±π heading under the half-angle law:
   cut. Under the OLD sin(ego) torque, sin(±π)≈0 killed the torque, so a
   STATIC scan saw a normal SC saddle at θ=±π (R near 1, arg≈±π, |f|≈0)
   and the trap was indistinguishable from a saddle. Under the CURRENT
-  sin(ego/2) law this is no longer true: at θ=±π, sin(±π/2)=±1, so |f|
+  half-angle law f=K·R·sin(arg(γ)/2) this is no longer true: at θ=±π,
+  sin(±π/2)=±1, so |f|
   is *maximal* (≈K·R), not zero, and the static scan now sees the
   type-(d) branch-cut f-jump there instead of a saddle. The half-angle
   law thus removed the static torque dead-zone at the facing-away

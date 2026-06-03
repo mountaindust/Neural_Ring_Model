@@ -1,5 +1,25 @@
 # Bifurcation diagram verdict: VM k=0.55, two circle targets
 
+> **⚠️ STALE — predates the current dθ/dt turning law.** This directory
+> (formerly `VM_bifurcations/`) was produced under an **older heading torque**
+> and the diagnostic scripts here still reconstruct dθ/dt with the stale form
+> `K·R·sin(ego)` / `K·R·sin(ego/2)` using the inverse-warped egocentric angle.
+> The model has since moved to `dθ/dt = K·R·sin(arg(γ)/2)` — the half-angle law
+> in the **neural** consensus angle (no inverse-warp mapping). Two caveats for
+> anyone reading these results:
+>
+> 1. **The scripts' torque reconstructions are not updated** (kept as-is, hence
+>    the directory rename to `_old_dtheta`). They no longer match
+>    `NeuralBandModel.dtheta_dt` / `_discrim_coupled`.
+> 2. **The numerical results below have not been re-run since the `sin(ego)` →
+>    `sin(ego/2)` half-angle change**, let alone the later `ego → arg(γ)`
+>    change. The SC-equilibrium locations and stable/unstable *counts* are
+>    provably invariant under both changes (sign-preserving), but the
+>    **Hopf-island fine structure** (the (2.1, ±2.45) loop, limit-cycle period,
+>    panel-(d) phase portraits) depends on the coupled 3×3 magnitudes and may
+>    shift. Treat the Hopf/limit-cycle specifics here as indicative, not
+>    current; regenerate against the new law before relying on them.
+
 ## TL;DR
 
 When the standard self-consistent bifurcation diagram is computed with

@@ -1,14 +1,17 @@
-"""Tests for the half-angle heading-torque law dtheta/dt = K*R*sin(ego/2).
+"""Tests for the half-angle heading-torque law (NBM: dtheta/dt =
+K*R*sin(arg(gamma)/2) in the neural consensus angle; IEM: K*|gamma|*sin(ego/2)
+in the physical angle difference).
 
 Covers:
-  - NBM torque shape: zero only at ego=0, monotone, +-K*R at ego->+-pi, and the
-    intentional 2*K*R jump across the +-pi branch cut.
+  - NBM torque shape: zero only at arg(gamma)=0, monotone, +-K*R at
+    arg(gamma)->+-pi, and the intentional 2*K*R jump across the +-pi branch cut.
+    (The NBM shape tests use the identity warp, where ego == arg(gamma).)
   - IEM torque shape + the convert_angles wrapping regression (sin(x/2) is
     4*pi-periodic, so the egocentric argument MUST be wrapped before halving).
-  - Bifurcation invariance: doubling K exactly cancels the 1/2 from sin(ego/2)
-    in the coupled 3x3 Jacobian at self-consistent equilibria, so eigenvalues
-    (and hence stability / Hopf / SN structure) are unchanged vs the old
-    K=1 * sin(ego) law.
+  - Bifurcation invariance: doubling K exactly cancels the 1/2 from
+    sin(arg(gamma)/2) in the coupled 3x3 Jacobian at self-consistent equilibria,
+    so eigenvalues (and hence stability / Hopf / SN structure) are unchanged vs
+    a K=1 * sin(arg(gamma)) full-angle law.
 """
 import os
 import sys
@@ -124,15 +127,17 @@ def test_iem_torque_2pi_invariance():
 # Bifurcation invariance: K-doubling cancels the 1/2 at SC equilibria
 # ---------------------------------------------------------------------------
 def _coupled_jac(nbm, gamma_star, theta, half_angle, h=1e-6):
-    """Build the 3x3 coupled Jacobian using either sin(ego) or sin(ego/2)."""
+    """Build the 3x3 coupled Jacobian using either sin(arg(gamma)) or
+    sin(arg(gamma)/2) (the neural consensus angle, matching the current
+    NBM torque)."""
     gr0, gi0, th0 = gamma_star.real, gamma_star.imag, float(theta)
 
     def rhs(gr, gi, th):
         gamma = gr + 1j*gi
         dg = nbm.dgamma_dt(gamma=gamma, focal_angle=th,
                            focal_loc=nbm.percep_model.focal_loc)
-        ego, R = nbm.convert_gamma(gamma)
-        s = np.sin(ego/2) if half_angle else np.sin(ego)
+        arg, R = np.angle(gamma), np.abs(gamma)
+        s = np.sin(arg/2) if half_angle else np.sin(arg)
         return np.array([dg.real, dg.imag, nbm.K * R * s])
 
     J = np.zeros((3, 3))

@@ -9,7 +9,7 @@ Provides the function `theta_scan` (a reusable building block for Steps
 At each θ on a circular mesh, integrate dγ/dt to steady state with γ
 initialized from the previous θ's γ_eq (warm-start). This traces the
 γ-branch that's continuous in θ — exactly the slow manifold the walker
-follows. Returns θ, γ_eq, R, ego_angle, f(θ) = K · R · sin(ego_angle/2).
+follows. Returns θ, γ_eq, R, ego_angle, f(θ) = K · R · sin(arg(γ_eq)/2).
 
 Tests on 1stable_far (focal_loc=(0.5, 0)):
   T1. f(θ) has exactly one stable zero and one unstable zero on S¹.
@@ -100,8 +100,8 @@ def theta_scan(focal_loc, theta_start, gamma_start, n_mesh=200,
         theta : (n_mesh,) θ values in (-π, π], in scan order
         gamma_eq : (n_mesh,) complex γ_eq(θ)
         R : (n_mesh,) |γ_eq|
-        ego_angle : (n_mesh,) inverse neural mapping of arg(γ_eq)
-        f : (n_mesh,) K · R · sin(ego_angle/2), the reduced θ-flow
+        ego_angle : (n_mesh,) inverse neural mapping of arg(γ_eq) (diagnostic)
+        f : (n_mesh,) K · R · sin(arg(γ_eq)/2), the reduced θ-flow
     """
     sign = 1 if direction == 'ccw' else -1
     raw = theta_start + sign * np.linspace(0, 2 * np.pi, n_mesh + 1)[:-1]
@@ -115,12 +115,15 @@ def theta_scan(focal_loc, theta_start, gamma_start, n_mesh=200,
         gammas[i] = current
 
     R = np.abs(gammas)
+    arg_gamma = np.angle(gammas)
+    # ego_angle retained only as a physical-readout diagnostic (the egocentric
+    # consensus direction); it no longer drives f.
     ego_angle = np.array([
-        nbm.percep_model.get_neural_angle_inverse(np.angle(g))
-        for g in gammas])
-    # Half-angle torque law (matches NeuralBandModel.dtheta_dt). The +-pi
-    # branch cut in ego_angle is the intentional jump discontinuity in f.
-    f = nbm.K * R * np.sin(ego_angle/2)
+        nbm.percep_model.get_neural_angle_inverse(a) for a in arg_gamma])
+    # Half-angle torque law in the NEURAL consensus angle arg(gamma) (matches
+    # NeuralBandModel.dtheta_dt). The +-pi branch cut is the intentional jump
+    # discontinuity in f.
+    f = nbm.K * R * np.sin(arg_gamma/2)
     return {
         'theta': thetas,
         'gamma_eq': gammas,
@@ -267,7 +270,7 @@ if __name__ == "__main__":
 
     axes[2].plot(deg, f_sorted, 'k.-', markersize=3)
     axes[2].axhline(0, color='gray', lw=0.5)
-    axes[2].set_ylabel('f(θ) = K·R·sin(ego/2)')
+    axes[2].set_ylabel('f(θ) = K·R·sin(arg(γ)/2)')
     axes[2].set_xlabel('θ [°]')
     axes[2].grid(alpha=0.3)
     for tz, tp in zeros:
