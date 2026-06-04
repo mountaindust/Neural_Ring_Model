@@ -286,3 +286,73 @@ def test_gate_quiets_committed_walker():
     s_const = _final_spread(_identity_nbm, std=0.75*np.pi, noise_exp=0)
     s_gated = _final_spread(_identity_nbm, std=0.75*np.pi, noise_exp=2)
     assert s_gated < s_const
+
+
+# ---------------------------------------------------------------------------
+# cos(Theta/2) heading-aligned noise modulation (noise_exp != 0)
+# ---------------------------------------------------------------------------
+def _offaxis_model():
+    """Two symmetric delta targets due east, identity warp (neural == ego)."""
+    targets = dm.Targets(locs=np.array([(3.0, 1.0), (3.0, -1.0)]), geom_name=None)
+    pm = dm.PerceptionModel(targets=targets, focal_loc=(0.0, 0.0),
+                            focal_angle=0.0, neural_angle_dist=None,
+                            angle_weight=None)
+    return dm.NeuralBandModel(percep_model=pm, T=0.2, K=2)
+
+
+def _one_step_loc(nbm, std, noise_exp, seed, start_angle, dt=0.1, v=1):
+    """Walker's actual (x,y) after a single step (the second track point)."""
+    nbm.rng = np.random.default_rng(seed); nbm.gamma = 0 + 0j
+    fig, ax = plt.subplots()
+    nbm.plot_walkers(dt=dt, v=v, std=std, walk_std=0.5*np.pi, noise_exp=noise_exp,
+                     repetitions=1, max_steps=1, start_loc=(0.0, 0.0),
+                     start_angle=start_angle, plot_tracks=True, ax=ax)
+    line = ax.get_lines()[-1]
+    loc = np.array([line.get_xdata()[1], line.get_ydata()[1]])
+    plt.close(fig)
+    return loc
+
+
+def _predict_loc(nbm, std, noise_exp, seed, start_angle, with_cos, dt=0.1, v=1):
+    """Predicted (x,y) after one step from the KNOWN first RNG draw and
+    sigma_eff = std*(1-R)^noise_exp * [cos(Theta/2) if with_cos]."""
+    nbm.gamma = 0 + 0j
+    dth = nbm.dtheta_dt(theta=start_angle)              # relaxes nbm.gamma
+    R = abs(nbm.gamma); Theta = np.angle(nbm.gamma)
+    sig = std * max(0.0, 1.0 - R) ** noise_exp
+    if with_cos and noise_exp != 0 and R > 0.0:
+        sig *= np.cos(Theta / 2)
+    z0 = np.random.default_rng(seed).normal()
+    th = start_angle + dth * dt + sig * z0 * np.sqrt(dt)
+    return Theta, R, v * dt * np.array([np.cos(th), np.sin(th)])
+
+
+def test_cos_factor_applied_for_nonzero_noise_exp():
+    """At noise_exp!=0 the visible noise carries an exact cos(Theta/2) factor.
+    Off-axis heading => Theta!=0, R<1, so cos(Theta/2)<1 with the gate open."""
+    nbm = _offaxis_model()
+    ang = np.pi / 2                       # face north; consensus (east) is off-axis
+    Theta, R, pred = _predict_loc(nbm, 2.0, 2, 1, ang, with_cos=True)
+    assert abs(Theta) > 0.5 and R < 0.99          # meaningful cos<1, gate open
+    act = _one_step_loc(nbm, 2.0, 2, 1, ang)
+    assert np.allclose(pred, act, atol=1e-12)     # sigma_eff includes cos, exactly
+    # omitting the cos factor must NOT reproduce the step
+    _, _, pred_nocos = _predict_loc(nbm, 2.0, 2, 1, ang, with_cos=False)
+    assert not np.allclose(pred_nocos, act, atol=1e-9)
+
+
+def test_no_cos_factor_in_constant_mode():
+    """noise_exp=0 (constant mode) has NO cos factor: the plain sigma*dW step."""
+    nbm = _offaxis_model()
+    ang = np.pi / 2
+    _, _, pred = _predict_loc(nbm, 2.0, 0, 1, ang, with_cos=False)
+    act = _one_step_loc(nbm, 2.0, 0, 1, ang)
+    assert np.allclose(pred, act, atol=1e-12)
+
+
+def test_walk_std_default_is_half_pi():
+    """The walk_std signature default moved 0.75pi -> 0.5pi for both models."""
+    import inspect
+    for cls in (dm.NeuralBandModel, dm.IsingExtModel):
+        d = inspect.signature(cls.plot_walkers).parameters['walk_std'].default
+        assert d == pytest.approx(0.5 * np.pi)

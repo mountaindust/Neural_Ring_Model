@@ -3269,7 +3269,7 @@ class NeuralBandModel:
             return ax
 
 
-    def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.75*np.pi,
+    def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
                      noise_exp=0, repetitions=20, max_steps=1500, start_loc=None,
                      start_angle=None, target_tol=None, plot_tracks=False,
                      ax=None, title=None, wb_plot=False):
@@ -3309,17 +3309,23 @@ class NeuralBandModel:
             (1-R)^noise_exp gate tames once the walker commits). std=0 makes the
             VISIBLE steps deterministic. (Blind steps use walk_std, not std --
             the two are orthogonal; see walk_std.)
-        walk_std : float, optional (default 0.75*pi)
+        walk_std : float, optional (default 0.5*pi)
             Random-walk intensity used on BLIND steps (no targets visible: gamma
             collapses to 0, deterministic torque vanishes). Set INDEPENDENTLY of
             std so a lost walker re-acquires even in gentle constant-noise mode.
             walk_std=0 freezes the blind drift (deterministic search-off). Fully
-            deterministic walk: std=0 AND walk_std=0.
+            deterministic walk: std=0 AND walk_std=0. The 0.5*pi default makes the
+            per-unit-time heading-change 2-sigma span the full circle (+-pi).
         noise_exp : float, optional (default 0)
-            Gate exponent p in the VISIBLE-step noise amplitude std*(1-R)^p. p=0
-            recovers a constant sigma*dW (no gating). p>0 interpolates between a
-            random walk (R->0, undecided) and low-noise homing (R->1, committed):
-            larger p closes the gate faster.
+            Gate exponent p in the VISIBLE-step noise amplitude
+            std*(1-R)^p*cos(Theta/2), where Theta is the consensus angle relative
+            to heading (the torque's angle). p=0 recovers a constant sigma*dW (no
+            gating, no cos factor). p>0 interpolates between a random walk
+            (R->0, undecided) and low-noise homing (R->1, committed) -- larger p
+            closes the gate faster -- and the cos(Theta/2) factor (applied only
+            for p!=0) zeros the noise when facing away from consensus (Theta=+-pi)
+            and leaves it full facing consensus (Theta=0), in quadrature with the
+            sin(Theta/2) torque so corrective swings back are noise-free.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -3399,6 +3405,17 @@ class NeuralBandModel:
                     # when R->0 (undecided) and low-noise homing when R->1
                     # (committed); noise_exp=0 recovers a constant sigma*dW.
                     sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                    if noise_exp != 0 and R > 0.0:
+                        # Heading-aligned modulation cos(Theta/2), Theta = the
+                        # torque's angle (NBM: arg(gamma); IEM: the egocentric
+                        # consensus). Derived from dtheta = K*R*sin(Theta/2):
+                        #   cos(Theta/2) = sqrt(1 - (dtheta/(K*R))^2)
+                        # (the +root; Theta/2 in (-pi/2, pi/2]). Full noise facing
+                        # consensus (Theta=0), zero facing away (Theta=+-pi); in
+                        # quadrature with the torque so corrective swings back are
+                        # noise-free while exploration near course is preserved.
+                        s = dtheta / (self.K * R)
+                        sigma_eff *= np.sqrt(max(0.0, 1.0 - s * s))
                 # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
                 # here (only the resulting heading is wrapped on assignment below).
                 # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
@@ -4458,7 +4475,7 @@ class IsingExtModel:
             return ax
         
 
-    def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.75*np.pi,
+    def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
                      noise_exp=0, repetitions=20, max_steps=1500, start_loc=None,
                      start_angle=None, target_tol=None, plot_tracks=False,
                      ax=None, title=None, wb_plot=False):
@@ -4494,17 +4511,23 @@ class IsingExtModel:
             (1-R)^noise_exp gate tames once the walker commits). std=0 makes the
             VISIBLE steps deterministic. (Blind steps use walk_std, not std --
             the two are orthogonal; see walk_std.)
-        walk_std : float, optional (default 0.75*pi)
+        walk_std : float, optional (default 0.5*pi)
             Random-walk intensity used on BLIND steps (no targets visible: gamma
             collapses to 0, deterministic torque vanishes). Set INDEPENDENTLY of
             std so a lost walker re-acquires even in gentle constant-noise mode.
             walk_std=0 freezes the blind drift (deterministic search-off). Fully
-            deterministic walk: std=0 AND walk_std=0.
+            deterministic walk: std=0 AND walk_std=0. The 0.5*pi default makes the
+            per-unit-time heading-change 2-sigma span the full circle (+-pi).
         noise_exp : float, optional (default 0)
-            Gate exponent p in the VISIBLE-step noise amplitude std*(1-R)^p. p=0
-            recovers a constant sigma*dW (no gating). p>0 interpolates between a
-            random walk (R->0, undecided) and low-noise homing (R->1, committed):
-            larger p closes the gate faster.
+            Gate exponent p in the VISIBLE-step noise amplitude
+            std*(1-R)^p*cos(Theta/2), where Theta is the consensus angle relative
+            to heading (the torque's angle). p=0 recovers a constant sigma*dW (no
+            gating, no cos factor). p>0 interpolates between a random walk
+            (R->0, undecided) and low-noise homing (R->1, committed) -- larger p
+            closes the gate faster -- and the cos(Theta/2) factor (applied only
+            for p!=0) zeros the noise when facing away from consensus (Theta=+-pi)
+            and leaves it full facing consensus (Theta=0), in quadrature with the
+            sin(Theta/2) torque so corrective swings back are noise-free.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -4582,6 +4605,17 @@ class IsingExtModel:
                     # when R->0 (undecided) and low-noise homing when R->1
                     # (committed); noise_exp=0 recovers a constant sigma*dW.
                     sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                    if noise_exp != 0 and R > 0.0:
+                        # Heading-aligned modulation cos(Theta/2), Theta = the
+                        # torque's angle (NBM: arg(gamma); IEM: the egocentric
+                        # consensus). Derived from dtheta = K*R*sin(Theta/2):
+                        #   cos(Theta/2) = sqrt(1 - (dtheta/(K*R))^2)
+                        # (the +root; Theta/2 in (-pi/2, pi/2]). Full noise facing
+                        # consensus (Theta=0), zero facing away (Theta=+-pi); in
+                        # quadrature with the torque so corrective swings back are
+                        # noise-free while exploration near course is preserved.
+                        s = dtheta / (self.K * R)
+                        sigma_eff *= np.sqrt(max(0.0, 1.0 - s * s))
                 # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
                 # here (only the resulting heading is wrapped on assignment below).
                 # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
