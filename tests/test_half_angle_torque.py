@@ -198,13 +198,13 @@ def test_blind_spot_detection():
     assert neur.size == 0
 
 
-def _single_track(nbm, std, *, noise_exp=0, seed=0, max_steps=300,
-                  start_angle=-np.pi/2):
+def _single_track(nbm, std, *, walk_std=0.75*np.pi, noise_exp=0, seed=0,
+                  max_steps=300, start_angle=-np.pi/2):
     """Run one walker and return its (x, y) trajectory."""
     nbm.rng = np.random.default_rng(seed)
     fig, ax = plt.subplots()
-    nbm.plot_walkers(dt=0.1, v=1, std=std, noise_exp=noise_exp, repetitions=1,
-                     max_steps=max_steps, start_loc=(0.0, 0.0),
+    nbm.plot_walkers(dt=0.1, v=1, std=std, walk_std=walk_std, noise_exp=noise_exp,
+                     repetitions=1, max_steps=max_steps, start_loc=(0.0, 0.0),
                      start_angle=start_angle, plot_tracks=True, ax=ax)
     line = ax.get_lines()[-1]
     xd, yd = line.get_xdata(), line.get_ydata()
@@ -213,17 +213,17 @@ def _single_track(nbm, std, *, noise_exp=0, seed=0, max_steps=300,
 
 
 def test_blind_spot_frozen_drifts_straight():
-    """std=0: a blind walker keeps its heading and walks off (deterministic)."""
-    xd, yd = _single_track(_blind_model(), std=0.0)
+    """walk_std=0: a blind walker keeps its heading and walks off (frozen)."""
+    xd, yd = _single_track(_blind_model(), std=0.0, walk_std=0.0)
     # heading frozen pointing south: x stays put, y marches negative
     assert np.std(xd) < 1e-6
     assert yd[-1] < -10            # walked far away from the (0,3) target
 
 
 def test_blind_spot_search_escapes():
-    """A blind walker searches at max(std, 0.75*pi) -- the fixed floor decoupled
-    from the committed std -- reorients, re-acquires, and is captured. Uses the
-    DEFAULT constant-noise mode (std=None -> 0.1, noise_exp=0): without the floor
+    """A blind walker searches at walk_std -- set independently of the committed
+    std -- reorients, re-acquires, and is captured. Uses the DEFAULT constant-
+    noise mode (std=None -> 0.1, noise_exp=0): without the independent walk_std
     the blind search would be a feeble 0.1 and the walker would march off."""
     max_steps = 400
     xd, yd = _single_track(_blind_model(), std=None, noise_exp=0,
@@ -234,6 +234,21 @@ def test_blind_spot_search_escapes():
     assert len(xd) - 1 < max_steps
     # ended at the target (surface at y = 3 - 1 = 2), not drifting away south
     assert yd[-1] > 1.0
+
+
+def test_walk_std_orthogonal_to_std():
+    """walk_std and std are independent: walk_std=0 freezes the blind search
+    even when the committed std>0 (the walker, always blind here, marches off);
+    and a blind walker still searches under the default-constant mode regardless
+    of the small committed std."""
+    # std>0 but walk_std=0 -> blind frozen (marches straight off)
+    xd, yd = _single_track(_blind_model(), std=0.5, walk_std=0.0)
+    assert np.std(xd) < 1e-6
+    assert yd[-1] < -10
+    # std small (gentle constant) but walk_std>0 -> blind searches and escapes
+    xd2, yd2 = _single_track(_blind_model(), std=0.1, walk_std=0.75*np.pi,
+                             max_steps=400)
+    assert np.std(xd2) > 1e-3 and yd2[-1] > 1.0
 
 
 # ---------------------------------------------------------------------------
