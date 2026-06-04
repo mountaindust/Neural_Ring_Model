@@ -300,12 +300,12 @@ def _offaxis_model():
     return dm.NeuralBandModel(percep_model=pm, T=0.2, K=2)
 
 
-def _one_step_loc(nbm, std, noise_exp, seed, start_angle, dt=0.1, v=1):
+def _one_step_loc(nbm, std, noise_exp, seed, start_angle, R_exp=1, dt=0.1, v=1):
     """Walker's actual (x,y) after a single step (the second track point)."""
     nbm.rng = np.random.default_rng(seed); nbm.gamma = 0 + 0j
     fig, ax = plt.subplots()
     nbm.plot_walkers(dt=dt, v=v, std=std, walk_std=0.5*np.pi, noise_exp=noise_exp,
-                     repetitions=1, max_steps=1, start_loc=(0.0, 0.0),
+                     R_exp=R_exp, repetitions=1, max_steps=1, start_loc=(0.0, 0.0),
                      start_angle=start_angle, plot_tracks=True, ax=ax)
     line = ax.get_lines()[-1]
     loc = np.array([line.get_xdata()[1], line.get_ydata()[1]])
@@ -313,17 +313,20 @@ def _one_step_loc(nbm, std, noise_exp, seed, start_angle, dt=0.1, v=1):
     return loc
 
 
-def _predict_loc(nbm, std, noise_exp, seed, start_angle, with_cos, dt=0.1, v=1):
-    """Predicted (x,y) after one step from the KNOWN first RNG draw and
-    sigma_eff = std*(1-R)^noise_exp * [cos(Theta/2) if with_cos]."""
+def _predict_loc(nbm, std, noise_exp, seed, start_angle, with_cos, R_exp=1,
+                 dt=0.1, v=1):
+    """Predicted (x,y) after one step from the KNOWN first RNG draw, with drift
+    K*R^R_exp*sin(Theta/2) and sigma_eff = std*(1-R)^noise_exp*[cos(Theta/2)]."""
     nbm.gamma = 0 + 0j
     dth = nbm.dtheta_dt(theta=start_angle)              # relaxes nbm.gamma
     R = abs(nbm.gamma); Theta = np.angle(nbm.gamma)
+    s = dth / (nbm.K * R) if R > 0 else 0.0             # = sin(Theta/2)
+    drift = nbm.K * R ** R_exp * s if R_exp != 1 else dth
     sig = std * max(0.0, 1.0 - R) ** noise_exp
     if with_cos and noise_exp != 0 and R > 0.0:
         sig *= np.cos(Theta / 2)
     z0 = np.random.default_rng(seed).normal()
-    th = start_angle + dth * dt + sig * z0 * np.sqrt(dt)
+    th = start_angle + drift * dt + sig * z0 * np.sqrt(dt)
     return Theta, R, v * dt * np.array([np.cos(th), np.sin(th)])
 
 
@@ -356,3 +359,33 @@ def test_walk_std_default_is_half_pi():
     for cls in (dm.NeuralBandModel, dm.IsingExtModel):
         d = inspect.signature(cls.plot_walkers).parameters['walk_std'].default
         assert d == pytest.approx(0.5 * np.pi)
+
+
+def test_R_exp_default_resolves_regime_aware():
+    """R_exp default is None: resolves to 1 when noise_exp==0 (model torque) and
+    1/noise_exp otherwise."""
+    import inspect
+    for cls in (dm.NeuralBandModel, dm.IsingExtModel):
+        assert inspect.signature(cls.plot_walkers).parameters['R_exp'].default is None
+    nbm = _offaxis_model(); ang = np.pi / 2
+    # noise_exp=0 -> R_exp resolves to 1 (matches explicit R_exp=1)
+    _, _, p0 = _predict_loc(nbm, 2.0, 0, 1, ang, with_cos=False, R_exp=1)
+    assert np.allclose(p0, _one_step_loc(nbm, 2.0, 0, 1, ang, R_exp=None), atol=1e-12)
+    # noise_exp=2 -> R_exp resolves to 1/2 (matches explicit 0.5, NOT 1)
+    _, _, p2 = _predict_loc(nbm, 2.0, 2, 1, ang, with_cos=True, R_exp=0.5)
+    act2 = _one_step_loc(nbm, 2.0, 2, 1, ang, R_exp=None)
+    assert np.allclose(p2, act2, atol=1e-12)
+    _, _, p2_unit = _predict_loc(nbm, 2.0, 2, 1, ang, with_cos=True, R_exp=1)
+    assert not np.allclose(p2_unit, act2, atol=1e-9)
+
+
+def test_R_exp_scales_walker_drift():
+    """R_exp!=1 makes the walker's drift K*R^R_exp*sin(Theta/2): the step matches
+    the R_exp-included prediction exactly, and NOT the R_exp=1 one."""
+    nbm = _offaxis_model(); ang = np.pi / 2
+    _, R, pred = _predict_loc(nbm, 2.0, 2, 1, ang, with_cos=True, R_exp=0.5)
+    assert 0.0 < R < 1.0                                   # R^0.5 != R
+    act = _one_step_loc(nbm, 2.0, 2, 1, ang, R_exp=0.5)
+    assert np.allclose(pred, act, atol=1e-12)
+    _, _, pred_unit = _predict_loc(nbm, 2.0, 2, 1, ang, with_cos=True, R_exp=1)
+    assert not np.allclose(pred_unit, act, atol=1e-9)
