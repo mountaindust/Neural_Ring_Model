@@ -3,6 +3,12 @@
 **Date:** 2026-05-22
 **Status:** exploratory; no code changes proposed yet.
 
+> **Decision (2026-06):** keep uniform weight (`angle_weight=None`); do not adopt
+> a foveal vonMises weight. The `1/N` pathology is exclusive to the *exact delta*
+> (a singular limit), and a foveal weight buys a marginal commitment-signal lift
+> for the cost of the far-target "ears" below. See
+> [foveal_decision.md](foveal_decision.md).
+
 ## Question
 
 `PerceptionModel.neural_weight` plays two roles in `NeuralBandModel` (NBM):
