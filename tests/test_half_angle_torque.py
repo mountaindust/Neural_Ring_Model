@@ -221,11 +221,12 @@ def test_blind_spot_frozen_drifts_straight():
 
 
 def test_blind_spot_search_escapes():
-    """std>0: at R=0 the gate (1-R)^p = 1, so a blind walker gets a full-sigma
-    diffusive search that reorients it, re-acquires the target, and is captured
-    (instead of marching off) -- no separate blind-search knob needed."""
+    """A blind walker searches at max(std, 0.75*pi) -- the fixed floor decoupled
+    from the committed std -- reorients, re-acquires, and is captured. Uses the
+    DEFAULT constant-noise mode (std=None -> 0.1, noise_exp=0): without the floor
+    the blind search would be a feeble 0.1 and the walker would march off."""
     max_steps = 400
-    xd, yd = _single_track(_blind_model(), std=0.75*np.pi, noise_exp=2,
+    xd, yd = _single_track(_blind_model(), std=None, noise_exp=0,
                            max_steps=max_steps)
     # reorientation happened (frozen drift keeps x identically 0)
     assert np.std(xd) > 1e-3

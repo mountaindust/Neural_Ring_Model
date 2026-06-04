@@ -16,6 +16,11 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
 
 
+# Walker heading-noise scales (see NeuralBandModel.plot_walkers).
+_CONST_NOISE_STD = 0.1          # default gentle constant-noise intensity (noise_exp=0)
+_BLIND_SEARCH_STD = 0.75 * np.pi  # blind random-walk / search floor and gated default
+
+
 def convert_angles(theta):
     '''Given a scalar or array of angles, convert to angles in
     [-np.pi,np.pi]
@@ -3300,22 +3305,25 @@ class NeuralBandModel:
         v : float
             Speed of the walker, assumed constant
         std : float or None
-            Sigma: the heading-noise intensity at R=0 (the random-walk / blind
-            value). The per-step kick is std*(1-R)^noise_exp * sqrt(dt) (Euler-
-            Maruyama, so the per-unit-time angular variance is std**2*(1-R)^(2
-            noise_exp), independent of dt). If None (default), a regime-aware
+            Sigma: the heading-noise intensity for VISIBLE steps (where the
+            amplitude is std*(1-R)^noise_exp). The per-step kick is
+            sigma_eff*sqrt(dt) (Euler-Maruyama, per-unit-time angular variance
+            sigma_eff**2, independent of dt). If None (default), a regime-aware
             default is used: 0.1 when noise_exp==0 (a gentle constant noise) and
-            0.75*pi when noise_exp>0 (the random-walk / blind-search intensity
-            that the (1-R)^noise_exp gate tames once the walker commits). Set
-            std=0 for a fully deterministic walk.
+            0.75*pi when noise_exp>0 (the random-walk intensity the (1-R)^noise_exp
+            gate tames once the walker commits). Set std=0 for a fully
+            deterministic walk. NOTE: blind steps (no targets visible) ignore this
+            scale and search at max(std, 0.75*pi) -- see noise_exp.
         noise_exp : float, optional (default 0)
-            Gate exponent p in the noise amplitude std*(1-R)^p. p=0 recovers a
-            constant sigma*dW (no gating). p>0 interpolates between a random walk
-            (R->0, e.g. no targets visible) and low-noise homing (R->1, walker
-            committed): larger p closes the gate faster. At R=0 the gate is 1 for
-            any p, so a blind walker (no visible targets, gamma collapses to 0,
-            deterministic torque vanishes) gets a full-sigma diffusive search for
-            free via the same term -- there is no separate blind-search knob.
+            Gate exponent p in the VISIBLE-step noise amplitude std*(1-R)^p. p=0
+            recovers a constant sigma*dW (no gating). p>0 interpolates between a
+            random walk (R->0, undecided) and low-noise homing (R->1, committed):
+            larger p closes the gate faster. A blind step (no visible targets ->
+            gamma collapses to 0, deterministic torque vanishes) is handled
+            separately: the walker searches at max(std, 0.75*pi) -- a fixed floor
+            decoupled from the committed std, so it re-acquires even in gentle
+            constant-noise mode -- unless std=0 (frozen drift). There is no
+            per-call blind-search knob.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -3356,8 +3364,9 @@ class NeuralBandModel:
         if std is None:
             # Regime-aware default: a gentle constant noise when ungated, the
             # vigorous random-walk / blind-search intensity when the (1-R)^p gate
-            # is on (it tames this scale once the walker commits).
-            std = 0.1 if noise_exp == 0 else 0.75 * np.pi
+            # is on (it tames this scale once the walker commits). Blind steps
+            # always search at >= _BLIND_SEARCH_STD regardless of this choice.
+            std = _CONST_NOISE_STD if noise_exp == 0 else _BLIND_SEARCH_STD
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
         orig_gamma = self.gamma
@@ -3377,27 +3386,30 @@ class NeuralBandModel:
                 old_loc = self.percep_model.focal_loc.copy()
                 # Blind fast-path: if no target is visible at all, gamma
                 # collapses to 0, the deterministic torque vanishes, and R=0.
-                # The unified noise term then drives a full-sigma random-walk
-                # search for free (the gate (1-R)^noise_exp = 1 at R=0),
-                # independent of noise_exp -- no separate blind-search kick and
-                # no wasted dgamma/dt solve on a blind step.
+                # A lost walker then searches at the random-walk floor
+                # max(std, _BLIND_SEARCH_STD) -- decoupled from the committed std
+                # so it re-acquires even in gentle constant-noise mode (where the
+                # gate (1-R)^noise_exp = 1 at R=0 would otherwise leave only the
+                # small std) -- via a cheap fast-path that skips the dgamma/dt
+                # solve. std=0 stays deterministic (frozen drift).
                 neur, _ = self.percep_model.get_neural_signals()
                 if neur.size == 0:
                     self.gamma = 0 + 0j
-                    dtheta, R = 0.0, 0.0
+                    dtheta = 0.0
+                    sigma_eff = max(std, _BLIND_SEARCH_STD) if std > 0 else 0.0
                 else:
                     dtheta = self.dtheta_dt()
                     R = np.abs(self.gamma)
-                # Heading noise sigma*(1-R)^noise_exp: a random walk when R->0
-                # (undecided / blind) and low-noise homing when R->1 (committed);
-                # noise_exp=0 recovers a constant sigma*dW. dtheta_dt() is a
-                # turning RATE, not an angle, so it is NOT wrapped here (only the
-                # resulting heading is wrapped on assignment below). The diffusion
-                # term scales as sqrt(dt) (Wiener increment), NOT dt, so the
-                # per-unit-time angular variance is independent of the step size.
-                if std > 0:
-                    gate = np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
-                    noise = std * gate * self.rng.normal() * np.sqrt(dt)
+                    # Visible: gated noise sigma*(1-R)^noise_exp -- a random walk
+                    # when R->0 (undecided) and low-noise homing when R->1
+                    # (committed); noise_exp=0 recovers a constant sigma*dW.
+                    sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
+                # here (only the resulting heading is wrapped on assignment below).
+                # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
+                # so the per-unit-time angular variance is independent of step size.
+                if sigma_eff > 0.0:
+                    noise = sigma_eff * self.rng.normal() * np.sqrt(dt)
                 else:
                     noise = 0.0
                 theta = self.percep_model.focal_angle + dtheta*dt + noise
@@ -4478,22 +4490,25 @@ class IsingExtModel:
         v : float
             Speed of the walker, assumed constant
         std : float or None
-            Sigma: the heading-noise intensity at R=0 (the random-walk / blind
-            value). The per-step kick is std*(1-R)^noise_exp * sqrt(dt) (Euler-
-            Maruyama, so the per-unit-time angular variance is std**2*(1-R)^(2
-            noise_exp), independent of dt). If None (default), a regime-aware
+            Sigma: the heading-noise intensity for VISIBLE steps (where the
+            amplitude is std*(1-R)^noise_exp). The per-step kick is
+            sigma_eff*sqrt(dt) (Euler-Maruyama, per-unit-time angular variance
+            sigma_eff**2, independent of dt). If None (default), a regime-aware
             default is used: 0.1 when noise_exp==0 (a gentle constant noise) and
-            0.75*pi when noise_exp>0 (the random-walk / blind-search intensity
-            that the (1-R)^noise_exp gate tames once the walker commits). Set
-            std=0 for a fully deterministic walk.
+            0.75*pi when noise_exp>0 (the random-walk intensity the (1-R)^noise_exp
+            gate tames once the walker commits). Set std=0 for a fully
+            deterministic walk. NOTE: blind steps (no targets visible) ignore this
+            scale and search at max(std, 0.75*pi) -- see noise_exp.
         noise_exp : float, optional (default 0)
-            Gate exponent p in the noise amplitude std*(1-R)^p. p=0 recovers a
-            constant sigma*dW (no gating). p>0 interpolates between a random walk
-            (R->0, e.g. no targets visible) and low-noise homing (R->1, walker
-            committed): larger p closes the gate faster. At R=0 the gate is 1 for
-            any p, so a blind walker (no visible targets, gamma collapses to 0,
-            deterministic torque vanishes) gets a full-sigma diffusive search for
-            free via the same term -- there is no separate blind-search knob.
+            Gate exponent p in the VISIBLE-step noise amplitude std*(1-R)^p. p=0
+            recovers a constant sigma*dW (no gating). p>0 interpolates between a
+            random walk (R->0, undecided) and low-noise homing (R->1, committed):
+            larger p closes the gate faster. A blind step (no visible targets ->
+            gamma collapses to 0, deterministic torque vanishes) is handled
+            separately: the walker searches at max(std, 0.75*pi) -- a fixed floor
+            decoupled from the committed std, so it re-acquires even in gentle
+            constant-noise mode -- unless std=0 (frozen drift). There is no
+            per-call blind-search knob.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -4534,8 +4549,9 @@ class IsingExtModel:
         if std is None:
             # Regime-aware default: a gentle constant noise when ungated, the
             # vigorous random-walk / blind-search intensity when the (1-R)^p gate
-            # is on (it tames this scale once the walker commits).
-            std = 0.1 if noise_exp == 0 else 0.75 * np.pi
+            # is on (it tames this scale once the walker commits). Blind steps
+            # always search at >= _BLIND_SEARCH_STD regardless of this choice.
+            std = _CONST_NOISE_STD if noise_exp == 0 else _BLIND_SEARCH_STD
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
 
@@ -4553,27 +4569,30 @@ class IsingExtModel:
                 old_loc = self.percep_model.focal_loc.copy()
                 # Blind fast-path: if no target is visible at all, gamma
                 # collapses to 0, the deterministic torque vanishes, and R=0.
-                # The unified noise term then drives a full-sigma random-walk
-                # search for free (the gate (1-R)^noise_exp = 1 at R=0),
-                # independent of noise_exp -- no separate blind-search kick and
-                # no wasted dgamma/dt solve on a blind step.
+                # A lost walker then searches at the random-walk floor
+                # max(std, _BLIND_SEARCH_STD) -- decoupled from the committed std
+                # so it re-acquires even in gentle constant-noise mode (where the
+                # gate (1-R)^noise_exp = 1 at R=0 would otherwise leave only the
+                # small std) -- via a cheap fast-path that skips the dgamma/dt
+                # solve. std=0 stays deterministic (frozen drift).
                 neur, _ = self.percep_model.get_neural_signals()
                 if neur.size == 0:
                     self.gamma = 0 + 0j
-                    dtheta, R = 0.0, 0.0
+                    dtheta = 0.0
+                    sigma_eff = max(std, _BLIND_SEARCH_STD) if std > 0 else 0.0
                 else:
                     dtheta = self.dtheta_dt()
                     R = np.abs(self.gamma)
-                # Heading noise sigma*(1-R)^noise_exp: a random walk when R->0
-                # (undecided / blind) and low-noise homing when R->1 (committed);
-                # noise_exp=0 recovers a constant sigma*dW. dtheta_dt() is a
-                # turning RATE, not an angle, so it is NOT wrapped here (only the
-                # resulting heading is wrapped on assignment below). The diffusion
-                # term scales as sqrt(dt) (Wiener increment), NOT dt, so the
-                # per-unit-time angular variance is independent of the step size.
-                if std > 0:
-                    gate = np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
-                    noise = std * gate * self.rng.normal() * np.sqrt(dt)
+                    # Visible: gated noise sigma*(1-R)^noise_exp -- a random walk
+                    # when R->0 (undecided) and low-noise homing when R->1
+                    # (committed); noise_exp=0 recovers a constant sigma*dW.
+                    sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
+                # here (only the resulting heading is wrapped on assignment below).
+                # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
+                # so the per-unit-time angular variance is independent of step size.
+                if sigma_eff > 0.0:
+                    noise = sigma_eff * self.rng.normal() * np.sqrt(dt)
                 else:
                     noise = 0.0
                 theta = self.percep_model.focal_angle + dtheta*dt + noise
