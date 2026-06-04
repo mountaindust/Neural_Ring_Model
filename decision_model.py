@@ -3269,16 +3269,20 @@ class NeuralBandModel:
             return ax
 
 
-    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=1500,
-                     start_loc=None, start_angle=None, target_tol=None,
-                     plot_tracks=False, ax=None, title=None, wb_plot=False,
-                     blind_search_std=0.75*np.pi):
+    def plot_walkers(self, dt=0.1, v=1, std=None, noise_exp=0, repetitions=20,
+                     max_steps=1500, start_loc=None, start_angle=None,
+                     target_tol=None, plot_tracks=False, ax=None, title=None,
+                     wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the neural band torque model on
-        a dt step size with zero-mean angular Gaussian noise with standard
-        deviation as specified. Repeat for a number of repetitions and plot a
-        heat map of these walks in 2D space.
+        a dt step size with state-gated angular Gaussian noise. Repeat for a
+        number of repetitions and plot a heat map of these walks in 2D space.
+
+        The heading noise amplitude is sigma*(1-R)^noise_exp, where R=|gamma| is
+        the coherence strength: a random walk when R->0 (undecided / no targets
+        visible) and low-noise homing when R->1 (committed). noise_exp=0 recovers
+        a plain constant sigma*dW. See the std/noise_exp parameters below.
 
         At each step, dgamma_dt is run to steady state to find the local
         equilibrium gamma; the resulting torque K*R*sin(arg(gamma)/2) in the
@@ -3295,11 +3299,23 @@ class NeuralBandModel:
             Time step for the walk
         v : float
             Speed of the walker, assumed constant
-        std : float
-            Rotational-diffusion intensity of the zero-mean angular noise. The
-            heading SDE is integrated by Euler-Maruyama, so the per-step kick is
-            std*sqrt(dt); the per-unit-time angular variance is
-            std**2, independent of dt. If zero (default), no angular noise.
+        std : float or None
+            Sigma: the heading-noise intensity at R=0 (the random-walk / blind
+            value). The per-step kick is std*(1-R)^noise_exp * sqrt(dt) (Euler-
+            Maruyama, so the per-unit-time angular variance is std**2*(1-R)^(2
+            noise_exp), independent of dt). If None (default), a regime-aware
+            default is used: 0.1 when noise_exp==0 (a gentle constant noise) and
+            0.75*pi when noise_exp>0 (the random-walk / blind-search intensity
+            that the (1-R)^noise_exp gate tames once the walker commits). Set
+            std=0 for a fully deterministic walk.
+        noise_exp : float, optional (default 0)
+            Gate exponent p in the noise amplitude std*(1-R)^p. p=0 recovers a
+            constant sigma*dW (no gating). p>0 interpolates between a random walk
+            (R->0, e.g. no targets visible) and low-noise homing (R->1, walker
+            committed): larger p closes the gate faster. At R=0 the gate is 1 for
+            any p, so a blind walker (no visible targets, gamma collapses to 0,
+            deterministic torque vanishes) gets a full-sigma diffusive search for
+            free via the same term -- there is no separate blind-search knob.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -3323,15 +3339,6 @@ class NeuralBandModel:
             Title for the plot. If not provided, a default title is used.
         wb_plot : bool
             Whether or not plotting in a Jupyter notebook (adjusts size of figure)
-        blind_search_std : float, optional (default 0.75*pi)
-            Rotational-diffusion intensity of the heading noise used on steps
-            where NO target is visible (get_neural_signals returns empty, e.g.
-            all targets in a cutoff-weight blind spot with b_weight < pi). On
-            such steps gamma collapses to 0 and the deterministic torque
-            vanishes, so without it the walker would drift straight and never
-            re-acquire. The kick is scaled by sqrt(dt) (like the std noise
-            above), giving a dt-invariant diffusive search walk until a target
-            re-enters view. Set to 0 to recover the frozen-drift behavior.
 
         Returns
         -------
@@ -3346,6 +3353,11 @@ class NeuralBandModel:
             start_angle = self.percep_model.focal_angle
         if target_tol is None:
             target_tol = v * dt
+        if std is None:
+            # Regime-aware default: a gentle constant noise when ungated, the
+            # vigorous random-walk / blind-search intensity when the (1-R)^p gate
+            # is on (it tames this scale once the walker commits).
+            std = 0.1 if noise_exp == 0 else 0.75 * np.pi
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
         orig_gamma = self.gamma
@@ -3363,32 +3375,32 @@ class NeuralBandModel:
                           self.percep_model.focal_loc) < target_tol):
                     break
                 old_loc = self.percep_model.focal_loc.copy()
-                # Blind-spot search: if no target is visible at all, gamma
-                # collapses to 0 and the deterministic torque vanishes. Drive a
-                # pure rotational-diffusion search walk (heading kick scaled by
-                # sqrt(dt), like the Euler-Maruyama noise term below) instead of
-                # the near-frozen drift the deterministic dynamics would give.
+                # Blind fast-path: if no target is visible at all, gamma
+                # collapses to 0, the deterministic torque vanishes, and R=0.
+                # The unified noise term then drives a full-sigma random-walk
+                # search for free (the gate (1-R)^noise_exp = 1 at R=0),
+                # independent of noise_exp -- no separate blind-search kick and
+                # no wasted dgamma/dt solve on a blind step.
                 neur, _ = self.percep_model.get_neural_signals()
                 if neur.size == 0:
                     self.gamma = 0 + 0j
-                    if blind_search_std > 0:
-                        theta = convert_angles(self.percep_model.focal_angle
-                                               + self.rng.normal(scale=blind_search_std)*np.sqrt(dt))
-                    else:
-                        theta = self.percep_model.focal_angle
+                    dtheta, R = 0.0, 0.0
                 else:
-                    if std > 0:
-                        noise = self.rng.normal(scale=std)
-                    else:
-                        noise = 0
-                    # Euler-Maruyama step. dtheta_dt() is a turning RATE (angular
-                    # velocity), not an angle: it must not be wrapped to (-pi, pi].
-                    # Only the resulting heading is wrapped (next focal_angle assign).
-                    # The diffusion term scales as sqrt(dt) (Wiener increment),
-                    # NOT dt: noise ~ N(0, std**2) so noise*sqrt(dt) ~ N(0, std**2*dt),
-                    # giving a per-unit-time angular variance of std**2 that is
-                    # independent of the step size.
-                    theta = self.percep_model.focal_angle + self.dtheta_dt()*dt + noise*np.sqrt(dt)
+                    dtheta = self.dtheta_dt()
+                    R = np.abs(self.gamma)
+                # Heading noise sigma*(1-R)^noise_exp: a random walk when R->0
+                # (undecided / blind) and low-noise homing when R->1 (committed);
+                # noise_exp=0 recovers a constant sigma*dW. dtheta_dt() is a
+                # turning RATE, not an angle, so it is NOT wrapped here (only the
+                # resulting heading is wrapped on assignment below). The diffusion
+                # term scales as sqrt(dt) (Wiener increment), NOT dt, so the
+                # per-unit-time angular variance is independent of the step size.
+                if std > 0:
+                    gate = np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                    noise = std * gate * self.rng.normal() * np.sqrt(dt)
+                else:
+                    noise = 0.0
+                theta = self.percep_model.focal_angle + dtheta*dt + noise
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)
@@ -4439,16 +4451,20 @@ class IsingExtModel:
             return ax
         
 
-    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=1500,
-                     start_loc=None, start_angle=None, target_tol=None,
-                     plot_tracks=False, ax=None, title=None, wb_plot=False,
-                     blind_search_std=0.75*np.pi):
+    def plot_walkers(self, dt=0.1, v=1, std=None, noise_exp=0, repetitions=20,
+                     max_steps=1500, start_loc=None, start_angle=None,
+                     target_tol=None, plot_tracks=False, ax=None, title=None,
+                     wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the Ising torque model on a dt
-        step size with zero-mean angular Gaussian noise with standard deviation
-        as specified. Repeat for a number of repetitions and plot a heat map of
-        these walks in 2D space.
+        step size with state-gated angular Gaussian noise. Repeat for a number
+        of repetitions and plot a heat map of these walks in 2D space.
+
+        The heading noise amplitude is sigma*(1-R)^noise_exp, where R=|gamma| is
+        the coherence strength: a random walk when R->0 (undecided / no targets
+        visible) and low-noise homing when R->1 (committed). noise_exp=0 recovers
+        a plain constant sigma*dW. See the std/noise_exp parameters below.
 
         The walker stops when it is within target_tol of a target surface,
         when its trajectory passes through a target, or after max_steps.
@@ -4461,11 +4477,23 @@ class IsingExtModel:
             Time step for the walk
         v : float
             Speed of the walker, assumed constant
-        std : float
-            Rotational-diffusion intensity of the zero-mean angular noise. The
-            heading SDE is integrated by Euler-Maruyama, so the per-step kick is
-            std*sqrt(dt); the per-unit-time angular variance is
-            std**2, independent of dt. If zero (default), no angular noise.
+        std : float or None
+            Sigma: the heading-noise intensity at R=0 (the random-walk / blind
+            value). The per-step kick is std*(1-R)^noise_exp * sqrt(dt) (Euler-
+            Maruyama, so the per-unit-time angular variance is std**2*(1-R)^(2
+            noise_exp), independent of dt). If None (default), a regime-aware
+            default is used: 0.1 when noise_exp==0 (a gentle constant noise) and
+            0.75*pi when noise_exp>0 (the random-walk / blind-search intensity
+            that the (1-R)^noise_exp gate tames once the walker commits). Set
+            std=0 for a fully deterministic walk.
+        noise_exp : float, optional (default 0)
+            Gate exponent p in the noise amplitude std*(1-R)^p. p=0 recovers a
+            constant sigma*dW (no gating). p>0 interpolates between a random walk
+            (R->0, e.g. no targets visible) and low-noise homing (R->1, walker
+            committed): larger p closes the gate faster. At R=0 the gate is 1 for
+            any p, so a blind walker (no visible targets, gamma collapses to 0,
+            deterministic torque vanishes) gets a full-sigma diffusive search for
+            free via the same term -- there is no separate blind-search knob.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -4489,15 +4517,6 @@ class IsingExtModel:
             Title for the plot. If not provided, a default title is used.
         wb_plot : bool
             Whether or not plotting in a Jupyter notebook (adjusts size of figure)
-        blind_search_std : float, optional (default 0.75*pi)
-            Rotational-diffusion intensity of the heading noise used on steps
-            where NO target is visible (get_neural_signals returns empty, e.g.
-            all targets in a cutoff-weight blind spot with b_weight < pi). On
-            such steps gamma collapses to 0 and the deterministic torque
-            vanishes, so without it the walker would drift straight and never
-            re-acquire. The kick is scaled by sqrt(dt) (like the std noise
-            above), giving a dt-invariant diffusive search walk until a target
-            re-enters view. Set to 0 to recover the frozen-drift behavior.
 
         Returns
         -------
@@ -4512,6 +4531,11 @@ class IsingExtModel:
             start_angle = self.percep_model.focal_angle
         if target_tol is None:
             target_tol = v * dt
+        if std is None:
+            # Regime-aware default: a gentle constant noise when ungated, the
+            # vigorous random-walk / blind-search intensity when the (1-R)^p gate
+            # is on (it tames this scale once the walker commits).
+            std = 0.1 if noise_exp == 0 else 0.75 * np.pi
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
 
@@ -4527,38 +4551,32 @@ class IsingExtModel:
                           self.percep_model.focal_loc) < target_tol):
                     break
                 old_loc = self.percep_model.focal_loc.copy()
-                # Blind-spot search: if no target is visible at all, gamma
-                # collapses to 0 and the deterministic torque vanishes. Drive a
-                # pure rotational-diffusion search walk (heading kick scaled by
-                # sqrt(dt), like the Euler-Maruyama noise term below).
+                # Blind fast-path: if no target is visible at all, gamma
+                # collapses to 0, the deterministic torque vanishes, and R=0.
+                # The unified noise term then drives a full-sigma random-walk
+                # search for free (the gate (1-R)^noise_exp = 1 at R=0),
+                # independent of noise_exp -- no separate blind-search kick and
+                # no wasted dgamma/dt solve on a blind step.
                 neur, _ = self.percep_model.get_neural_signals()
                 if neur.size == 0:
                     self.gamma = 0 + 0j
-                    if blind_search_std > 0:
-                        theta = convert_angles(self.percep_model.focal_angle
-                                               + self.rng.normal(scale=blind_search_std)*np.sqrt(dt))
-                    else:
-                        theta = self.percep_model.focal_angle
-                    mv_vec = v*dt*np.array([np.cos(theta), np.sin(theta)])
-                    self.percep_model.focal_loc += mv_vec
-                    self.percep_model.focal_angle = convert_angles(theta)
-                    walk.append(self.percep_model.focal_loc.copy())
-                    if np.any(targets.check_trajectory_intersection(
-                              old_loc, self.percep_model.focal_loc)):
-                        break
-                    continue
-                if std > 0:
-                    noise = self.rng.normal(scale=std)
+                    dtheta, R = 0.0, 0.0
                 else:
-                    noise = 0
-                # Euler-Maruyama step (TODO: Honeycutt) instead of solving the
-                # theta equation. dtheta_dt() is a turning RATE, not an angle: do
-                # NOT wrap it to (-pi, pi]. The resulting heading is wrapped (next
-                # focal_angle assignment). The diffusion term scales as sqrt(dt)
-                # (Wiener increment), NOT dt: noise ~ N(0, std**2) so noise*sqrt(dt)
-                # ~ N(0, std**2*dt), a per-unit-time angular variance of std**2
-                # that is independent of the step size.
-                theta = self.percep_model.focal_angle + self.dtheta_dt()*dt + noise*np.sqrt(dt)
+                    dtheta = self.dtheta_dt()
+                    R = np.abs(self.gamma)
+                # Heading noise sigma*(1-R)^noise_exp: a random walk when R->0
+                # (undecided / blind) and low-noise homing when R->1 (committed);
+                # noise_exp=0 recovers a constant sigma*dW. dtheta_dt() is a
+                # turning RATE, not an angle, so it is NOT wrapped here (only the
+                # resulting heading is wrapped on assignment below). The diffusion
+                # term scales as sqrt(dt) (Wiener increment), NOT dt, so the
+                # per-unit-time angular variance is independent of the step size.
+                if std > 0:
+                    gate = np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                    noise = std * gate * self.rng.normal() * np.sqrt(dt)
+                else:
+                    noise = 0.0
+                theta = self.percep_model.focal_angle + dtheta*dt + noise
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)

@@ -198,13 +198,14 @@ def test_blind_spot_detection():
     assert neur.size == 0
 
 
-def _single_track(nbm, blind_search_std, *, seed=0, max_steps=300):
-    """Run one walker from a blind start and return its (x, y) trajectory."""
+def _single_track(nbm, std, *, noise_exp=0, seed=0, max_steps=300,
+                  start_angle=-np.pi/2):
+    """Run one walker and return its (x, y) trajectory."""
     nbm.rng = np.random.default_rng(seed)
     fig, ax = plt.subplots()
-    nbm.plot_walkers(dt=0.1, v=1, std=0, repetitions=1, max_steps=max_steps,
-                     start_loc=(0.0, 0.0), start_angle=-np.pi/2,
-                     plot_tracks=True, ax=ax, blind_search_std=blind_search_std)
+    nbm.plot_walkers(dt=0.1, v=1, std=std, noise_exp=noise_exp, repetitions=1,
+                     max_steps=max_steps, start_loc=(0.0, 0.0),
+                     start_angle=start_angle, plot_tracks=True, ax=ax)
     line = ax.get_lines()[-1]
     xd, yd = line.get_xdata(), line.get_ydata()
     plt.close(fig)
@@ -212,18 +213,19 @@ def _single_track(nbm, blind_search_std, *, seed=0, max_steps=300):
 
 
 def test_blind_spot_frozen_drifts_straight():
-    """With blind_search_std=0 a blind walker keeps its heading and walks off."""
-    xd, yd = _single_track(_blind_model(), blind_search_std=0.0)
+    """std=0: a blind walker keeps its heading and walks off (deterministic)."""
+    xd, yd = _single_track(_blind_model(), std=0.0)
     # heading frozen pointing south: x stays put, y marches negative
     assert np.std(xd) < 1e-6
     assert yd[-1] < -10            # walked far away from the (0,3) target
 
 
 def test_blind_spot_search_escapes():
-    """With blind_search_std>0 the blind walker reorients, re-acquires the
-    target, and is captured (instead of marching off to infinity)."""
+    """std>0: at R=0 the gate (1-R)^p = 1, so a blind walker gets a full-sigma
+    diffusive search that reorients it, re-acquires the target, and is captured
+    (instead of marching off) -- no separate blind-search knob needed."""
     max_steps = 400
-    xd, yd = _single_track(_blind_model(), blind_search_std=np.pi/2,
+    xd, yd = _single_track(_blind_model(), std=0.75*np.pi, noise_exp=2,
                            max_steps=max_steps)
     # reorientation happened (frozen drift keeps x identically 0)
     assert np.std(xd) > 1e-3
@@ -231,3 +233,40 @@ def test_blind_spot_search_escapes():
     assert len(xd) - 1 < max_steps
     # ended at the target (surface at y = 3 - 1 = 2), not drifting away south
     assert yd[-1] > 1.0
+
+
+# ---------------------------------------------------------------------------
+# State-gated noise sigma*(1-R)^noise_exp
+# ---------------------------------------------------------------------------
+def _final_spread(make, std, noise_exp, *, n=4, start_angle=0.2):
+    """Sum of per-axis std of the final walker position across n seeds."""
+    finals = []
+    for s in range(n):
+        xd, yd = _single_track(make(), std, noise_exp=noise_exp, seed=s,
+                               max_steps=200, start_angle=start_angle)
+        finals.append([xd[-1], yd[-1]])
+    return float(np.std(np.array(finals), axis=0).sum())
+
+
+def test_std_zero_is_deterministic():
+    """std=0 => no angular noise => trajectories are seed-independent."""
+    xa, ya = _single_track(_identity_nbm(), std=0.0, seed=0, start_angle=0.2,
+                           max_steps=200)
+    xb, yb = _single_track(_identity_nbm(), std=0.0, seed=9, start_angle=0.2,
+                           max_steps=200)
+    assert xa.shape == xb.shape
+    assert np.allclose(xa, xb) and np.allclose(ya, yb)
+
+
+def test_default_injects_noise():
+    """Default (std=None, noise_exp=0) resolves to a gentle constant 0.1 noise,
+    so trajectories are seed-dependent (unlike std=0)."""
+    assert _final_spread(_identity_nbm, std=None, noise_exp=0) > 1e-6
+
+
+def test_gate_quiets_committed_walker():
+    """noise_exp>0 closes the gate as R rises, so at the same sigma a homing
+    walker is quieter than under the constant (noise_exp=0) law."""
+    s_const = _final_spread(_identity_nbm, std=0.75*np.pi, noise_exp=0)
+    s_gated = _final_spread(_identity_nbm, std=0.75*np.pi, noise_exp=2)
+    assert s_gated < s_const
