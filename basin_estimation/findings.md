@@ -20,6 +20,7 @@ step contributed each section.
 
 | §  | Topic | Step |
 |----|-------|------|
+| 0  | Re-vetting under the K=2, sin(Θ*/2) torque law + γ/θ decoupling | 2026-06 |
 | 1  | The state space and the slow manifold | foundation |
 | 2  | γ-Langevin dynamics and what they tell us | 3 |
 | 3  | Slow-manifold θ-scan and γ-continuation | 4 |
@@ -31,7 +32,150 @@ step contributed each section.
 | 9  | Asymmetric basin test (close+far targets) | 9 |
 | 10 | Hopf island graceful failure and the public-API wrapper | 10 |
 | 11 | Performance benchmark and decision on grid strategy | 11 |
-| 13 | Original theory questions — answered, deferred, open | retrospective |
+| 12 | Summary — vetting plan complete | — |
+| 13 | Open theory questions | — |
+
+## 0. Re-vetting under the K=2, sin(Θ*/2) torque law (2026-06-01)
+
+> **⚠️ PARTLY SUPERSEDED (2026-06-02): dθ/dt moved to the NEURAL angle.**
+> The torque law changed again, from `K·R·sin(ego/2)` (ego = inverse-warp of
+> arg(γ)) to **`K·R·sin(arg(γ)/2)`** — the half-angle law in the neural
+> consensus angle directly, dropping the inverse-warp mapping. The
+> basin_estimation/ torque sites (`theta_scan`, `basin_via_theta`, `mc_escape`)
+> were updated to match. Effect on the numbers in this file:
+> - **γ-side numbers are INVARIANT** (still correct): ΔF_γ, γ-saddles, γ-folds,
+>   F̂, SC-equilibrium locations, stable/unstable counts, and geometric basin
+>   widths bounded by saddles/folds. dγ/dt is untouched.
+> - **θ-side magnitudes are STALE — they rescale by the warp factor
+>   `W'(0)=ν(0)`** (the neural density at center): slow eigenvalues, V''(θ_s),
+>   θ-relaxation timescales, and θ-noise barrier heights ΔV. For the calibration
+>   warp here (vonmises k=0.55) ν(0)≈1.609, e.g. the slow eig at SC eq (0.5,0)
+>   moves −0.419 → −0.674 (×1.609, confirmed numerically). The branch-cut jump
+>   magnitude stays 2·K·R (arg=±π ⇒ sin(±π/2)=±1, warp-independent).
+> Not re-run in full: further dθ/dt changes are under consideration, so the
+> θ-side numbers will be refreshed once the turning law settles.
+
+**The original Steps 1–11 below were vetted under the old heading torque
+`dθ/dt = K·R·sin(ego)` with `K=1`. The model has since changed to the
+half-angle law `dθ/dt = K·R·sin(ego/2)` with default `K=2`** (see the
+CLAUDE.md "Half-angle heading torque" note). This section records the
+re-vetting of every Steps 5–9 calibration number under the new law. The
+three basin_estimation/ formula sites (`theta_scan.py`,
+`basin_via_theta.py`, `mc_escape.py`) were already updated to `sin(ego/2)`;
+this is the numerical confirmation.
+
+**Headline: almost everything is invariant, and provably so.** The *only*
+place `K` and the half-angle enter is the θ-equation. At *every*
+self-consistent equilibrium `ego=0`, where `d/dθ[sin(ego/2)] = ½·ego'`
+versus `d/dθ[sin(ego)] = ego'`; doubling `K` (1→2) exactly cancels that ½.
+So the full 3×3 coupled Jacobian — and therefore stability, slow
+eigenvalues, Hopf/saddle-node locations — is *identical* at SC equilibria.
+Everything that is a property of the γ-only landscape or of SC equilibria
+is mathematically K-independent (F̂, γ_eq(θ), γ-saddles, ΔF_γ, γ-fold
+locations). Verified numerically against the recorded values:
+
+| quantity | findings value (old law) | new-law value | status |
+|---|---|---|---|
+| SC eqs at (1.2,0) | stable ±0.6625, 0; unstable ±0.3674 | identical | **invariant** |
+| SC eqs at (2.0,0) | stable ±0.8204; unstable 0 | identical | **invariant** |
+| SC eqs at (4.0,1.5) | stable +1.2520, −1.4885; unstable −1.3096 | identical | **invariant** |
+| γ-eq counts at (1.2,0) | 5 (3 min/2 sad) center, 3 (2/1) side | identical | **invariant** |
+| ΔF_γ center (1.2,0) | 0.0154 | 0.01537 | **invariant** |
+| ΔF_γ side (1.2,0) | 0.00426 | 0.00426 | **invariant** |
+| γ-folds (2.0,0) | −0.92, −2.46 | −0.9232, −2.4626 | **invariant** |
+| γ-fold (1.2,0) inner | ±0.4789 | ±0.4842 | **invariant** |
+| basin widths (4.0,1.5) | close 303°, far 57°, ratio 5.35 | 303.3°, 56.7°, 5.35 | **invariant** |
+| (4.0,1.5) boundaries | fold −1.39, saddle −2.38 | fold −1.394, saddle −2.384 | **invariant** |
+| slow eig at SC eq (0.5,0) | (V''≈+0.42, time ~2) | −0.419 (V''=+0.419) | **invariant** |
+| Step 8 central slope | 0.0179 (ΔF_γ 0.0154) | 0.0180, ratio 1.168 | **invariant** |
+| Step 8 τ tables | 110.6/18.4/7.6; 211.5/48.1/14.8 | 112.7/19.2/7.6; 213.8/48.1/14.8 | **invariant** (within MC noise) |
+| Step 8 ordering | τ_side≈40, τ_cent≈1200 @ D=0.003 | 40.0, 1243.7 | **invariant** |
+| Hopf island (2.1,2.45) | 0 stable + Hopf sentinel | identical | **invariant** |
+
+**The one genuine change: a new branch-cut basin-boundary type at the
+facing-away heading.** Under `sin(ego/2)`, wherever γ_eq crosses the
+negative real axis (arg(γ_eq) through ±π, i.e. consensus directly behind),
+`f` jumps from +K·R to −K·R while γ_eq moves *continuously* through −R
+(only its argument flips sign across the cut). Measured at (0.5,0), θ=±π:
+γ_eq = −0.9494, R = 0.9494, `f` jumps −1.899 → +1.898, so |Δf| = 3.80 ≈
+2·K·R = 3.798, with |Δγ| ≈ 0.02 (a pure f-jump, not a γ-fold). This is the
+intentional left/right fork at the facing-away point, **not** a numerical
+artifact (both `sin(arg(γ)/2)` and the algebraic half-angle identity give
+two-sided limits ±1 there). Consequences for the basin machinery:
+
+- **f(θ) magnitudes off-equilibrium shift.** Near every SC eq `f` is
+  unchanged to first order (K=2·½ = 1 = old K·1), but away from ego=0 the
+  two laws diverge; at the facing-away heading the old law gave `f≈0`
+  (a spurious torque dead-zone) and the new law gives `|f|≈K·R` (maximal).
+  Any reported `f(θ)` plot or off-equilibrium `ΔV` excursion value shifts.
+- **A basin boundary that sat at θ=±π under the old law is now a
+  branch-cut, not a saddle.** This matters only in 1-stable cells and in
+  symmetric cells where a basin edge falls at the facing-away heading. In
+  the multistable *asymmetric* cells (e.g. (4.0,1.5)) the boundaries are
+  saddles and γ-folds — both invariant — so basin widths are unchanged.
+- **Step 7's detector already catches it** as a type-(d) event (see §7).
+  The §7 BlindSpot/perception-collapse machinery is unaffected. The old
+  Step-7 T1 ("smooth 1-stable scan → zero detections") was updated to
+  expect exactly one branch-cut f-jump at θ≈±π; T1 now passes with that
+  expectation. All other test scripts in basin_estimation/ pass unchanged.
+
+**Net effect on the integration TODO.** The Steps 5–9 calibration
+constants stand as written; the only thing the basin machinery gains under
+the new law is the fourth boundary type (saddle, γ-fold,
+perception-collapse, **branch-cut**). Section-level notes below are
+annotated where the old K=1/sin(ego) framing appears.
+
+### 0.1 Why this is robust to *future* dθ/dt changes — the γ/θ decoupling
+
+`K` (and possibly the functional form of the turning law) may still move as
+the dθ/dt physical model is refined. The invariance above is not a
+coincidence of the specific `K=2, sin(ego/2)` choice — it reflects a
+structural decoupling worth stating directly, because it tells you which
+results are banked regardless of what dθ/dt becomes.
+
+Write the turning law as `dθ/dt = K·R·g(ego)`, where `g` is the
+dimensionless shape function (`g = sin` old, `g = sin(·/2)` now), with the
+two properties any sane turning law has: `g(0)=0` (don't turn when facing
+consensus) and `g'(0)>0` (turn toward consensus, harder the farther off).
+
+- **dγ/dt is Hamiltonian/Glauber-derived; dθ/dt is phenomenological.** The
+  only place the turning law enters the whole system is the θ-equation, and
+  θ feeds *back* into dγ/dt only through perception geometry (the neural
+  angles θ̂_j and weights ρ_j), never through a turning parameter.
+- **The slow manifold γ_eq(θ) knows nothing about `g`.** Everything that is
+  a property of it is turning-law-independent: γ_eq(θ), R(θ), ego(θ),
+  γ-folds, perception-collapse zones, and the entire γ-noise story
+  (F̂, γ-saddles, ΔF_γ).
+- **SC equilibria sit where ego(θ)=0** — a γ-side condition — and any law
+  with `g(0)=0` vanishes there, so SC-eq *locations* are turning-law-
+  independent. Their *reduced-flow* stability is `sign(f'(θ_s)) =
+  sign(g'(0)·ego'(θ_s)·R)`; with `g'(0)>0` fixed, the sign (hence the
+  stable/unstable count and the basin count) is set by the γ-side quantity
+  `ego'(θ_s)`. The *magnitude* of `f'(θ_s)` scales with `K·g'(0)` — that is
+  the only thing the K=2 doubling held fixed (2·½ = 1·1).
+
+So **basin topology, boundary inventory, basin counts, geometric widths
+bounded by saddles/folds, and γ-noise robustness (ΔF_γ) are insulated from
+the dθ/dt uncertainty.** What stays tied to dθ/dt: slow-eigenvalue
+*magnitudes* → θ-relaxation timescale → **θ-noise barrier heights ΔV**;
+the coupled 3×3 fine structure (Hopf-boundary locations) *if* `K·g'(0)`
+drifts off 1; and the existence/width of branch-cut-bounded basins.
+
+### 0.2 Two open items that depend on the final dθ/dt
+
+Both are on the θ-noise side and cannot be closed until the turning law is
+fixed; flag them when that happens:
+
+1. **θ-noise basin "depth" at the branch-cut/antipode needs its own
+   first-passage treatment.** The branch-cut is a *repelling fork*, not a
+   Kramers barrier you climb over, so the saddle/fold escape formulas in §7
+   don't apply to a basin bounded by it. Its FPT behavior must be worked
+   out for whatever `g` is finally chosen.
+2. **The θ-noise-vs-γ-noise proxy question (§13.4) is dθ/dt-dependent.**
+   Whether the `std` knob in `plot_walkers` is a faithful stand-in for the
+   physical γ-noise rests on the θ-dynamics, so the σ ↔ T·g(geometry)
+   calibration should be (re)run once dθ/dt is settled. The γ-noise half
+   (ΔF_γ, Step 6/8) is already done and is turning-law-independent.
 
 ## 1. The state space and the slow manifold
 
@@ -44,9 +188,11 @@ The dynamical equations have a built-in **separation of timescales**:
 - γ relaxes on its own timescale, set by the Hessian of F̂. In our
   calibration setup the Hessian eigenvalues at the SC equilibria are
   ~1, so γ relaxes on time ~1.
-- θ moves under the torque dθ/dt = K · R · sin(ego_angle), with K = 1
-  in our setup. Near a stable SC equilibrium R ~ 0.6 and ego_angle ~ 0,
-  so dθ/dt is small and θ moves on time ~2.
+- θ moves under the torque dθ/dt = K · R · sin(ego_angle/2), with K = 2
+  in the current setup (this section was originally written for the old
+  K=1, sin(ego) law; see §0 — the two are identical at SC equilibria, so
+  the slow timescale here is unchanged). Near a stable SC equilibrium
+  R ~ 0.6 and ego_angle ~ 0, so dθ/dt is small and θ moves on time ~2.
 
 These are not enormously different — but the ratio is ~2, which turns
 out to matter for some of the numerics (see §5 on Schur).
@@ -853,6 +999,23 @@ in principle, not in implementation. The dynamical signature (slow
 mixing in the branch-cut region) would require Step 8's MC machinery
 to confirm.
 
+> **Correction under the half-angle law (see §0).** The argument above
+> ("same R, arg(γ), f at the saddle and the trap, so statically
+> indistinguishable") was specific to the old `sin(ego)` torque, where
+> `sin(±π) ≈ 0` made `|f| ≈ 0` at *both* the back-of-circle saddle and
+> the trap. Under the current `sin(ego/2)` law, `sin(±π/2) = ±1`, so at
+> θ ≈ ±π the static `|f|` is *maximal* (≈ K·R), **not** zero — and the
+> ±π point is no longer a smooth saddle but a type-(d) **branch-cut
+> f-jump** (|Δf| ≈ 2·K·R; §0). The static scan now *does* flag the ±π
+> heading, as a branch-cut rather than a saddle. What remains true is
+> the narrower statement: the static detector still can't tell a
+> *dynamical* blind-spot *trap* (slow γ-mixing under noise) from an
+> ordinary branch-cut crossing — both share the static branch-cut
+> signature; the trap-vs-not question is still dynamical (Step 8 MC).
+> The half-angle law's removal of the back-of-circle torque dead-zone
+> is the deterministic half of the two-part blind-spot fix recorded in
+> CLAUDE.md (the other half being `blind_search_std` in `plot_walkers`).
+
 ### 7.4 Perception collapse — the static signature we *can* detect
 
 If we tighten the cutoff so that the perception window doesn't cover
@@ -883,13 +1046,20 @@ of arc, behind the walker).
 ### 7.5 What this means for basin structure
 
 In §4.4 we listed two possible basin-boundary types: a smooth saddle
-on the same γ-branch, or a γ-fold. Step 7 adds a third:
+on the same γ-branch, or a γ-fold. Step 7 adds a third, and the
+half-angle torque law adds a fourth:
 
 - **Perception collapse boundary**: where R drops to 0 over an
   extended θ-range. A walker entering this region has no torque to
   re-orient by. The basin in θ is bounded by the *edge* of this
   collapse zone — where the first target re-enters the perception
   window as the walker rotates toward the front.
+- **Branch-cut boundary** (half-angle law, §0): where γ_eq crosses the
+  negative real axis (consensus directly behind), `f` jumps +K·R ↔ −K·R
+  while γ_eq moves continuously. A real left/right fork at the
+  facing-away heading, bounding basins in 1-stable and symmetric cells
+  where an edge falls at θ ≈ ±π. Static signature: |Δf| ≈ 2·K·R with
+  |Δγ| small and γ_eq on the negative real axis.
 
 The Kramers escape rate near a perception collapse boundary is
 different again from the saddle and fold cases: the torque is
@@ -907,6 +1077,7 @@ mechanisms, each with its own Kramers / FPT signature:
 | Saddle | exp(−ΔV / D_θ)  [exponential, Kramers] |
 | γ-fold | exp(−ΔV_fold / D_θ)  [exponential, but with ΔV at the discontinuity rather than at a smooth max] |
 | Perception collapse | Δθ² / (2 D_θ)  [polynomial, diffusive] |
+| Branch-cut (half-angle law) | f-jump +K·R ↔ −K·R at θ≈±π; a repelling fork, not a barrier to escape over — bounds 1-stable/symmetric basins (§0) |
 
 ### 7.6 Bonus finding — extra γ-fold at (2.0, 0)
 
@@ -1077,15 +1248,10 @@ escape rates. With it, we have:
 - **Relative ordering is right** — the smaller-ΔF_γ stable escapes
   faster by close to the predicted ratio.
 
-So for downstream basin-of-attraction visualization on the
-(x, y)-bifurcation diagram, **ΔF_γ is a trustworthy scalar measure
-of γ-noise robustness** to display per stable equilibrium *in
-multistable cells*. In 1-stable cells there is no second basin to
-escape to, and ΔF_γ measures only transient excursion timescales
-rather than basin-transition rates — see §4.4 scope caveat and
-§13.6. The right visualization for 1-stable cells is just the
-direction arrow (and optionally a local-stiffness glyph), not a
-Kramers-style robustness color.
+So for the basin-of-attraction visualization, **ΔF_γ is a trustworthy
+scalar measure of γ-noise robustness** to display per stable equilibrium
+*in multistable cells* (1-stable cells get a direction arrow instead — see
+the §13.6 scope correction).
 
 ### 8.8 Compute notes
 
@@ -1102,8 +1268,8 @@ Kramers-style robustness color.
 
 ## 9. Asymmetric basin test — Step 9
 
-The original planning notes (basin_estimation_planning.md) anticipated
-a specific qualitative behavior:
+The user's prior physical intuition anticipated a specific qualitative
+behavior:
 
 > in a bistable region where the observer is very close to one
 > circular target and the other is far, the far target's basin
@@ -1325,367 +1491,74 @@ The wrapper does NOT:
 
 ## 11. Performance benchmark — Step 11
 
-The final vetting step times the pipeline and decides whether basin
-computation can run on every cell of a typical bifurcation grid or
-requires subgrid sampling.
+**Bottom line: ~4.2 min parallel (32 cores) for a 41×41 grid with basins**,
+vs ~21 s for `sc_equilib`-only baseline. Feasible — a researcher can iterate
+on bifurcation+basin plots in minutes. (The README's strict "full/baseline
+ratio < 10×" criterion fails at ~14×, but only because `sc_equilib` is
+*fast* (~90 ms); the absolute runtime is fine.)
 
-### 11.1 Per-point timing on calibration points
+Per-point cost by cell class, and how the renderer routes each (this routing
+*is* the cost structure — multistable cells dominate the budget):
 
-|              point | baseline (s) | full (s) | ratio | # basins |
-|--------------------|--------------|----------|-------|----------|
-|       1-stable far (0.5, 0)  | 0.08 | 1.87 | 23×   | 1 |
-|           3-stable (1.2, 0)  | 0.09 | 4.01 | 47×   | 3 |
-| 2-stable w/ folds  (2.0, 0)  | 0.08 | 2.62 | 33×   | 2 |
-|       asym 2-stable (4.0,1.5)| 0.13 | 2.94 | 23×   | 2 |
-|        Hopf island (2.1,2.45)| 0.09 | 0.09 | 1×    | 0 (sentinel) |
+| cell class | per-point full | what to compute / render |
+|---|---|---|
+| **0-stable** (Hopf / collapse) | ~0.09 s (wrapper short-circuit) | sentinel-driven marker; no basin |
+| **1-stable** | ~0.09 s (scan skipped by default) | direction arrow + optional F̂-Hessian stiffness glyph; no scan (the scalars don't carry their multistable meaning — see §13.6) |
+| **multistable** (≥2 stable) | ~2–4 s | per-stable CCW/CW basin scan, ΔF_γ via `gamma_eqs_at_theta`, fold-vs-saddle classification |
 
-The Hopf-island case short-circuits in the wrapper (no scan
-attempted), so it has the same cost as baseline. The other points
-spend most of their time in the per-stable basin extraction: each
-stable triggers two truncated CCW/CW scans, each ~150 LSODA
-relaxations of γ at varying θ.
+The default `scan_single_stable=False` skips the θ-scan at 1-stable cells.
+This is primarily a *correctness* choice (§13.6), not a speed one: the perf
+win parallelizes away because multistable cells are the bottleneck.
 
-### 11.2 Extrapolation to a 41×41 bifurcation grid
-
-Using the **5×5 random-sweep mean** (~0.09 s baseline, ~2.1 s full)
-as a more representative per-point cost:
-
-|                        | serial | 32-core parallel |
-|------------------------|--------|------------------|
-| Baseline (sc_equilib)  | 153 s  | 21 s             |
-| Full (basin per cell)  | 3351 s ≈ 56 min | 257 s ≈ **4.3 min** |
-| Ratio (full / baseline) | 21.8× | 12.2× |
-
-(Parallel speedup is ~7× for baseline and ~13× for full on 32 cores —
-sub-linear because the perception spline lookups serialize through a
-shared in-process spline table.)
-
-### 11.3 Pass-criterion analysis
-
-Two ways to score this:
-
-- **Strict** (README criterion): ratio < 10× → **FAIL** (21.8× serial,
-  12.2× parallel).
-- **Practical** (absolute time): parallel run < 10 min → **PASS**
-  (4.3 min for full grid with basins).
-
-The strict 10× ratio was a conservative pass criterion meant to flag
-"computationally infeasible" cases. In our regime the absolute time is
-fine: a researcher can iterate on bifurcation+basin plots in minutes,
-not hours. The 10× ratio fails not because basin extraction is slow in
-absolute terms, but because `sc_equilib` is *fast* (it's the brentq
-+ multistart-polish path that takes only ~90 ms).
-
-**Decision:** see §11.4 below — the principled answer is to skip the
-scan at 0-stable and 1-stable cells (which is both correct on its own
-terms and the dominant performance win), and run the full scan only
-in multistable cells. This is *not* a subgrid approximation; it's a
-recognition that basin-barrier scalars only carry meaning in
-multistable regions (see §4.4 scope caveat and §13.6).
-
-### 11.4 Scope-correct skipping — correctness improvement, modest perf win
-
-`compute_basins_at_focal_loc` was updated to skip the θ-scan at
-1-stable cells by default (`scan_single_stable=False` is the new
-default; pass `True` to recover the old behavior for diagnostic
-purposes). This is primarily a *correctness* improvement: the scan
-output at 1-stable cells computes scalars that don't carry their
-multistable meaning (see §4.4 scope caveat and §13.6). The
-performance impact is modest:
-
-| | per-point mean | parallel 41×41 | strict ratio |
-|---|---|---|---|
-| Old (scan everywhere) | 2.1 s full vs 0.09 s baseline | 4.3 min | 22.9× |
-| New (1-stable skip)   | 1.4 s full vs 0.09 s baseline | 4.2 min | 14.0× |
-
-The strict 10× criterion still fails, but the parallel runtime is
-essentially unchanged: multistable cells (the slow ones at ~2–4 s
-each) dominate the budget, and 1-stable savings parallelize away.
-The change is worth keeping because it's *the right thing to do
-conceptually*, not because it transforms the runtime.
-
-Three cell classes:
-
-1. **0-stable cells (Hopf island, perception collapse).** Already
-   handled by the wrapper's short-circuit on empty `stable_thetas`.
-   Cost: ~0.09 s (the `sc_equilib` call alone). The renderer uses
-   the sentinel string to choose a limit-cycle or blind-zone marker
-   — no basin to draw because there is no stable equilibrium.
-
-2. **1-stable cells (both 1+0 and 1+1 from sc_equilib).** Basin is
-   topologically the whole circle minus the unstable point
-   (Poincaré-Hopf). No basin-transition rate to estimate because
-   there is no second basin. The deliverable is:
-   - The direction arrow from `sc_equilib`'s θ_s.
-   - Optionally, a local-stiffness glyph from the F̂-Hessian at
-     γ_s (a single Hessian eigenvalue computation, ~negligible cost).
-   - **No θ-scan needed.** Skipping it is the right thing, not just
-     the fast thing — the scan would compute ΔV and basin-width
-     scalars that don't carry their multistable meaning here.
-
-3. **Multistable cells (2+ stable).** Full pipeline applies: scan
-   each stable's basin (CCW/CW until first event), compute ΔF_γ via
-   `gamma_eqs_at_theta`, classify fold-vs-saddle boundaries. This
-   is where Kramers escape determines which stable a noisy walker
-   commits to and where ΔF_γ-colored arrows are informative.
-
-#### Updated cost estimate (verified by re-running bench_per_point.py)
-
-Measured: 4.2 min parallel on 41×41 with the new default. Only
-slightly lower than the 4.3 min before the scope correction because
-multistable cells are the bottleneck and they still scan.
-
-#### Additional mitigations available if needed at higher resolutions
-
-If at 81×81 or finer the multistable-only runtime grows beyond
-comfort, these are available:
-
-1. **Subgrid sampling within multistable regions.** Multistable cells
-   in (x, y) are themselves spatially clustered; basin geometry is
-   continuous within them. Compute basins on a coarser sub-grid
-   (every 2nd cell) inside multistable regions, interpolate.
-2. **Cross-cell γ warm-start.** Currently each cell's scan warm-starts
-   from γ = R + 0j at that cell. A grid scan could instead warm-start
-   from the neighboring cell's γ_eq series, leveraging (x, y)-
-   continuity of γ_eq.
-3. **Reduce scan resolution.** Default n_max = 300 with dθ ≈ 0.02.
-   Coarser (n_max = 100, dθ ≈ 0.06) trades fold-location accuracy
-   for ~3× speedup.
-
-None of these are needed for the initial implementation at 41×41
-resolution.
-
-### 11.5 What was scanned
-
-```
-calibration_points = [
-    (0.5, 0)    1-stable far     → 1 basin
-    (1.2, 0)    3-stable          → 3 basins
-    (2.0, 0)    2-stable + folds  → 2 basins
-    (4.0, 1.5)  2-stable asym     → 2 basins
-    (2.1, 2.45) Hopf island       → 0 basins (sentinel)
-]
-5×5 random sweep on (0.5, 5.5) × (-2.5, 2.5) → 25 mixed cases
-```
-
-The 5×5 sweep is a less biased sample than the hand-picked calibration
-set (which over-represents multistable cases). The per-point mean
-from the sweep (2.1 s) is slightly lower than the calibration mean
-(2.3 s), as expected.
+**Available mitigations** if higher resolution (81×81+) outgrows comfort —
+none needed at 41×41: (1) subgrid-sample within the spatially-clustered
+multistable regions and interpolate; (2) cross-cell γ warm-start from the
+neighboring cell's γ_eq series (exploiting (x,y)-continuity of γ_eq);
+(3) coarser scan resolution (n_max 300→100, ~3× faster, looser fold
+locations). Benchmarked on the five calibration points plus a 5×5 random
+sweep on (0.5, 5.5)×(−2.5, 2.5); `bench_per_point.py` reproduces.
 
 ## 12. Summary — vetting plan complete
 
-All 11 steps of the vetting plan have completed. The basin-of-attraction
-estimator is verified end-to-end against analytical predictions,
-Monte Carlo ground truth, and the user's prior physical intuition,
-and is fast enough for the bifurcation+basin plot at the resolutions
-used in VM_bifurcations.
+All 11 steps are done; the estimator is verified end-to-end against
+analytical predictions, Monte Carlo ground truth, and the user's physical
+intuition, and is fast enough for the bifurcation+basin plot (§11). Per-step
+detail is in the body sections above; the two non-obvious headline results:
 
-### Solid foundations from each step
-
-- **Step 1**: F̂(γ) derived from H + Glauber, in closed form, with
-  log-(1+exp) representation.
-- **Step 2**: F̂ numerically validated against `dgamma_dt` to machine
-  precision; 7 cross-checks pass including consistency between F̂
-  and the mean-field projection of ⟨H⟩ − T·S.
-- **Step 3**: γ-Langevin SDE built; Boltzmann stationary distribution
-  P ∝ exp(−F̂/D); calibration D = T/(2kN) verified by 1/N scaling
-  across N=200/1000/5000; local Gaussian shape Gaussian to ~1%
-  precision (skewness, kurtosis ≈ 0).
-- **Step 4**: Slow-manifold θ-scan with warm-start γ-continuation;
-  correct Poincaré-Hopf count (1 stable + 1 unstable) on simple case.
-- **Step 5**: V(θ), saddle/fold-bounded basin extraction with the
-  truncated CCW/CW scan; Schur-complement slow-eigenvalue agrees with
-  V''(θ_s) to 0.02%; y-symmetry on fold pairs holds to machine
-  precision.
-- **Step 6**: ΔF_γ at fixed θ via direct evaluation matches the
-  path-integral by the gradient theorem to ~1e-17; varies by ~30×
-  across calibration points.
-- **Step 7**: Discontinuity detection — γ-fold (|Δγ| jump),
-  f-jump (no-γ-jump discrete perception change), perception collapse
-  (R → 0 over an interval). |Δf| is a confirming signal, not primary.
-- **Step 8**: γ-Langevin MC escape times match Kramers prediction
-  within factor of 2 across two orders of magnitude in D; slope of
-  log(τ) vs 1/D matches ΔF_γ within 16%; relative ordering of
-  stables matches the predicted ~30× ratio.
-- **Step 9**: Asymmetric basin (4.0, 1.5) — close-target basin 5×
-  wider than far-target basin (303° vs 57°); basin asymmetry exceeds
-  distance asymmetry (perception falls off faster than 1/d).
-- **Step 10**: Public-API wrapper `compute_basins_at_focal_loc`
-  handles Hopf islands (short-circuit in 90 ms with sentinel) and
-  all normal multistable cases. Sentinel string is the routing key
-  for the bifurcation-plot renderer.
-- **Step 11**: Per-point cost ratio 22× when scanning every cell
-  (FAIL strict 10× criterion) but parallel runtime on 41×41 grid is
-  4.3 min (PASS practical criterion). With the conceptually correct
-  default (`compute_basins_at_focal_loc(scan_single_stable=False)`,
-  skipping the scan at 1-stable cells — basin barriers only carry
-  Kramers meaning in multistable regions, see §4.4 scope caveat and
-  §13.6), per-point ratio drops to 14× and parallel runtime to
-  4.2 min. The scope correction is primarily a correctness
-  improvement; multistable cells dominate the parallel budget.
-
-**The substantive finding (Step 5):**
-
-The slow manifold projecting the (γ, θ) dynamics onto 1D heading
-dynamics is not a global object — it's a *union of γ-branches* glued
-at γ-folds. A basin in θ around a stable SC equilibrium is an arc on
-one γ-branch, bounded by either a saddle (smooth zero of f on the
-same branch) or a γ-fold (a discontinuity where the branch terminates
-and γ jumps). The Poincaré-Hopf theorem (#stable = #unstable on S¹)
-holds within each branch but not across the branch union. sc_equilib's
-saddle list is necessarily incomplete because it restricts to γ on
-the positive real axis and to one γ-branch at a time. Sign-change
-bisection and basin-attribution bisection answer different questions;
-the latter is what the walker actually experiences.
-
-**The substantive finding (Step 6):**
-
-ΔF_γ — the γ-noise escape barrier from a stable SC equilibrium —
-varies by ~30× across our calibration setup. The side stables at
-(1.2, 0) have very small barriers (ΔF_γ ≈ 0.00426); the (2.0, 0)
-side stables have much larger ones (ΔF_γ ≈ 0.144). Different
-SC equilibria are dramatically different in their γ-noise robustness.
-y-symmetric calibration points have mirror-image γ-saddle pairs,
-which add their escape rates as parallel channels.
-
-**The substantive finding (Step 7):**
-
-The basin boundary catalog now has three mechanisms (saddle, γ-fold,
-perception collapse), each with a different Kramers / first-passage
-signature. The dynamical "blind-spot trap" of weighting_analysis/
-turns out to be indistinguishable from a normal back-of-circle SC
-saddle on a static scan — its trap character is purely dynamical. A
-genuine static "perception collapse" signature emerges only with
-tighter cutoffs (b < π) that physically exclude targets from the
-back hemisphere. As a bonus, Step 7 caught a second γ-fold at
-(2.0, 0) that Step 5 missed.
-
-**The substantive finding (Step 8):**
-
-ΔF_γ is empirically a trustworthy noise-robustness scalar **in
-multistable cells**. The γ-Langevin Kramers formula predicts escape
-rates within factor of 2 of MC ground truth across two orders of
-magnitude in D, and predicts the relative ordering of stable
-equilibria to good accuracy (side stable ~30× faster than center
-at common D, matching the exp(ΔΔF_γ / D) ratio). This validates
-ΔF_γ for use as a noise-robustness indicator in the multistable
-regions of the basin-of-attraction visualization. (In 1-stable
-regions there is no basin transition to predict — see §13.6.)
+- **The slow manifold is not a global object — it's a union of γ-branches
+  glued at γ-folds** (§4.3–§4.5). A basin in θ is an arc on one γ-branch,
+  bounded by a saddle, a γ-fold, a perception-collapse zone, or (under the
+  half-angle law) a branch-cut. Poincaré-Hopf holds within a branch, not
+  across the union, so `sc_equilib`'s unstable list can be incomplete.
+- **ΔF_γ is a validated γ-noise robustness scalar in multistable cells**
+  (§6, §8). It varies by ~30× across the calibration setup ((1.2,0) sides
+  ≈ 0.00426 vs (2.0,0) sides ≈ 0.144), and γ-Langevin MC confirms the
+  Kramers prediction within a factor of 2, with correct relative ordering.
 
 ### Ready for implementation in decision_model.py
 
-The vetting has produced a vetted implementation that lives in the
-basin_estimation/ folder and a trustworthy public API:
+Public API: `result = compute_basins_at_focal_loc(focal_loc, *,
+scan_single_stable=False)` returns `{'basins', 'stable_count',
+'unstable_count', 'sentinel'}`; each multistable basin dict carries
+`theta_stable`, `gamma_stable`, `delta_theta_{ccw,cw}`, `delta_V_{ccw,cw}`,
+`{ccw,cw}_endpoint`, `{ccw,cw}_type`. To wire into the two-panel plot: add a
+`NeuralBandModel` method wrapping it, and route rendering by cell class
+(§11 table / §10.4) — sentinel marker for 0-stable, direction arrow (+
+optional stiffness glyph) for 1-stable, ΔF_γ-coded arrows per stable for
+multistable. Open theory gaps and carry-forward items are in §13.4–§13.5.
 
-```python
-result = compute_basins_at_focal_loc(focal_loc)
-# result['basins'] = [{'theta_stable', 'gamma_stable',
-#                      'delta_theta_ccw', 'delta_theta_cw',
-#                      'delta_V_ccw', 'delta_V_cw',
-#                      'ccw_endpoint', 'ccw_type', 'cw_endpoint', 'cw_type',
-#                      ...}, ...]
-# result['stable_count']   = int
-# result['unstable_count'] = int
-# result['sentinel']       = None or short reason string
-```
+## 13. Open theory questions
 
-To wire this into the two-panel bifurcation+basin plot referenced
-in CLAUDE.md's TODO:
-
-1. Add a method on `NeuralBandModel` that wraps
-   `compute_basins_at_focal_loc` (or call directly).
-2. **Routing by cell class** (per the §11.4 scope correction):
-   - **0-stable cells** (sentinel set): render the limit-cycle
-     marker for Hopf islands or the blind-zone marker for
-     perception-collapse cases. No basin to draw.
-   - **1-stable cells**: render the allocentric direction arrow from
-     `sc_equilib`'s θ_s. Optionally encode local stiffness (F̂-Hessian
-     eigenvalues at γ_s) as the arrow color or glyph size. No basin
-     barrier scalar — there is no second basin to escape to.
-   - **Multistable cells** (stable_count ≥ 2): render one arrow per
-     stable, colored or sized by ΔF_γ (the noise-robustness scalar
-     validated in Step 8) or basin width Δθ_total. This is where the
-     full pipeline does meaningful work.
-3. Allow `compute_basins_at_focal_loc` to skip the θ-scan for 0-stable
-   and 1-stable cells (since the scan output isn't used by the
-   renderer in those classes). This is both correct (the scalars
-   don't carry their multistable meaning at 1-stable) and the dominant
-   performance win.
-4. Set basin computation to run on every multistable cell at 41×41;
-   switch to subgrid sampling within multistable regions only if
-   upping resolution.
-
-### Carry-forward items (not blocking implementation)
-
-- **Basin-attribution bisection** (Step 7 follow-up) — would refine
-  γ-fold locations beyond the |Δγ|-threshold heuristic. Currently
-  the fold θ is detected to ~dθ ≈ 0.02 rad precision; basin-
-  attribution bisection could refine to arbitrary precision by
-  integrating the full coupled dynamics from probe midpoints. Not
-  needed for visualization but useful if exact fold locations
-  become a target of analysis.
-- **θ-noise MC** (the (b) mode from the planning notes) — deferred
-  because the multistable side-stable basins are γ-fold-bounded
-  rather than V-saddle-bounded, so the simple exp(2 ΔV/σ²)
-  prediction doesn't apply cleanly. A proper θ-noise test would
-  need different setups (e.g. 1-stable far points where basins
-  are smooth V-saddle-bounded).
-- **Limit-cycle period estimation** for Hopf-island sentinel cells.
-  Currently the sentinel just says "limit cycle suspected"; an
-  enhancement could integrate the coupled dynamics and report
-  period/amplitude. Not needed for v1 of the plot.
-
-## 13. Original theory questions — answered, deferred, open
-
-This section is a retrospective rubric: it maps the theory questions
-that were on the table at the *start* of this vetting effort
-(basin_estimation_planning.md and the deep theory exchanges in the
-session that produced it) to where each was answered, and explicitly
-calls out the gaps.
-
-Three status codes:
-- **✓** — fully answered in the vetting.
-- **◑** — partially answered; what's missing is noted.
-- **✗** — deferred; a proposed plan for how to address is given.
-
-### 13.1 Fine points raised in the original planning session
-
-(From basin_estimation_planning.md, the "Fine point" series.)
-
-| # | Question | Status | Where answered (or gap) |
-|---|---|---|---|
-| 1 | What γ-branch does V(θ) actually live on? | ✓ | §3.3 (γ-branch definition), §4.4 (basin lives on one branch, ends at fold or saddle on that branch) |
-| 2 | Saddle-node folds in γ_eq(θ) and what they mean for the basin boundary | ✓ | §4.3 (folds), §4.4 (one of three boundary types) |
-| 3 | The two noise sources (Ising T vs heading std) — is θ-noise a good proxy for γ-noise? | ✗ | See §13.4 below — the headline gap. Note: only meaningful in multistable regions; see §13.6 for the conceptual scope. |
-| 4 | Hopf-island handling | ✓ | §10 (wrapper short-circuits with sentinel) |
-| 5 | Computational budget | ✓ | §11 (4.3 min parallel for 41×41) |
-
-### 13.2 Three deep theory points raised during the planning exchange
-
-(From the mid-planning user message about γ-dependence on θ, mean-field
-Glauber stochasticity, and discontinuities defining basins.)
-
-| # | Question | Status | Where answered |
-|---|---|---|---|
-| 1 | θ-noise *is* γ-noise via warping — does the warping matter? | ✓ | §1 (slow manifold absorbs warping; warping is encoded in γ_eq(θ)). The chain "θ kicked → γ_eq(θ) shifts → γ chases" is captured by V(θ) in the adiabatic limit. |
-| 2 | γ-noise is the physically motivated noise; need ΔF_γ as the noise-robustness scalar | ✓ | §6 (ΔF_γ derivation + verification), §8 (MC validation: Kramers within factor of 2, slope within 16% of ΔF_γ, relative ordering correct) |
-| 3 | Discontinuities define basin boundaries beyond saddles | ✓ | §4.3 (γ-folds), §4.4 (three boundary types), §7 (detection of each) |
-
-### 13.3 Items flagged "for future session" at the end of the planning doc
-
-(From basin_estimation_planning.md §"Theory items flagged for a future
-session". These are deeper theoretical questions, several of which the
-user wanted to study independently with the `theory_background.md`
-notes.)
-
-| # | Question | Status | Where answered (or gap) |
-|---|---|---|---|
-| 1 | F_γ for NBM cosine kernel with weighting and warping | ✓ | §6.1, full closed-form derivation in free_energy_derivation.md, verified to machine precision in Step 2 |
-| 2 | Two-timescale Langevin: γ-noise projects onto θ-noise (T_eff = T·g(geometry)) | ✗ | See §13.4 — this is the same gap as fine point #3, just from a different angle |
-| 3 | Comparison of θ-saddle vs γ-branch escape rates: when each dominates | ◑ | We *have* the ΔV barrier (§4.1) and ΔF_γ barrier (§6) at sample points but never directly compared min(ΔV/D_θ, ΔF_γ/D) across the (x, y) parameter plane. See §13.5 #2. |
-| 4 | Joint (γ, θ) gradient status | ◑ | γ-only is gradient (Glauber F̂, derivation §3 of free_energy_derivation.md). θ-only on the slow manifold is gradient (1D ODE). Whether the *coupled* 3D system has a global Lyapunov function — never explicitly tested. See §13.5 #3. |
-| 5 | Kramers-vs-discontinuity escape distinction at γ-folds and perception discontinuities | ◑ | §7.5 lists three distinct scaling forms (saddle exp, γ-fold exp, perception Δθ²/2D). Saddle/γ-fold Kramers form *validated* in Step 8. Perception-collapse Δθ² form *not* MC-tested. See §13.5 #1. |
+The theory questions on the table at the start of this effort are mostly
+answered in the body above: the F̂/ΔF_γ derivation and validation (§6, §8),
+γ-folds and the multi-type basin-boundary catalog (§4.3–§4.5, §7), Hopf-
+island handling (§10), and the computational budget (§11). The chain
+"θ kicked → γ_eq(θ) shifts → γ chases" is captured by V(θ) in the adiabatic
+limit (§1), so warping is absorbed into γ_eq(θ) and needs no separate
+treatment. What remains genuinely open is consolidated below: the headline
+θ-noise-proxy gap (§13.4), smaller gaps (§13.5), and the scope correction
+that frames where any of it applies (§13.6). The two open items that depend
+on the still-unsettled dθ/dt law are also flagged in §0.2.
 
 ### 13.4 The headline gap — θ-noise as a faithful proxy for γ-noise
 
@@ -1889,13 +1762,12 @@ cells**, where it does the work it was designed for.
 
 #### Implication for §11 mitigations
 
-The "skip trivial 1-stable cells" mitigation in §11.4 was framed as a
-performance optimization. It's actually a *correctness* improvement
-too: at 1-stable cells the scan computes scalars (ΔV, basin-width,
-fold-vs-saddle classification) that don't carry their
-multistable-context meaning. Skipping the scan and drawing only the
-direction arrow (plus optional stiffness glyph) is the *right* thing
-to do, not just the fast thing.
+The "skip the scan at 1-stable cells" default (§11) is not just a
+performance choice — it's a *correctness* one: at 1-stable cells the scan
+computes scalars (ΔV, basin-width, fold-vs-saddle classification) that
+don't carry their multistable-context meaning. Skipping the scan and
+drawing only the direction arrow (plus optional stiffness glyph) is the
+*right* thing to do, not just the fast thing.
 
 ### 13.7 Bottom line
 

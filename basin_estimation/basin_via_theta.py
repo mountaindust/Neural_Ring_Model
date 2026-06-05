@@ -54,8 +54,11 @@ from theta_scan import (_relax_gamma_cached, _circular_angle_diff, nbm)
 # =============================================================================
 def _eval_f(theta, gamma_eq):
     R = abs(gamma_eq)
-    ego = nbm.percep_model.get_neural_angle_inverse(np.angle(gamma_eq))
-    return nbm.K * R * np.sin(ego)
+    # Half-angle torque law in the NEURAL consensus angle arg(gamma_eq)
+    # (matches NeuralBandModel.dtheta_dt). arg is in (-pi, pi] from np.angle;
+    # the +-pi branch cut is the intentional jump discontinuity (Step-7
+    # detector catches it).
+    return nbm.K * R * np.sin(np.angle(gamma_eq)/2)
 
 
 def scan_until_event(focal_loc, theta_start, gamma_start, direction='ccw',
@@ -320,8 +323,8 @@ def jacobian_3x3(gamma_re, gamma_im, theta, focal_loc, h=1e-5):
     def rhs(gr, gi, th):
         gamma = gr + 1j * gi
         dg = nbm.dgamma_dt(None, gamma, th, focal_loc)
-        ego, R = nbm.convert_gamma(gamma)
-        dth = nbm.K * R * np.sin(ego)
+        R = np.abs(gamma)
+        dth = nbm.K * R * np.sin(np.angle(gamma)/2)
         return np.array([dg.real, dg.imag, dth])
     J = np.zeros((3, 3))
     for k, (dr, di, dt) in enumerate([(h, 0, 0), (0, h, 0), (0, 0, h)]):

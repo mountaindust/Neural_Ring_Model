@@ -2287,9 +2287,9 @@ class NeuralBandModel:
     Relies on get_neural_signals from the PerceptionModel to obtain 
     neural angles and relative neural group size.'''
 
-    def __init__(self, percep_model=None, T=0.2, K=1):
-        '''From a PerceptionModel with its Targets object, establishes a model 
-        for chosing direction based on discrete Ising. Relies on get_neural_signals 
+    def __init__(self, percep_model=None, T=0.2, K=2):
+        '''From a PerceptionModel with its Targets object, establishes a model
+        for chosing direction based on discrete Ising. Relies on get_neural_signals
         from the PerceptionModel to obtain neural angles and relative neural 
         group size.
         
@@ -2303,8 +2303,8 @@ class NeuralBandModel:
         T : float
             Temperature for the neural ring representing amount of noise in the system.
         K : float
-            Coupling strength for Kuramoto turning speed. Used in models of 
-            walkers only.
+            Coupling strength for Kuramoto turning speed. Used in models of
+            walkers only. Default of 2 in order to match sine argument of ego/2.
         '''
 
         self.T = T
@@ -2693,8 +2693,9 @@ class NeuralBandModel:
                   t_Final=100):
         '''Turning rate based on the neural band model coherence value.
 
-        Runs dgamma_dt to steady state, applies the inverse neural-to-egocentric
-        mapping, and returns the Kuramoto-style torque K*R*sin(ego_angle).
+        Runs dgamma_dt to steady state and returns the Kuramoto-style torque
+        K*R*sin(Theta/2), where Theta = arg(gamma) is the neural consensus
+        angle and R = |gamma|.
 
         Parameters
         ----------
@@ -2722,15 +2723,26 @@ class NeuralBandModel:
             self.gamma = self.run_dgamma_dt(focal_angle=theta, focal_loc=focal_loc,
                                              init_gamma=None, t_Final=t_Final)
             gamma = self.gamma
-        # Convert from neural space to egocentric physical angle
-        ego_angle, R = self.convert_gamma(gamma)
-        return self.K * R * np.sin(ego_angle)
+        # Half-angle torque in the NEURAL consensus angle Theta = arg(gamma).
+        # Theta is the canonical [-pi, pi] coordinate (the warp maps the
+        # facing-away heading to +-pi for every perception model), so the
+        # "/2" normalization is perception-model-independent and the torque
+        # is zero only when consensus is straight ahead (Theta=0) and maximal
+        # +-K*R when consensus is directly behind (Theta=+-pi). The +-pi point
+        # carries an intentional +K*R <-> -K*R jump discontinuity (the physical
+        # left/right fork facing away), resolved by roundoff/noise. We use
+        # arg(gamma) directly rather than its inverse-warped egocentric angle:
+        # the turning law is then a direct function of gamma* with no
+        # dependence on the perception model's inverse mapping.
+        Theta = np.angle(gamma)
+        R = np.abs(gamma)
+        return self.K * R * np.sin(Theta/2)
 
 
     def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
                          h=1e-6, tol=1e-8):
         '''Stability test using the full 3x3 coupled Jacobian of
-        (gamma_re, gamma_im, theta) where dtheta/dt = K*R*sin(ego_angle).
+        (gamma_re, gamma_im, theta) where dtheta/dt = K*R*sin(arg(gamma)/2).
 
         Built by central finite differences. Returns True iff every
         eigenvalue has real part < -tol. This is the physically correct
@@ -2746,8 +2758,8 @@ class NeuralBandModel:
             gamma = gr + 1j*gi
             dg = self.dgamma_dt(gamma=gamma, focal_angle=th,
                                 focal_loc=focal_loc)
-            ego_angle, R = self.convert_gamma(gamma)
-            dth = self.K * R * np.sin(ego_angle)
+            R = np.abs(gamma)
+            dth = self.K * R * np.sin(np.angle(gamma)/2)
             return np.array([dg.real, dg.imag, dth])
 
         J = np.zeros((3, 3))
@@ -3257,20 +3269,24 @@ class NeuralBandModel:
             return ax
 
 
-    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=1500,
+    def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
+                     noise_exp=0, R_exp=None, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
                      plot_tracks=False, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the neural band torque model on
-        a dt step size with zero-mean angular Gaussian noise with standard
-        deviation as specified. Repeat for a number of repetitions and plot a
-        heat map of these walks in 2D space.
+        a dt step size with state-gated angular Gaussian noise. Repeat for a
+        number of repetitions and plot a heat map of these walks in 2D space.
+
+        The heading noise amplitude is sigma*(1-R)^noise_exp, where R=|gamma| is
+        the coherence strength: a random walk when R->0 (undecided / no targets
+        visible) and low-noise homing when R->1 (committed). noise_exp=0 recovers
+        a plain constant sigma*dW. See the std/noise_exp parameters below.
 
         At each step, dgamma_dt is run to steady state to find the local
-        equilibrium, which is then mapped from neural angle space back to an
-        egocentric physical angle via the inverse neural mapping. The resulting
-        torque K*R*sin(ego_angle) drives the heading update.
+        equilibrium gamma; the resulting torque K*R*sin(arg(gamma)/2) in the
+        neural consensus angle arg(gamma) drives the heading update.
 
         The walker stops when it is within target_tol of a target surface,
         when its trajectory passes through a target, or after max_steps.
@@ -3283,9 +3299,43 @@ class NeuralBandModel:
             Time step for the walk
         v : float
             Speed of the walker, assumed constant
-        std : float
-            Standard deviation of angular Gaussian noise with mean zero.
-            If zero (default), run without any angular noise.
+        std : float or None
+            Sigma: the heading-noise intensity for VISIBLE steps (amplitude
+            std*(1-R)^noise_exp). The per-step kick is sigma_eff*sqrt(dt)
+            (Euler-Maruyama, per-unit-time angular variance sigma_eff**2,
+            independent of dt). If None (default), a regime-aware default is used
+            for the VISIBLE scale: 0.1 when noise_exp==0 (a gentle constant noise)
+            and walk_std when noise_exp>0 (the random-walk intensity the
+            (1-R)^noise_exp gate tames once the walker commits). std=0 makes the
+            VISIBLE steps deterministic. (Blind steps use walk_std, not std --
+            the two are orthogonal; see walk_std.)
+        walk_std : float, optional (default 0.5*pi)
+            Random-walk intensity used on BLIND steps (no targets visible: gamma
+            collapses to 0, deterministic torque vanishes). Set INDEPENDENTLY of
+            std so a lost walker re-acquires even in gentle constant-noise mode.
+            walk_std=0 freezes the blind drift (deterministic search-off). Fully
+            deterministic walk: std=0 AND walk_std=0. The 0.5*pi default makes the
+            per-unit-time heading-change 2-sigma span the full circle (+-pi).
+        noise_exp : float, optional (default 0)
+            Gate exponent p in the VISIBLE-step noise amplitude
+            std*(1-R)^p*cos(Theta/2), where Theta is the consensus angle relative
+            to heading (the torque's angle). p=0 recovers a constant sigma*dW (no
+            gating, no cos factor). p>0 interpolates between a random walk
+            (R->0, undecided) and low-noise homing (R->1, committed) -- larger p
+            closes the gate faster -- and the cos(Theta/2) factor (applied only
+            for p!=0) zeros the noise when facing away from consensus (Theta=+-pi)
+            and leaves it full facing consensus (Theta=0), in quadrature with the
+            sin(Theta/2) torque so corrective swings back are noise-free.
+        R_exp : float or None, optional (default None)
+            Exponent on the coherence R in the WALKER's drift (pursuit) torque:
+            the heading update uses K*R^R_exp*sin(Theta/2) in place of the model's
+            K*R*sin(Theta/2). If None (default), a regime-aware value is used:
+            1 (the model's dtheta_dt unchanged) when noise_exp==0, else 1/noise_exp
+            -- stronger pursuit at intermediate coherence (R^R_exp > R for R<1),
+            mirroring noise_exp's exponent on (1-R) and balancing the explore->
+            commit handoff. R_exp=1 forces the model torque regardless of mode.
+            This affects ONLY the walker's drift here -- the deterministic SC
+            equilibria / bifurcation / basin machinery keep R^1.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -3323,6 +3373,17 @@ class NeuralBandModel:
             start_angle = self.percep_model.focal_angle
         if target_tol is None:
             target_tol = v * dt
+        if std is None:
+            # Regime-aware default for the VISIBLE-step scale: a gentle constant
+            # noise when ungated, else the random-walk intensity walk_std that the
+            # (1-R)^p gate tames once the walker commits. (Blind steps use
+            # walk_std directly, independent of this choice.)
+            std = 0.1 if noise_exp == 0 else walk_std
+        if R_exp is None:
+            # Regime-aware default for the drift exponent: 1 (the model torque)
+            # in constant mode, else 1/noise_exp -- stronger pursuit at
+            # intermediate R, balancing the (1-R)^noise_exp noise gate.
+            R_exp = 1 if noise_exp == 0 else 1.0 / noise_exp
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
         orig_gamma = self.gamma
@@ -3340,11 +3401,53 @@ class NeuralBandModel:
                           self.percep_model.focal_loc) < target_tol):
                     break
                 old_loc = self.percep_model.focal_loc.copy()
-                if std > 0:
-                    noise = self.rng.normal(scale=std)
+                # Blind fast-path: if no target is visible at all, gamma
+                # collapses to 0, the deterministic torque vanishes, and the
+                # walker searches at the random-walk intensity walk_std -- set
+                # INDEPENDENTLY of the committed std (orthogonal knobs), so it
+                # re-acquires even in gentle constant-noise mode. walk_std=0
+                # freezes the blind drift. A cheap fast-path skips the dgamma/dt
+                # solve on a blind step.
+                neur, _ = self.percep_model.get_neural_signals()
+                if neur.size == 0:
+                    self.gamma = 0 + 0j
+                    dtheta = 0.0
+                    sigma_eff = walk_std
                 else:
-                    noise = 0
-                theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
+                    dtheta = self.dtheta_dt()
+                    R = np.abs(self.gamma)
+                    # Visible: gated noise sigma*(1-R)^noise_exp -- a random walk
+                    # when R->0 (undecided) and low-noise homing when R->1
+                    # (committed); noise_exp=0 recovers a constant sigma*dW.
+                    sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                    if R > 0.0:
+                        s = dtheta / (self.K * R)        # = sin(Theta/2), in [-1,1]
+                        if noise_exp != 0:
+                            # Heading-aligned modulation cos(Theta/2), Theta = the
+                            # torque's angle (NBM: arg(gamma); IEM: the egocentric
+                            # consensus). Derived from dtheta = K*R*sin(Theta/2):
+                            #   cos(Theta/2) = sqrt(1 - (dtheta/(K*R))^2)
+                            # (the +root; Theta/2 in (-pi/2, pi/2]). Full noise
+                            # facing consensus (Theta=0), zero facing away
+                            # (Theta=+-pi); in quadrature with the torque so
+                            # corrective swings back are noise-free.
+                            sigma_eff *= np.sqrt(max(0.0, 1.0 - s * s))
+                        if R_exp != 1:
+                            # Exponent on the drift's coherence: the walker's
+                            # pursuit torque becomes K*R^R_exp*sin(Theta/2)
+                            # (R_exp=1 is the model's dtheta_dt). Affects only the
+                            # walker's drift here -- NOT the deterministic SC /
+                            # bifurcation / basin machinery (which keeps R^1).
+                            dtheta = self.K * R ** R_exp * s
+                # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
+                # here (only the resulting heading is wrapped on assignment below).
+                # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
+                # so the per-unit-time angular variance is independent of step size.
+                if sigma_eff > 0.0:
+                    noise = sigma_eff * self.rng.normal() * np.sqrt(dt)
+                else:
+                    noise = 0.0
+                theta = self.percep_model.focal_angle + dtheta*dt + noise
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)
@@ -3400,8 +3503,11 @@ class NeuralBandModel:
         xcenters = (xedges[:-1] + xedges[1:]) / 2
         ycenters = (yedges[:-1] + yedges[1:]) / 2
         # Interpolate to finer grid for smoother plotting
-        # Guard against degenerate bin centers
-        if xcenters.size < 2 or ycenters.size < 2:
+        # Guard against degenerate bin centers: RectBivariateSpline defaults to
+        # bicubic (kx=ky=3) and needs at least 4 points per axis. Walks with
+        # little spatial spread (e.g. a single near-straight track) produce
+        # fewer bins, so fall back to a plain imshow in that case.
+        if xcenters.size < 4 or ycenters.size < 4:
             # fall back to simple imshow without interpolation
             default_title = 'Random walker paths\n and histogram'
             if local_plot:
@@ -3465,10 +3571,10 @@ class IsingExtModel:
     center. Hard to know if this is better or worse.
     '''
 
-    def __init__(self, percep_model=None, T=0.2, K=1, nu=1):
-        '''From a PerceptionModel with its Targets object, establishes a model 
-        for chosing direction based on discrete Ising. Relies on get_neural_signals 
-        from the PerceptionModel to obtain neural angles and relative neural 
+    def __init__(self, percep_model=None, T=0.2, K=2, nu=1):
+        '''From a PerceptionModel with its Targets object, establishes a model
+        for chosing direction based on discrete Ising. Relies on get_neural_signals
+        from the PerceptionModel to obtain neural angles and relative neural
         group size.
         
         Parameters
@@ -3481,7 +3587,10 @@ class IsingExtModel:
         T : float
             Temperature for Ising model
         K : float
-            Coupling strength for Kuramoto turning speed.
+            Coupling strength for Kuramoto turning speed. Default 2 to match
+            the near-heading gain of the half-angle torque law
+            dtheta/dt = K*|gamma|*sin((angle(gamma)-theta)/2); see
+            NeuralBandModel.__init__.
         nu : float
             Exponent for cosine weighting kernel in Sridhar et al. (2018). 
             Higher values lead to sharper peaks. This should be 1 unless you are 
@@ -3715,7 +3824,12 @@ class IsingExtModel:
             gamma = self.run_dgamma_dt(focal_angle=theta, focal_loc=focal_loc, 
                                        init_gamma=0.1*np.exp(1j*theta), 
                                        t_Final=t_Final)
-        return self.K*np.abs(gamma)*np.sin(np.angle(gamma)-theta)
+        # Half-angle torque (see NBM.dtheta_dt). The egocentric consensus
+        # angle (np.angle(gamma) - theta) is NOT pre-wrapped, so it must be
+        # wrapped to (-pi, pi] before halving: sin(x/2) is 4*pi-periodic and
+        # would otherwise be discontinuous/incorrect across 2*pi boundaries.
+        ego = convert_angles(np.angle(gamma) - theta)
+        return self.K*np.abs(gamma)*np.sin(ego/2)
     
 
     def plot_dtheta_dt(self, gamma=None, focal_loc=None, wb_plot=False):
@@ -3894,7 +4008,7 @@ class IsingExtModel:
     def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
                          h=1e-6, tol=1e-8):
         '''Stability test using the full 3x3 coupled Jacobian of
-        (gamma_re, gamma_im, theta) where dtheta/dt = K*|gamma|*sin(angle(gamma)-theta).
+        (gamma_re, gamma_im, theta) where dtheta/dt = K*|gamma|*sin((angle(gamma)-theta)/2).
 
         Built by central finite differences. Returns True iff every
         eigenvalue has real part < -tol. This is the physically correct
@@ -3912,7 +4026,8 @@ class IsingExtModel:
             dg = self.dgamma_dt(gamma=gamma, focal_angle=th,
                                 focal_loc=focal_loc)
             R = np.abs(gamma)
-            dth = self.K * R * np.sin(np.angle(gamma) - th)
+            ego = convert_angles(np.angle(gamma) - th)
+            dth = self.K * R * np.sin(ego/2)
             return np.array([dg.real, dg.imag, dth])
 
         J = np.zeros((3, 3))
@@ -4383,15 +4498,20 @@ class IsingExtModel:
             return ax
         
 
-    def plot_walkers(self, dt=0.1, v=1, std=0, repetitions=20, max_steps=1500,
+    def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
+                     noise_exp=0, R_exp=None, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
                      plot_tracks=False, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the Ising torque model on a dt
-        step size with zero-mean angular Gaussian noise with standard deviation
-        as specified. Repeat for a number of repetitions and plot a heat map of
-        these walks in 2D space.
+        step size with state-gated angular Gaussian noise. Repeat for a number
+        of repetitions and plot a heat map of these walks in 2D space.
+
+        The heading noise amplitude is sigma*(1-R)^noise_exp, where R=|gamma| is
+        the coherence strength: a random walk when R->0 (undecided / no targets
+        visible) and low-noise homing when R->1 (committed). noise_exp=0 recovers
+        a plain constant sigma*dW. See the std/noise_exp parameters below.
 
         The walker stops when it is within target_tol of a target surface,
         when its trajectory passes through a target, or after max_steps.
@@ -4404,9 +4524,43 @@ class IsingExtModel:
             Time step for the walk
         v : float
             Speed of the walker, assumed constant
-        std : float
-            Standard deviation of angular Gaussian noise with mean zero.
-            If zero (default), run without any angular noise.
+        std : float or None
+            Sigma: the heading-noise intensity for VISIBLE steps (amplitude
+            std*(1-R)^noise_exp). The per-step kick is sigma_eff*sqrt(dt)
+            (Euler-Maruyama, per-unit-time angular variance sigma_eff**2,
+            independent of dt). If None (default), a regime-aware default is used
+            for the VISIBLE scale: 0.1 when noise_exp==0 (a gentle constant noise)
+            and walk_std when noise_exp>0 (the random-walk intensity the
+            (1-R)^noise_exp gate tames once the walker commits). std=0 makes the
+            VISIBLE steps deterministic. (Blind steps use walk_std, not std --
+            the two are orthogonal; see walk_std.)
+        walk_std : float, optional (default 0.5*pi)
+            Random-walk intensity used on BLIND steps (no targets visible: gamma
+            collapses to 0, deterministic torque vanishes). Set INDEPENDENTLY of
+            std so a lost walker re-acquires even in gentle constant-noise mode.
+            walk_std=0 freezes the blind drift (deterministic search-off). Fully
+            deterministic walk: std=0 AND walk_std=0. The 0.5*pi default makes the
+            per-unit-time heading-change 2-sigma span the full circle (+-pi).
+        noise_exp : float, optional (default 0)
+            Gate exponent p in the VISIBLE-step noise amplitude
+            std*(1-R)^p*cos(Theta/2), where Theta is the consensus angle relative
+            to heading (the torque's angle). p=0 recovers a constant sigma*dW (no
+            gating, no cos factor). p>0 interpolates between a random walk
+            (R->0, undecided) and low-noise homing (R->1, committed) -- larger p
+            closes the gate faster -- and the cos(Theta/2) factor (applied only
+            for p!=0) zeros the noise when facing away from consensus (Theta=+-pi)
+            and leaves it full facing consensus (Theta=0), in quadrature with the
+            sin(Theta/2) torque so corrective swings back are noise-free.
+        R_exp : float or None, optional (default None)
+            Exponent on the coherence R in the WALKER's drift (pursuit) torque:
+            the heading update uses K*R^R_exp*sin(Theta/2) in place of the model's
+            K*R*sin(Theta/2). If None (default), a regime-aware value is used:
+            1 (the model's dtheta_dt unchanged) when noise_exp==0, else 1/noise_exp
+            -- stronger pursuit at intermediate coherence (R^R_exp > R for R<1),
+            mirroring noise_exp's exponent on (1-R) and balancing the explore->
+            commit handoff. R_exp=1 forces the model torque regardless of mode.
+            This affects ONLY the walker's drift here -- the deterministic SC
+            equilibria / bifurcation / basin machinery keep R^1.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -4444,6 +4598,17 @@ class IsingExtModel:
             start_angle = self.percep_model.focal_angle
         if target_tol is None:
             target_tol = v * dt
+        if std is None:
+            # Regime-aware default for the VISIBLE-step scale: a gentle constant
+            # noise when ungated, else the random-walk intensity walk_std that the
+            # (1-R)^p gate tames once the walker commits. (Blind steps use
+            # walk_std directly, independent of this choice.)
+            std = 0.1 if noise_exp == 0 else walk_std
+        if R_exp is None:
+            # Regime-aware default for the drift exponent: 1 (the model torque)
+            # in constant mode, else 1/noise_exp -- stronger pursuit at
+            # intermediate R, balancing the (1-R)^noise_exp noise gate.
+            R_exp = 1 if noise_exp == 0 else 1.0 / noise_exp
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
 
@@ -4459,12 +4624,53 @@ class IsingExtModel:
                           self.percep_model.focal_loc) < target_tol):
                     break
                 old_loc = self.percep_model.focal_loc.copy()
-                if std > 0:
-                    noise = self.rng.normal(scale=std)
+                # Blind fast-path: if no target is visible at all, gamma
+                # collapses to 0, the deterministic torque vanishes, and the
+                # walker searches at the random-walk intensity walk_std -- set
+                # INDEPENDENTLY of the committed std (orthogonal knobs), so it
+                # re-acquires even in gentle constant-noise mode. walk_std=0
+                # freezes the blind drift. A cheap fast-path skips the dgamma/dt
+                # solve on a blind step.
+                neur, _ = self.percep_model.get_neural_signals()
+                if neur.size == 0:
+                    self.gamma = 0 + 0j
+                    dtheta = 0.0
+                    sigma_eff = walk_std
                 else:
-                    noise = 0
-                # Use an Euler (TODO: Honeycutt) step instead of solving the theta equation
-                theta = self.percep_model.focal_angle + convert_angles(self.dtheta_dt())*dt + noise*dt
+                    dtheta = self.dtheta_dt()
+                    R = np.abs(self.gamma)
+                    # Visible: gated noise sigma*(1-R)^noise_exp -- a random walk
+                    # when R->0 (undecided) and low-noise homing when R->1
+                    # (committed); noise_exp=0 recovers a constant sigma*dW.
+                    sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                    if R > 0.0:
+                        s = dtheta / (self.K * R)        # = sin(Theta/2), in [-1,1]
+                        if noise_exp != 0:
+                            # Heading-aligned modulation cos(Theta/2), Theta = the
+                            # torque's angle (NBM: arg(gamma); IEM: the egocentric
+                            # consensus). Derived from dtheta = K*R*sin(Theta/2):
+                            #   cos(Theta/2) = sqrt(1 - (dtheta/(K*R))^2)
+                            # (the +root; Theta/2 in (-pi/2, pi/2]). Full noise
+                            # facing consensus (Theta=0), zero facing away
+                            # (Theta=+-pi); in quadrature with the torque so
+                            # corrective swings back are noise-free.
+                            sigma_eff *= np.sqrt(max(0.0, 1.0 - s * s))
+                        if R_exp != 1:
+                            # Exponent on the drift's coherence: the walker's
+                            # pursuit torque becomes K*R^R_exp*sin(Theta/2)
+                            # (R_exp=1 is the model's dtheta_dt). Affects only the
+                            # walker's drift here -- NOT the deterministic SC /
+                            # bifurcation / basin machinery (which keeps R^1).
+                            dtheta = self.K * R ** R_exp * s
+                # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
+                # here (only the resulting heading is wrapped on assignment below).
+                # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
+                # so the per-unit-time angular variance is independent of step size.
+                if sigma_eff > 0.0:
+                    noise = sigma_eff * self.rng.normal() * np.sqrt(dt)
+                else:
+                    noise = 0.0
+                theta = self.percep_model.focal_angle + dtheta*dt + noise
                 mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
                 self.percep_model.focal_loc += mv_vec
                 self.percep_model.focal_angle = convert_angles(theta)
