@@ -1,5 +1,12 @@
 # Basin-of-attraction estimator — vetting
 
+> **Status (2026-06):** all 11 vetting steps complete — see
+> [findings.md](findings.md) §12. Public entry point
+> `compute_basins_at_focal_loc` in
+> [basin_via_theta.py](basin_via_theta.py) (vetted, runs; not yet wired
+> into `decision_model.py`). The plan below is preserved as the record of
+> how the estimator was vetted.
+
 Standalone exploratory work to validate a basin-of-attraction estimator
 for stable self-consistent equilibria in NBM, before any changes to
 `decision_model.py`. Mirrors the structure of `VM_bifurcations/`:
@@ -15,9 +22,12 @@ Running mathematical findings and results: see [findings.md](findings.md).
 - **F_γ:** re-derive as part of vetting (not lifted from
   `Hamiltonian ideas.tex`).
 - **Noise model:** γ-Langevin (primary) + θ-Gaussian (calibration).
-- **Discontinuity catalog:** γ-folds, perception/blind-spot crossings,
-  occlusion transitions (this list is a loose end — may not be
-  exhaustive; revisit if vetting surfaces a fourth type).
+- **Discontinuity catalog:** the "may not be exhaustive — revisit if a
+  fourth type surfaces" loose end is resolved. Vetting settled on four
+  basin-boundary types: smooth saddle, γ-fold, perception-collapse, and
+  (under the half-angle torque law) branch-cut at the facing-away
+  heading. The branch-cut was the fourth type. Detail: findings.md
+  §7.5, §0.
 
 ## Calibration setup — primary
 
@@ -29,9 +39,9 @@ target_locs = np.array([[4.33,  2.5],
 targets = model.Targets(locs=target_locs, geom_name='circle', r=0.5)
 percep = model.PerceptionModel(targets,
     focal_loc=(0, 0), focal_angle=0,
-    neural_weight='vonmises', neural_angle='integral')
-percep.k = 0.55
-nbm = model.NeuralBandModel(percep)   # T=0.2, K=1
+    neural_angle_dist='vonmises', angle_weight='neural_angle_dist',
+    a_warp=0.55)
+nbm = model.NeuralBandModel(percep)   # T=0.2, K=2
 ```
 
 Test points within this setup (final list will be confirmed by reading
@@ -49,11 +59,20 @@ the bifurcation diagram):
 
 Setup BlindSpot (from `../weighting_analysis/`):
 
-- Delta targets, `neural_weight='cutoff'`, `a=0`, `b=pi`,
-  `neural_angle='integral'`.
-- Exact configuration TBD when we get to step 8.
+- Delta targets (`geom_name=None`), `neural_angle_dist='cutoff'`,
+  `angle_weight='neural_angle_dist'`, `a_warp=0.0`, `b_warp=π/2`
+  (as implemented in `detect_discontinuities.py`).
+- **Why `b_warp=π/2` and not the originally-planned `π`:** the smooth
+  cutoff weight has compact support on `|ego| < b_warp`, so at `π/2`
+  any target more than 90° off the heading gets `ρ = 0`. The entire
+  rear hemisphere is then a perception blind spot: as the observer
+  rotates, there is an extended θ-range over which *every* `ρ_j = 0`,
+  so `γ_eq → 0` and `R → 0` — a genuine **perception-collapse** zone.
+  That is exactly the static discontinuity the Step-7 detector is built
+  to catch (findings.md §7.4). At the planned `b_warp=π` the window
+  still spans the full circle, so no collapse zone forms.
 - Purpose: exercise the perception-discontinuity detector at the
-  blind-spot trap.
+  perception-collapse boundary.
 
 ## Vetting steps (in order)
 
@@ -195,18 +214,27 @@ passes — or the failure is understood and the plan is revised.
 
 ## After vetting
 
-If all steps pass: design the public API for `decision_model.py`
-(probably one new method that returns SC equilibria + per-equilibrium
-basin features, plus a modified `plot_direction_mesh` companion).
-Write tests against the vetted reference scripts here.
+All steps passed. What was built: the standalone public wrapper
+`compute_basins_at_focal_loc(focal_loc, *, scan_single_stable=False)` in
+[basin_via_theta.py](basin_via_theta.py), returning
+`{'basins', 'stable_count', 'unstable_count', 'sentinel'}` with per-cell
+basin-dict shapes by cell class (findings.md §10.2). Per-cell rendering
+rules for the two-panel bifurcation+basin plot are spec'd in findings.md
+§10.4 / §11.
 
-If a step fails: the script and findings here remain as
-documentation; revise the design before continuing.
+Still to do (not yet done): wire the wrapper into `decision_model.py` as
+a `NeuralBandModel` method, and build the two-panel plot (bifurcation
+raster + per-cell basin glyphs). Both prerequisite modeling changes
+(sin(Θ*/2) dθ/dt with K=2; warp/weight decouple) are complete and the
+Steps 5–9 calibration points were re-vetted as invariant (findings.md
+§0).
 
 ## Loose ends carried forward
 
-- Discontinuity catalog completeness — see top of file. May surface
-  during step 7.
+- Discontinuity catalog completeness — RESOLVED (Step 7 + the
+  half-angle law): four basin-boundary types, the fourth being the
+  branch-cut. See the "Design decisions in scope" bullet and
+  findings.md §7.5 / §0.
 - Joint-system gradient question (whether a global Lyapunov function
   exists for the coupled (γ, θ) system, or only local quadratic forms
   near each stable SC eq). Not blocking; revisit if it becomes
