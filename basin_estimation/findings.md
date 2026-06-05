@@ -1782,3 +1782,37 @@ faithful proxy for γ-noise in multistable regions — was deferred and
 is the right thing to pick up next if a follow-up theory session
 happens. A focused extension of mc_escape.py at the (1.2, 0)
 multistable calibration points would close it.
+
+### 13.8 Ruled out — R = |γ| at a stable eq as a basin-size proxy (2026-06)
+
+**Hypothesis (raised during the walker work):** since `R=|γ|` of a
+"losing" branch slides toward 0 as the observer commits to another
+target, could the `R` of each stable SC equilibrium be a cheap stand-in
+for its basin size — avoiding the θ-scan?
+
+**Ruled out — it can anti-correlate.** At the §9 asymmetric calibration
+point `(4.0, 1.5)` (close target `(4.33,2.5)`, far `(4.33,-2.5)`):
+
+| stable eq | target | R = \|γ\| | basin width |
+|---|---|---|---|
+| θ=+71.7° | **close** | **0.918** | **303.3°** |
+| θ=−85.3° | far | 1.000 | 56.7° |
+
+The wide-basin (close) eq has the *lower* R, and the narrow-basin (far)
+eq has `R=1.000` — the opposite of a proxy. They are set by different
+things: **basin width** is the θ-arc between the bounding saddles/folds
+(proximity/dominance — who wins which heading), while **R** is the
+committed coherence (angular *sharpness*). A close, large target subtends
+a wide arc, so integrating its warped phasors over that arc spreads them
+(`R<1`) even when solely committed; a far, point-like target is sharp
+(`R→1`). At the equilibrium `R` is closer to a **well-curvature** proxy
+(`V''(θ_s) ∝ R·Θ'(θ_s)`, local stiffness), and curvature/width decouple
+freely. So `R` would mis-rank exactly the close-vs-far asymmetry the
+estimator was built to capture.
+
+**The grain of truth (a different signal).** `R→0` does flag an
+equilibrium approaching a **saddle-node death** (its basin → 0) — the
+"losing branch" observation. So small/sliding `R` is a *near-SN
+marginality* flag, not a basin-*width* measure. `R`'s legitimate uses
+remain: the local-stiffness glyph (§13.6) and a near-SN/about-to-vanish
+indicator. Basin width still requires the θ-arc-to-saddle/fold scan.
