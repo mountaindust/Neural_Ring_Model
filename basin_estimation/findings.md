@@ -34,6 +34,7 @@ step contributed each section.
 | 11 | Performance benchmark and decision on grid strategy | 11 |
 | 12 | Summary — vetting plan complete | — |
 | 13 | Open theory questions | — |
+| 14 | Do γ-basins matter for θ-noise? Scan-fold vs decision boundary | 2026-06-08 |
 
 ## 0. Re-vetting under the K=2, sin(Θ*/2) torque law (2026-06-01)
 
@@ -1268,6 +1269,15 @@ the §13.6 scope correction).
 
 ## 9. Asymmetric basin test — Step 9
 
+> **⚠️ Width numbers below revised — see §14 (2026-06-08).** The basin
+> widths in this section are γ-*branch* extents from the warm-start scan.
+> They equal the true decision basins at saddle edges but **not** at
+> γ-fold edges: the far-target basin's fold-bounded side is ~5° as a
+> branch extent but ~68° as a dynamical decision basin, so the headline
+> 5.35× asymmetry is largely a scan artifact (true dynamical ratio
+> ≈ 2×). The *qualitative* result (close basin ≫ far basin) stands. Full
+> account and the corrected table are in §14.7.
+
 The user's prior physical intuition anticipated a specific qualitative
 behavior:
 
@@ -1712,12 +1722,15 @@ but were genuinely on the table and not closed out.
    subtract, to recover the bare Kramers rate. Not blocking but
    would tighten the validation.
 
-5. **The basin-attribution bisection** mentioned in §4.7 was never
-   implemented (only sign-change bisection was). At points where
-   γ-fold detection is delicate, basin-attribution would give the
-   exact basin boundary by integrating the full coupled dynamics
-   from probe midpoints. Not blocking for visualization since the
-   |Δγ| heuristic gets fold locations to ~dθ ≈ 0.02 rad already.
+5. **The basin-attribution bisection** mentioned in §4.7 — **IMPLEMENTED
+   (2026-06-08)** in `fold_kick_demo.py`, analyzed in §14. It turned out
+   NOT to be optional: §14 shows the |Δγ| fold heuristic locates the
+   γ-*branch* termination, which is **not** the decision boundary — the
+   true (basin-attribution) boundary can sit ~1 rad past the fold
+   (5° vs 68° at (4.0,1.5)). The slaved-flow bisection integrates the
+   walker's actual slaved dynamics from probe midpoints and gives the
+   true decision basin; it should be promoted into the estimator for the
+   two-panel plot's decision-basin rendering.
 
 ### 13.6 Conceptual scope correction — basin barriers only matter in multistable regions
 
@@ -1816,3 +1829,206 @@ equilibrium approaching a **saddle-node death** (its basin → 0) — the
 marginality* flag, not a basin-*width* measure. `R`'s legitimate uses
 remain: the local-stiffness glyph (§13.6) and a near-SN/about-to-vanish
 indicator. Basin width still requires the θ-arc-to-saddle/fold scan.
+(But see §14: the θ-arc-to-*fold* is a γ-branch extent, not the decision
+basin width — only the θ-arc-to-*saddle* is a true basin boundary.)
+
+## 14. Do γ-basins matter for θ-noise? — the scan-fold vs decision boundary (2026-06-08)
+
+This section answers two questions raised after the vetting plan was
+complete. In doing so it **corrects the basin-width numbers in §9** and
+makes concrete the open item flagged in §4.4(b), §4.7, and §13.5(5).
+Everything here is reproduced by `fold_kick_demo.py`.
+
+### 14.1 The questions
+
+Neural (γ) dynamics are fast; heading (θ) updates are slow. The modeling
+assumption is that fast γ-fluctuations average out, so one finds the
+γ-*equilibrium* γ_eq(θ) and feeds it into dθ/dt — the slow-manifold
+reduction used throughout this document (§1). Crucially, the **only**
+noise actually implemented in the walker is heading noise (the `std` knob
+in `plot_walkers`); there is no γ-noise term in the simulated walker (the
+γ-Langevin of §2–§3 / §8 was a vetting tool, not part of `plot_walkers`).
+Hence:
+
+1. **Do γ-basins matter for θ-noise?** Granting that neural noise averages
+   out, can heading noise *alone* push the system into a different
+   γ-basin and so change the decision?
+2. **How much / when does it actually flip the decision?**
+
+### 14.2 The load-bearing model fact: the walker slaves γ
+
+`NeuralBandModel.plot_walkers` advances the heading each step with
+`dtheta_dt()`, and `dtheta_dt(gamma=None)` calls
+`run_dgamma_dt(init_gamma=self.gamma)` — it **re-equilibrates γ to steady
+state, warm-started from the previous γ, on every heading step**, then
+computes dθ = K·R·sin(arg(γ)/2). So the real walker rides the warm-start
+slow manifold: it is exactly the slaved / adiabatic limit *with*
+γ-continuation. This is the *implementation* of "neural noise averages
+out," and it is why the slow-manifold basin machinery of this document is
+the correct framework for the actual walker.
+
+It also pins down the correct numerical experiment for a heading kick:
+**jump θ to θ_0 holding γ at its committed value, then run the slaved
+deterministic flow** (warm-start γ at every step) to steady state and see
+which stable it lands on. (For contrast, integrating γ as a free,
+finite-speed fast variable jointly with θ — the *non*-slaved extreme —
+yields a *wider* basin and is **not** what the model does. The model
+slaves γ; the slaved-flow result below is what matches `plot_walkers`.)
+
+### 14.3 The experiment
+
+Setup: VM-k055, focal_loc = (4.0, 1.5) — the §9 asymmetric point. Two
+stable SC equilibria:
+- far-target stable  θ_far  = −1.4885 rad (faces the far target, −85°),
+  with γ_far ≈ 1.000 + 0j (R = 1.0);
+- close-target stable θ_close = +1.2520 rad (+72°).
+
+The warm-start θ-scan (Step 5 machinery) reports the far basin's CCW
+(increasing-θ) boundary as a **γ-fold at θ_fold = −1.3942**, only
+0.094 rad (5°) from θ_far; its CW boundary is a **saddle at −2.384**.
+
+Procedure (`fold_kick_demo.py`): from the far stable, set θ to a kicked
+value θ_0 with γ held at γ_far, then run
+
+  θ_{n+1} = θ_n + K·R·sin(arg(γ)/2)·dt,  with γ ← γ_eq(θ_n) warm-started
+  from the trajectory,
+
+to steady state, and record the destination stable. Vary θ_0.
+
+### 14.4 Result 1 — crossing the γ-fold is NECESSARY but NOT SUFFICIENT
+
+Kick to θ_0 = −1.3642 (0.03 rad past the scan-fold). On step 1 the
+warm-start γ-relaxation **does jump γ-branches**: γ goes from
+γ_far = 1.000 + 0j (R = 1.0) to 0.398 − 0.081j (R = 0.41), a jump of
+|Δγ| = 0.61. So γ genuinely leaves its basin — past the fold the far
+γ-min has annihilated with its γ-saddle (saddle-node), and γ drops onto a
+different, low-R branch.
+
+**Yet the slaved flow returns to FAR.** The jumped low-R branch still
+produces a restoring torque toward the far target, so as θ slides back
+the far branch is recovered (R climbs back to 1.0). Crossing the γ-fold
+makes γ jump, but the jump is *recoverable*; it does not by itself commit
+the walker to the other target.
+
+This is precisely the distinction §4.4(b) hedged with "the walker **may**
+flow to a different stable," and §4.7 named ("sign-change / scan boundary"
+≠ "basin-attribution boundary"). **The scan-fold is a property of the
+γ-branch (where it terminates); it is not where the decision changes.**
+
+### 14.5 Result 2 — the true decision (basin-attribution) boundary
+
+Bisecting θ_0 on the slaved-flow *outcome* (far ↔ close) locates the
+actual decision boundary at
+
+  **θ_dyn = −0.3074 rad (−17.6°)**,
+
+which is **1.087 rad past the scan-fold** (−1.3942). So the far stable's
+CCW *decision* basin is **1.181 rad (68°) wide**, versus the **0.094 rad
+(5°)** branch extent the scan reports. Two kicks straddling θ_dyn by
+±0.03 rad confirm the watershed:
+
+  θ_0 = −0.337 → FAR,   θ_0 = −0.277 → CLOSE.
+
+**A 0.06 rad change in heading flips which target is chosen**, with
+γ-noise identically zero.
+
+Note θ_dyn is **not** at any SC equilibrium (the SC unstable eqs here are
+near −1.31 and the back saddle −2.38). It is a **fold-mediated
+separatrix** — the watershed of the history-dependent warm-start
+continuation flow — not a smooth zero of f(θ). Consequence: θ-noise
+escape across it is **not** textbook Kramers-over-a-smooth-saddle; the
+fold-prefactor caveat of §4.4(b) / §13.4 applies.
+
+### 14.6 The exact answers
+
+**Do γ-basins matter for θ-noise? — Yes.** With γ slaved (§14.2),
+heading noise never climbs the fixed-θ free-energy barrier ΔF_γ: γ sits
+at its well bottom, so the θ-noise walker never *pays* ΔF_γ (that barrier
+is the γ-*noise* robustness of §6/§8, relevant only if a γ-noise term is
+added to the walker). The channel by which heading noise changes a
+decision is instead the **γ-fold**: a θ-excursion that carries θ across a
+fold makes the slaved γ jump to a different γ-basin (R collapses).
+γ-basin structure is therefore what *enables* a θ-noise decision switch —
+but as a branch-jump event, not as the decision boundary itself.
+
+**How much / when does it actually flip the decision?** Only when the
+heading excursion reaches the **basin-attribution boundary**, which at a
+fold edge lies well *beyond* the fold. There are two distinct thresholds:
+
+- **γ-fold (necessary):** θ leaves the committed γ-branch; γ jumps basins
+  and R collapses. At (4.0,1.5): θ_fold = −1.39, only 5° from the far
+  stable.
+- **Basin-attribution boundary (sufficient):** the post-fold branch's
+  torque finally points to the *other* target and the decision commits.
+  At (4.0,1.5): θ_dyn = −0.31, 68° from the far stable.
+
+Between the two thresholds the γ-jump is recoverable and the walker homes
+back to the original target. **So the decision robustness of a stable
+equilibrium is its basin-attribution width, NOT its fold distance.**
+
+### 14.7 Correction to §9 and to the basin-width deliverable
+
+The §9 basin widths are γ-branch extents from the warm-start scan, not
+dynamical θ-noise decision basins. They **coincide at saddle edges** (a
+smooth saddle is a genuine separatrix) but **diverge at fold edges**.
+Revised picture for the §9 far stable (CCW side rigorously bisected; CW
+side taken at the genuine saddle −2.38):
+
+| far-stable basin    | §9 scan / branch | dynamical (basin-attribution) |
+|---------------------|------------------|-------------------------------|
+| CCW-side width      | 0.094 rad (5°)   | 1.181 rad (68°)               |
+| total far basin     | ~57°             | ~119°                         |
+| close basin         | ~303°            | ~241°                         |
+| close/far ratio     | 5.35×            | ≈ 2.0×                        |
+
+The **qualitative** §9 result (close basin ≫ far basin; off-axis basins
+are asymmetric) survives. The **5.35× magnitude was largely a scan
+artifact**; the dynamical asymmetry is ≈ 2×.
+
+A clean physical distinction underlies this, dovetailing with §13.8:
+- **γ-branch fragility** — a fold close to the stable, R collapsing on a
+  small heading change — is *near-saddle-node marginality of the
+  committed neural state* (the §13.8 "small/sliding R" flag).
+- **decision-basin width** — how far the heading can stray and still
+  return — is the *behavioral* robustness.
+
+These differ at fold edges. The far stable has a *fragile γ-branch*
+(R falls off within 5°) but a *robust decision* (68° to flip). The
+estimator as built reports the former where the deliverable wants the
+latter.
+
+### 14.8 Consequence for the two-panel plot, and status of §13.5(5)
+
+The right-panel decision-basin rendering must choose between:
+
+- **(a) scan / branch widths** — what `basin_via_theta.basin_features`
+  currently returns; cheap (warm-start scan), but *wrong at fold edges*
+  (under-reports decision basins, e.g. 5° vs 68°).
+- **(b) basin-attribution widths** — the true θ-noise decision basins via
+  slaved-flow bisection. Correct; ~26 slaved integrations per boundary
+  (~30 s/boundary as written in `fold_kick_demo.py`; reducible with a
+  looser tolerance and warm-start reuse).
+
+Recommendation: render **(b)** for decision basins, and keep the scan's
+fold location + R-collapse as a *separate* "γ-branch fragility / near-SN"
+glyph (not as the basin width). The slaved-flow bisection in
+`fold_kick_demo.py` is a working implementation of the
+**basin-attribution bisection deferred in §4.7 / §13.5(5)** and can be
+promoted into the estimator.
+
+### 14.9 Caveats / still open
+
+- Only the CCW boundary was bisected; the CW boundary was taken at the
+  genuine smooth saddle (−2.38). Smooth saddles are true separatrices, so
+  this is safe, but a full dynamical §9 recompute would bisect both sides
+  at every stable.
+- θ_dyn is the **deterministic** (small-noise-limit) basin-attribution
+  boundary. A finite-amplitude θ-noise walker's *effective* basin and its
+  escape rate across a fold-mediated boundary still need the first-passage
+  treatment flagged in §13.4 / §0.2 (the boundary is a repelling
+  watershed with R-collapse, not a smooth Kramers barrier).
+- The kick model holds γ = γ_far at the instant of the kick (the heading
+  changes instantaneously; γ lags by one slaved step). This is the
+  correct initial condition for "a committed walker whose heading is
+  perturbed," and it matches `plot_walkers`. A genuinely non-slaved γ
+  would widen the basin further — but the model slaves γ.
