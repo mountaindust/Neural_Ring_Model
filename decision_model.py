@@ -1599,10 +1599,6 @@ class PerceptionModel:
             return float(out[0])
         return out
 
-    @staticmethod # An alternative idea to the cutoff function? Currently unused.
-    def _tanh_plus(theta, a, b):
-        return (np.tanh(a*(1-(theta/b)**2) ) + 1.0001)/(1.0001+np.tanh(a))
-
     @staticmethod # Mentioned in our paper, mimics Sridhar but in the perception stage.
     def _power(theta, c):
         """
