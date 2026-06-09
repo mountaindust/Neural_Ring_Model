@@ -2431,7 +2431,7 @@ class NeuralBandModel:
 
 
     def gamma_equilib(self, focal_angle=None, focal_loc=None,
-                      stability_criterion='coupled'):
+                      stability_criterion='reduced'):
         '''Find gamma equilibria of dgamma/dt at a fixed observer heading.
 
         Multistart root-finding seeded on the polar circle of radius 0.5.
@@ -2448,11 +2448,14 @@ class NeuralBandModel:
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use
             self.percep_model.focal_loc.
-        stability_criterion : {'coupled', 'discrim_a'}
-            'coupled' (default): 3x3 (gamma_re, gamma_im, theta) Jacobian
-              evaluated at the fixed heading. Includes the response to
-              perturbations in theta even though heading is held fixed here.
-            'discrim_a': legacy 2x2 gamma-only discriminant.
+        stability_criterion : {'reduced', 'coupled', 'discrim_a'}
+            'reduced' (default): timescale-separated test -- fast gamma block
+              A Hurwitz AND slow Schur complement d - c A^{-1} b < 0. The
+              criterion consistent with gamma slaved to equilibrium (see
+              `_discrim_reduced`).
+            'coupled': full 3x3 (gamma_re, gamma_im, theta) Jacobian; resolves
+              coupled gamma-theta Hopf instabilities the reduced test omits.
+            'discrim_a': legacy 2x2 gamma-only discriminant (fast block only).
 
         Returns
         -------
@@ -2467,14 +2470,16 @@ class NeuralBandModel:
                 "call sc_equilib(focal_loc=..., "
                 "stability_criterion=...) instead to find self-consistent "
                 "equilibria (heading = allocentric consensus direction).")
-        if stability_criterion == 'coupled':
+        if stability_criterion == 'reduced':
+            stability_test = self._discrim_reduced
+        elif stability_criterion == 'coupled':
             stability_test = self._discrim_coupled
         elif stability_criterion == 'discrim_a':
             stability_test = self._discrim_A
         else:
             raise ValueError(
-                f"stability_criterion must be 'coupled' or 'discrim_a', "
-                f"got {stability_criterion!r}")
+                f"stability_criterion must be 'reduced', 'coupled', or "
+                f"'discrim_a', got {stability_criterion!r}")
         if focal_angle is None:
             focal_angle = self.percep_model.focal_angle
         init_angles = np.linspace(-np.pi, np.pi-0.01)
@@ -2499,7 +2504,7 @@ class NeuralBandModel:
         return final_gammas, stability
 
 
-    def sc_equilib(self, focal_loc=None, stability_criterion='coupled'):
+    def sc_equilib(self, focal_loc=None, stability_criterion='reduced'):
         '''Find self-consistent equilibria where heading = consensus direction.
 
         A self-consistent equilibrium is a fixed point of the coupled
@@ -2523,13 +2528,23 @@ class NeuralBandModel:
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use
             self.percep_model.focal_loc.
-        stability_criterion : {'coupled', 'discrim_a'}
-            'coupled' (default): full 3x3 numerical Jacobian of the coupled
-              (gamma_re, gamma_im, theta) system. Physically correct for
-              self-consistent equilibria where the heading dimension can flip
-              an otherwise gamma-stable equilibrium into a saddle.
+        stability_criterion : {'reduced', 'coupled', 'discrim_a'}
+            'reduced' (default): timescale-separated ("block") test. Stable
+              iff the fast gamma block A is Hurwitz (gamma-equilibrium branch
+              attracting) AND the slow Schur complement
+              lam_slow = d - c A^{-1} b < 0 (the slaved heading flow
+              dtheta/dt = g(h(theta)) is stable). This is the criterion
+              consistent with gamma run to equilibrium before each heading
+              step -- the dynamics the walker actually integrates. See
+              `_discrim_reduced`.
+            'coupled': full 3x3 numerical Jacobian of the coupled
+              (gamma_re, gamma_im, theta) system. Stability of the
+              non-separated continuous ODE; additionally flags coupled
+              gamma-theta Hopf / limit-cycle instabilities. Use when studying
+              the continuous coupled system rather than the walker.
             'discrim_a': legacy 2x2 gamma-only discriminant (the original
-              `_discrim_A` test). Retained for comparison plots.
+              `_discrim_A` test; the fast block alone). Retained for
+              comparison plots.
 
         Returns
         -------
@@ -2538,14 +2553,16 @@ class NeuralBandModel:
         stability : list of bool
             stability of each equilibrium.
         '''
-        if stability_criterion == 'coupled':
+        if stability_criterion == 'reduced':
+            stability_test = self._discrim_reduced
+        elif stability_criterion == 'coupled':
             stability_test = self._discrim_coupled
         elif stability_criterion == 'discrim_a':
             stability_test = self._discrim_A
         else:
             raise ValueError(
-                f"stability_criterion must be 'coupled' or 'discrim_a', "
-                f"got {stability_criterion!r}")
+                f"stability_criterion must be 'reduced', 'coupled', or "
+                f"'discrim_a', got {stability_criterion!r}")
 
         theta_mesh = np.linspace(-np.pi, np.pi, 100)
         final_angles = []
@@ -2739,16 +2756,14 @@ class NeuralBandModel:
         return self.K * R * np.sin(Theta/2)
 
 
-    def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
-                         h=1e-6, tol=1e-8):
-        '''Stability test using the full 3x3 coupled Jacobian of
-        (gamma_re, gamma_im, theta) where dtheta/dt = K*R*sin(arg(gamma)/2).
+    def _coupled_jacobian(self, gamma_star, focal_angle, focal_loc, h=1e-6):
+        '''Central-difference 3x3 Jacobian of the coupled
+        (gamma_re, gamma_im, theta) system at (gamma_star, focal_angle),
+        with dtheta/dt = K*R*sin(arg(gamma)/2).
 
-        Built by central finite differences. Returns True iff every
-        eigenvalue has real part < -tol. This is the physically correct
-        criterion for self-consistent equilibria; `_discrim_A` only checks
-        the gamma subsystem at fixed heading and over-reports stability
-        wherever heading coupling contributes a positive eigenvalue.
+        Shared by `_discrim_coupled` (full eigenvalues) and `_discrim_reduced`
+        (fast gamma block + Schur complement) so the two criteria are built
+        from a bit-identical Jacobian.
         '''
         gr0 = float(gamma_star.real)
         gi0 = float(gamma_star.imag)
@@ -2767,8 +2782,72 @@ class NeuralBandModel:
             f_plus = coupled_rhs(gr0+dr, gi0+di, th0+dt)
             f_minus = coupled_rhs(gr0-dr, gi0-di, th0-dt)
             J[:, k] = (f_plus - f_minus) / (2*h)
+        return J
+
+
+    def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
+                         h=1e-6, tol=1e-8):
+        '''Stability test using the full 3x3 coupled Jacobian of
+        (gamma_re, gamma_im, theta) where dtheta/dt = K*R*sin(arg(gamma)/2).
+
+        Returns True iff every eigenvalue has real part < -tol. This is the
+        stability of the *fully coupled* (non-separated) continuous system:
+        it resolves coupled gamma-theta oscillations (Hopf / limit cycles)
+        that the timescale-separated walker never realizes. Use it when
+        studying the continuous coupled ODE; for the stroboscopic walker the
+        consistent criterion is `_discrim_reduced`.
+        '''
+        J = self._coupled_jacobian(gamma_star, focal_angle, focal_loc, h)
         eigs = np.linalg.eigvals(J)
         return bool(np.all(np.real(eigs) < -tol))
+
+
+    def _discrim_reduced(self, gamma_star, focal_angle, focal_loc,
+                         h=1e-6, tol=1e-8):
+        '''Timescale-separated ("block") stability test: the criterion that
+        is consistent with the slaved gamma dynamics used everywhere else in
+        the model (mean-field neural ring, gamma run to equilibrium before
+        each dtheta step in plot_walkers, no gamma-noise).
+
+        Partition the coupled Jacobian J = [[A, b], [c, d]] with A the 2x2
+        gamma block, b = d(dgamma)/dtheta, c = d(dtheta)/dgamma,
+        d = d(dtheta)/dtheta. The equilibrium is stable iff BOTH:
+
+          1. Fast layer -- the gamma-equilibrium branch gamma = h(theta) is
+             attracting: A is Hurwitz (all eig(A) real-part < -tol). For the
+             cosine kernel this coincides with `_discrim_A`.
+          2. Slow layer -- the slaved flow dtheta/dt = g(h(theta)) is stable:
+             its linearization is the Schur complement of A in J,
+                 lam_slow = d - c A^{-1} b,
+             the leading (lambda->0) term of the exact eigenvalue equation
+             lam = d - c (A - lam I)^{-1} b; setting lambda = 0 inside the
+             resolvent is exactly the adiabatic elimination of gamma. We need
+             only its SIGN, which we read off without inverting A: by the
+             block-determinant identity det(J) = det(A) * lam_slow, and
+             det(A) > 0 for a Hurwitz 2x2 A, so
+                 lam_slow < 0   <=>   det(J) < 0.
+             Using det(J) keeps the slow test well-conditioned near a
+             gamma-fold (eig(A) -> 0), where the Schur complement itself
+             diverges (|lam_slow| -> inf) even though the sign is unambiguous
+             and det(J) stays bounded. The A-Hurwitz gate above already
+             rejects the genuinely singular case before this point.
+
+        Unlike `_discrim_coupled` this deliberately does NOT see coupled
+        gamma-theta Hopf instabilities: a sustained head-bobbing limit cycle
+        requires gamma to be dynamical on the theta timescale, which the
+        separation assumption excludes. The slow flow is 1-D in theta and
+        cannot oscillate, matching the stroboscopic walker.
+        '''
+        J = self._coupled_jacobian(gamma_star, focal_angle, focal_loc, h)
+        A = J[:2, :2]
+        # Fast (gamma) layer must be attracting for the slow reduction to be
+        # meaningful: if A is not Hurwitz the branch h(theta) is not a stable
+        # sheet. This gate also means det(A) > 0 below.
+        if not np.all(np.real(np.linalg.eigvals(A)) < -tol):
+            return False
+        # Slow layer: sign(lam_slow) = sign(det J) (since det(A) > 0), computed
+        # without the ill-conditioned A^{-1} of the Schur complement.
+        return bool(np.linalg.det(J) < 0.0)
 
 
     def _discrim_A(self, gamma_star, focal_angle, focal_loc):
@@ -2841,7 +2920,7 @@ class NeuralBandModel:
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19,
                             pool=None, ax=None, title=None, wb_plot=False,
-                            stability_criterion='coupled'):
+                            stability_criterion='reduced'):
         '''Create a mesh of starting locations and, for each point in the mesh,
         find the equilibria of dgamma/dt and plot the corresponding consensus
         directions.
@@ -2864,11 +2943,12 @@ class NeuralBandModel:
             title for the quiver plot.
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
-        stability_criterion : {'coupled', 'discrim_a'}
-            Which stability test to apply (forwarded to gamma_equilib).
-            'coupled' (default) uses the full 3x3 (gamma_re, gamma_im, theta)
-            Jacobian; 'discrim_a' uses the legacy gamma-only test for
-            comparison plots.
+        stability_criterion : {'reduced', 'coupled', 'discrim_a'}
+            Which stability test to apply (forwarded to sc_equilib).
+            'reduced' (default) is the timescale-separated test (fast gamma
+            block Hurwitz + slow Schur complement < 0). 'coupled' uses the
+            full 3x3 coupled Jacobian (adds gamma-theta Hopf detection);
+            'discrim_a' uses the legacy gamma-only test for comparison plots.
 
         Returns
         -------
@@ -3028,7 +3108,7 @@ class NeuralBandModel:
                                  num_y=29, refinement_levels=3, max_count=None,
                                  boundary_dilation=1,
                                  pool=None, ax=None, title=None, wb_plot=False,
-                                 stability_criterion='coupled'):
+                                 stability_criterion='reduced'):
         '''Plot a 2D colormap showing the number of stable self-consistent
         equilibria as a function of observer (x,y) location.
 
@@ -3076,13 +3156,16 @@ class NeuralBandModel:
             title for the plot
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
-        stability_criterion : {'coupled', 'discrim_a'}
+        stability_criterion : {'reduced', 'coupled', 'discrim_a'}
             Which stability test to apply when counting stable equilibria.
-            'coupled' (default) uses the full 3x3 coupled Jacobian and is the
-            physically correct criterion. 'discrim_a' uses the legacy
-            gamma-only test and over-reports stability where heading coupling
-            contributes a positive eigenvalue; intended for side-by-side
-            comparison plots.
+            'reduced' (default) is the timescale-separated test consistent
+            with the slaved-gamma walker: fast gamma block Hurwitz AND slow
+            Schur complement d - c A^{-1} b < 0. 'coupled' uses the full 3x3
+            coupled Jacobian and additionally flags coupled gamma-theta Hopf
+            instabilities (the non-separated continuous system). 'discrim_a'
+            uses the legacy gamma-only test and over-reports stability where
+            heading coupling contributes a positive eigenvalue; intended for
+            side-by-side comparison plots.
 
         Returns
         -------
@@ -3257,8 +3340,10 @@ class NeuralBandModel:
             ax.set_title(title)
         elif stability_criterion == 'discrim_a':
             ax.set_title('Neural band bifurcation diagram (discrim_A)')
+        elif stability_criterion == 'coupled':
+            ax.set_title('Neural band bifurcation diagram (coupled)')
         else:
-            ax.set_title('Neural band bifurcation diagram')
+            ax.set_title('Neural band bifurcation diagram (reduced)')
 
         if local_plot:
             ax.legend(title='# stable\nequilibria', loc='center left',
@@ -4005,17 +4090,15 @@ class IsingExtModel:
         return ii, jj, final_gammas
     
 
-    def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
-                         h=1e-6, tol=1e-8):
-        '''Stability test using the full 3x3 coupled Jacobian of
-        (gamma_re, gamma_im, theta) where dtheta/dt = K*|gamma|*sin((angle(gamma)-theta)/2).
+    def _coupled_jacobian(self, gamma_star, focal_angle, focal_loc, h=1e-6):
+        '''Central-difference 3x3 Jacobian of the coupled
+        (gamma_re, gamma_im, theta) system at (gamma_star, focal_angle), with
+        dtheta/dt = K*|gamma|*sin(convert_angles(angle(gamma) - theta)/2).
 
-        Built by central finite differences. Returns True iff every
-        eigenvalue has real part < -tol. This is the physically correct
-        criterion for self-consistent equilibria; `_discrim_A_nu` only
-        checks the gamma subsystem at fixed heading and over-reports
-        stability wherever heading coupling contributes a positive
-        eigenvalue.
+        Shared by `_discrim_coupled` (full eigenvalues) and `_discrim_reduced`
+        (fast gamma block + Schur complement). Note that, unlike NBM, the IEM
+        heading torque depends on theta directly, so the (theta, theta) entry
+        d = d(dtheta)/dtheta is nonzero (= -K*R/2 at a self-consistent eq).
         '''
         gr0 = float(gamma_star.real)
         gi0 = float(gamma_star.imag)
@@ -4035,8 +4118,51 @@ class IsingExtModel:
             f_plus = coupled_rhs(gr0+dr, gi0+di, th0+dt)
             f_minus = coupled_rhs(gr0-dr, gi0-di, th0-dt)
             J[:, k] = (f_plus - f_minus) / (2*h)
+        return J
+
+
+    def _discrim_coupled(self, gamma_star, focal_angle, focal_loc,
+                         h=1e-6, tol=1e-8):
+        '''Stability test using the full 3x3 coupled Jacobian of
+        (gamma_re, gamma_im, theta) where dtheta/dt = K*|gamma|*sin((angle(gamma)-theta)/2).
+
+        Returns True iff every eigenvalue has real part < -tol -- the
+        stability of the fully coupled (non-separated) continuous system,
+        including coupled gamma-theta oscillations. For the timescale-
+        separated criterion consistent with the slaved-gamma walker, use
+        `_discrim_reduced`.
+        '''
+        J = self._coupled_jacobian(gamma_star, focal_angle, focal_loc, h)
         eigs = np.linalg.eigvals(J)
         return bool(np.all(np.real(eigs) < -tol))
+
+
+    def _discrim_reduced(self, gamma_star, focal_angle, focal_loc,
+                         h=1e-6, tol=1e-8):
+        '''Timescale-separated ("block") stability test for IEM, consistent
+        with gamma slaved to equilibrium (mean field; gamma run to steady
+        state before each heading step; no gamma-noise).
+
+        Partition the coupled Jacobian J = [[A, b], [c, d]] (A the 2x2 gamma
+        block). Stable iff BOTH the fast layer is attracting (A Hurwitz, all
+        eig(A) real-part < -tol -- coincides with `_discrim_A_nu` for the
+        cosine kernel) AND the slow layer is stable. The slow eigenvalue is
+        the Schur complement lam_slow = d - c A^{-1} b, the linearization of
+        the slaved heading flow dtheta/dt = g(h(theta), theta). Because IEM's
+        torque depends on theta directly, d != 0 here (= -K*R/2 at a
+        self-consistent eq), so the slow eigenvalue carries that direct
+        heading restoring term in addition to the gamma-mediated feedback.
+        We test its SIGN via the block-determinant identity without inverting
+        A (which is ill-conditioned near a gamma-fold): det(J) = det(A)*lam_slow
+        with det(A) > 0 for Hurwitz A, so lam_slow < 0 <=> det(J) < 0. Like the
+        NBM version, this deliberately omits coupled gamma-theta Hopf
+        instabilities.
+        '''
+        J = self._coupled_jacobian(gamma_star, focal_angle, focal_loc, h)
+        A = J[:2, :2]
+        if not np.all(np.real(np.linalg.eigvals(A)) < -tol):
+            return False
+        return bool(np.linalg.det(J) < 0.0)
 
 
     def _discrim_A_nu(self, gamma_star, focal_loc):
@@ -4097,15 +4223,18 @@ class IsingExtModel:
         key, x, y, stability_criterion = args
         focal_loc = np.array([x, y])
         gamma_eqs = self.sc_equilib(focal_loc=focal_loc)
-        if stability_criterion == 'discrim_a':
+        if stability_criterion == 'reduced':
+            stable = [self._discrim_reduced(g, np.angle(g), focal_loc)
+                      for g in gamma_eqs]
+        elif stability_criterion == 'discrim_a':
             stable = [self._discrim_A_nu(g, focal_loc) for g in gamma_eqs]
         elif stability_criterion == 'coupled':
             stable = [self._discrim_coupled(g, np.angle(g), focal_loc)
                       for g in gamma_eqs]
         else:
             raise ValueError(
-                f"stability_criterion must be 'coupled' or 'discrim_a', "
-                f"got {stability_criterion!r}")
+                f"stability_criterion must be 'reduced', 'coupled', or "
+                f"'discrim_a', got {stability_criterion!r}")
         return key, int(sum(stable))
 
 
@@ -4113,7 +4242,7 @@ class IsingExtModel:
                                  num_y=29, refinement_levels=3, max_count=None,
                                  boundary_dilation=1,
                                  pool=None, ax=None, title=None, wb_plot=False,
-                                 stability_criterion='discrim_a'):
+                                 stability_criterion='reduced'):
         '''Plot a 2D colormap showing the number of stable self-consistent
         equilibria of the Ising-ext model as a function of observer (x,y)
         location.
@@ -4160,15 +4289,18 @@ class IsingExtModel:
             title for the plot
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
-        stability_criterion : {'discrim_a', 'coupled'}
+        stability_criterion : {'reduced', 'discrim_a', 'coupled'}
             Which stability test to apply when counting stable equilibria.
-            'discrim_a' (default) routes to ``_discrim_A_nu``, the
-            cosine-aware gamma-only test. Because the Ising-ext model is
-            allocentric, heading rotation does not rotate gamma and the
-            gamma-only test is the natural criterion. 'coupled' (opt-in)
-            uses the full 3x3 (gamma_re, gamma_im, theta) Jacobian; useful
-            as a sanity check when egocentric ``neural_weight`` weighting is
-            strongly direction-biased.
+            'reduced' (default) is the timescale-separated test: fast gamma
+            block Hurwitz AND slow Schur complement d - c A^{-1} b < 0
+            (``_discrim_reduced``). 'discrim_a' routes to ``_discrim_A_nu``,
+            the cosine-aware gamma-only test (the fast block alone); for IEM
+            the heading torque adds a direct -K*R/2 self-term to the slow
+            mode, so 'reduced' can differ from 'discrim_a' where that term
+            and the gamma-mediated feedback compete. 'coupled' uses the full
+            3x3 (gamma_re, gamma_im, theta) Jacobian and additionally flags
+            coupled gamma-theta Hopf instabilities (the non-separated
+            continuous system).
 
         Returns
         -------
@@ -4320,8 +4452,10 @@ class IsingExtModel:
             ax.set_title(title)
         elif stability_criterion == 'coupled':
             ax.set_title('Ising-ext bifurcation diagram (coupled)')
+        elif stability_criterion == 'discrim_a':
+            ax.set_title('Ising-ext bifurcation diagram (discrim_A)')
         else:
-            ax.set_title('Ising-ext bifurcation diagram')
+            ax.set_title('Ising-ext bifurcation diagram (reduced)')
 
         if local_plot:
             ax.legend(title='# stable\nequilibria', loc='center left',
@@ -4334,7 +4468,7 @@ class IsingExtModel:
 
     def plot_direction_mesh(self, xlim=(0,6), num_x=19, ylim=(-3.5,3.5), num_y=19,
                             pool=None, ax=None, wb_plot=False,
-                            stability_criterion='discrim_a'):
+                            stability_criterion='reduced'):
         '''Create a mesh of starting locations and, for each point in the mesh,
         find the equilibria of dgamma/dt and plot the corresponding consensus
         directions.
@@ -4355,15 +4489,14 @@ class IsingExtModel:
             If provided, plot on this axis instead of creating a new figure and axis.
         wb_plot : bool
             whether or not plotting in a Jupyter notebook
-        stability_criterion : {'discrim_a', 'coupled'}
-            Which stability test to apply to each equilibrium. Because
-            `IsingExtModel` is allocentric (gamma is reconstructed in world
-            coordinates inside `dgamma_dt`), heading rotation does not rotate
-            gamma, so the cosine-aware gamma-only test `_discrim_A_nu` is
-            the natural stability criterion. 'discrim_a' (default) uses it.
-            'coupled' (opt-in) uses the full 3x3 (gamma_re, gamma_im, theta)
-            Jacobian; useful as a sanity check when egocentric `neural_weight`
-            weighting is strongly direction-biased.
+        stability_criterion : {'reduced', 'discrim_a', 'coupled'}
+            Which stability test to apply to each equilibrium. 'reduced'
+            (default) is the timescale-separated test (fast gamma block
+            Hurwitz + slow Schur complement < 0), consistent with gamma
+            slaved to equilibrium. 'discrim_a' uses the cosine-aware
+            gamma-only test `_discrim_A_nu` (the fast block alone). 'coupled'
+            uses the full 3x3 (gamma_re, gamma_im, theta) Jacobian and adds
+            coupled gamma-theta Hopf detection.
 
         Returns
         -------
@@ -4420,7 +4553,10 @@ class IsingExtModel:
                 U_list[n][jj,ii] = np.cos(theta)
                 V_list[n][jj,ii] = np.sin(theta)
                 focal_loc = np.array([X[jj,ii], Y[jj,ii]])
-                if stability_criterion == 'coupled':
+                if stability_criterion == 'reduced':
+                    stability_list[n][jj,ii] = self._discrim_reduced(
+                        gamma, np.angle(gamma), focal_loc)
+                elif stability_criterion == 'coupled':
                     stability_list[n][jj,ii] = self._discrim_coupled(
                         gamma, np.angle(gamma), focal_loc)
                 elif stability_criterion == 'discrim_a':
@@ -4428,8 +4564,8 @@ class IsingExtModel:
                         gamma, focal_loc)
                 else:
                     raise ValueError(
-                        f"stability_criterion must be 'coupled' or "
-                        f"'discrim_a', got {stability_criterion!r}")
+                        f"stability_criterion must be 'reduced', 'coupled', "
+                        f"or 'discrim_a', got {stability_criterion!r}")
             if len(final_gammas) > 1:
                 multi_sol[jj,ii] = True
 
