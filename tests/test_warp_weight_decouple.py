@@ -132,13 +132,13 @@ ok(same, "uniform weight is warp-independent (rho from arc length only)")
 
 
 # ---------------------------------------------------------------------------
-print("\n=== Default config == old weight_angle_only=True cutoff ===")
+print("\n=== Default config: lin_cutoff warp + uniform weight ===")
 # ---------------------------------------------------------------------------
 pm_default = PM(tg())
-ok(pm_default.warp_name == "cutoff" and pm_default.weight_name is None,
-   "default: cutoff warp + uniform weight")
+ok(pm_default.warp_name == "lin_cutoff" and pm_default.weight_name is None,
+   "default: lin_cutoff warp + uniform weight")
 ok(pm_default.warp_params == {"a": pi / 3, "b": 4 * pi / 5},
-   "default: cutoff warp params are the documented defaults")
+   "default: lin_cutoff warp params are the documented defaults")
 
 
 # ---------------------------------------------------------------------------

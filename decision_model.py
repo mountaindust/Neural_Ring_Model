@@ -512,6 +512,7 @@ class Targets:
 # weight (rho attractiveness), except 'direct_power' which is warp-only.
 _FAMILY_INFO = {
     'cutoff':         {'slots': ('a', 'b'),     'defaults': {'a': np.pi/3, 'b': 4*np.pi/5}},
+    'lin_cutoff':     {'slots': ('a', 'b'),     'defaults': {'a': np.pi/3, 'b': 4*np.pi/5}},
     'vonmises':       {'slots': ('k', None),    'defaults': {'k': 1.0}},
     'symmetric_beta': {'slots': ('alpha', 'b'), 'defaults': {'alpha': 5.0, 'b': np.pi}},
     'reg_power':      {'slots': ('d', 'e'),     'defaults': {'d': 0.5, 'e': 1e-3}},
@@ -567,7 +568,7 @@ class PerceptionModel:
     negative egocentric angles are to the right.'''
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0,
-                 neural_angle_dist='cutoff', angle_weight=None,
+                 neural_angle_dist='lin_cutoff', angle_weight=None,
                  a_warp=None, b_warp=None, a_weight=None, b_weight=None,
                  theta_mesh=2000):
         '''Establishes an observer at location focal_loc, looking in a direction
@@ -604,13 +605,17 @@ class PerceptionModel:
             ndarray.
         focal_angle : float
             direction observer is facing in Euclidean space from [-pi,pi).
-        neural_angle_dist : {'cutoff', 'vonmises', 'symmetric_beta', 'reg_power', 'direct_power', None} (default = 'cutoff')
+        neural_angle_dist : {'cutoff', 'lin_cutoff', 'vonmises', 'symmetric_beta', 'reg_power', 'direct_power', None} (default = 'lin_cutoff')
             WARP role. A named distribution is integrated CDF-like to map
             egocentric angles to neural angles (denser neural representation
             where the distribution is concentrated). The families:
                 - 'cutoff' : smooth cutoff, 1 in front and 0 in back with a
                              smooth transition. Params a (inner), b (outer);
                              0 <= a < b. See _smooth_cutoff.
+                - 'lin_cutoff' : trapezoidal cutoff -- the piecewise-linear
+                             analog of 'cutoff' (1 on [-a, a], linear ramp to 0
+                             on a < |theta| < b). Same params/support; closed-form
+                             integral and inverse (no spline). See _lin_cutoff.
                 - 'vonmises' : von Mises pdf exp(k*cos(theta))/(2*pi*I0(k)).
                              Param k > 0 (larger k = narrower peak). See _vonmises.
                 - 'symmetric_beta' : Beta(alpha, alpha) rescaled to [-b, b].
@@ -626,7 +631,7 @@ class PerceptionModel:
                              compresses them. WARP ONLY -- not valid as a weight
                              (it is a signed angle map, not a density).
                 - None : identity warp (neural angle = egocentric angle).
-        angle_weight : {'cutoff', 'vonmises', 'symmetric_beta', 'reg_power', 'neural_angle_dist', None} (default = None)
+        angle_weight : {'cutoff', 'lin_cutoff', 'vonmises', 'symmetric_beta', 'reg_power', 'neural_angle_dist', None} (default = None)
             WEIGHT role. A named density family (same families as the warp,
             EXCEPT 'direct_power', which is disallowed) integrated over each
             target's visible arc to set rho. Plus:
@@ -639,7 +644,7 @@ class PerceptionModel:
         a_warp, b_warp : float, optional
             Parameters for the warp family, by slot. The real meaning of each
             slot depends on the family (see _FAMILY_INFO):
-                cutoff: a_warp=a, b_warp=b;  vonmises: a_warp=k;
+                cutoff/lin_cutoff: a_warp=a, b_warp=b;  vonmises: a_warp=k;
                 symmetric_beta: a_warp=alpha, b_warp=b;
                 reg_power: a_warp=d, b_warp=e;  direct_power: a_warp=c.
             If left None, the family default is used. Unused slots (e.g. b_warp
@@ -774,11 +779,11 @@ class PerceptionModel:
     def _validate_params(name, params, role):
         """Validate a family's resolved parameter dict, naming the real
         parameter (and the generic slot) in any error message."""
-        if name == 'cutoff':
+        if name in ('cutoff', 'lin_cutoff'):
             a, b = params['a'], params['b']
             if not (0 <= a < b):
                 raise ValueError(
-                    f"for cutoff {role}, a_{role} (a) and b_{role} (b) must "
+                    f"for {name} {role}, a_{role} (a) and b_{role} (b) must "
                     f"satisfy 0 <= a < b (got a={a}, b={b}).")
         elif name == 'vonmises':
             if not (params['k'] > 0):
@@ -1062,6 +1067,9 @@ class PerceptionModel:
             result = np.where(theta_arr >= b, np.pi, result)
             result = np.where(theta_arr <= -b, -np.pi, result)
             return float(result) if scalar else result
+        elif name == 'lin_cutoff':
+            return PerceptionModel._lin_cutoff_integral(
+                theta, params['a'], params['b'])
         elif name == 'vonmises' or name == 'reg_power':
             theta_arr = np.asarray(theta, dtype=float)
             scalar = theta_arr.ndim == 0
@@ -1090,6 +1098,9 @@ class PerceptionModel:
             result = np.where(y_arr == np.pi, b, result)
             result = np.where(y_arr == -np.pi, -b, result)
             return float(result) if scalar else result
+        elif name == 'lin_cutoff':
+            return PerceptionModel._lin_cutoff_int_inverse(
+                y, params['a'], params['b'])
         elif name == 'vonmises' or name == 'reg_power':
             y_arr = np.asarray(y, dtype=float)
             scalar = y_arr.ndim == 0
@@ -1249,6 +1260,81 @@ class PerceptionModel:
 
         result = brentq(func, x_lo, x_hi, xtol=tol, rtol=tol, maxiter=200)
         return np.sign(y) * result
+
+    @staticmethod
+    def _lin_cutoff(x, a, b):
+        """Trapezoidal (piecewise-linear) cutoff density: 1 on [-a, a], a
+        linear ramp down to 0 on a < |x| < b, and 0 for |x| >= b. The
+        piecewise-linear analog of _smooth_cutoff -- same support and unit
+        plateau, hence the same area (a+b)/2 (so the integral map shares the
+        normalization 2*pi/(a+b)), but with a closed-form integral and
+        inverse instead of an essential-singularity bump. Requires
+        0 <= a < b. Vectorized.
+        """
+        if not (0 <= a < b):
+            raise ValueError(f"Parameters must satisfy 0 <= a < b (a={a}, b={b}).")
+        x = np.asarray(x, dtype=float)
+        scalar_input = x.ndim == 0
+        absx = np.abs(x)
+        result = np.where(
+            absx <= a, 1.0,
+            np.where(absx < b, (b - absx) / (b - a), 0.0))
+        return result.item() if scalar_input else result
+
+    @staticmethod
+    def _lin_cutoff_integral(theta, a, b):
+        """Forward CDF-like map F(theta; a, b) = norm * integral from 0 to
+        theta of _lin_cutoff(x; a, b) dx, with norm = 2*pi/(a+b) so that
+        F(+/-b) = +/-pi (matching the _smooth_cutoff_integral convention).
+        Closed form and odd in theta: linear (norm*theta) on |theta| <= a,
+        quadratic on a < |theta| < b, saturating to +/-pi for |theta| >= b.
+        Requires 0 <= a < b. Vectorized; replaces the quad-based reference
+        used for the smooth cutoff, so no spline is needed.
+        """
+        if not (0 <= a < b):
+            raise ValueError(f"Parameters must satisfy 0 <= a < b (a={a}, b={b}).")
+        theta = np.asarray(theta, dtype=float)
+        scalar_input = theta.ndim == 0
+        norm = 2 * np.pi / (a + b)
+        s = np.sign(theta)
+        at = np.abs(theta)
+        # Ramp branch (a < |theta| < b). The expression is evaluated for all
+        # entries but only selected on the ramp; (b - at)**2 stays finite
+        # outside it, so the masked-out values are harmless.
+        ramp = norm * (a + ((b - a) ** 2 - (b - at) ** 2) / (2 * (b - a)))
+        result = np.where(
+            at <= a, norm * at,
+            np.where(at < b, ramp, np.pi))
+        result = s * result
+        return result.item() if scalar_input else result
+
+    @staticmethod
+    def _lin_cutoff_int_inverse(y, a, b):
+        """Inverse of _lin_cutoff_integral. Domain y in [-pi, pi]; pins
+        y = +/-pi to +/-b (saturation convention). Closed form and odd in y:
+        linear (y/norm) on |y| <= a*norm, a single square root on the ramp.
+        Exact to machine precision (no condition limit near +/-pi, unlike the
+        smooth-cutoff spline). Requires 0 <= a < b. Vectorized.
+        """
+        if not (0 <= a < b):
+            raise ValueError(f"Parameters must satisfy 0 <= a < b (a={a}, b={b}).")
+        y = np.asarray(y, dtype=float)
+        scalar_input = y.ndim == 0
+        if np.any(y < -np.pi) or np.any(y > np.pi):
+            raise ValueError("y must satisfy -pi <= y <= pi.")
+        norm = 2 * np.pi / (a + b)
+        s = np.sign(y)
+        ay = np.abs(y)
+        # Ramp inverse: theta = b - sqrt((b-a)^2 - 2(b-a)(|y|/norm - a)).
+        # Clip the discriminant to guard tiny negatives from roundoff at |y|=pi.
+        disc = np.clip((b - a) ** 2 - 2 * (b - a) * (ay / norm - a), 0.0, None)
+        ramp = b - np.sqrt(disc)
+        result = np.where(ay <= a * norm, ay / norm, ramp)
+        result = s * result
+        # Force exact endpoints.
+        result = np.where(y == np.pi, b, result)
+        result = np.where(y == -np.pi, -b, result)
+        return result.item() if scalar_input else result
 
     @staticmethod
     def _vonmises(theta, k):
@@ -1833,6 +1919,8 @@ class PerceptionModel:
             return np.ones_like(theta)
         elif name == 'cutoff':
             return self._smooth_cutoff(theta, p['a'], p['b'])
+        elif name == 'lin_cutoff':
+            return self._lin_cutoff(theta, p['a'], p['b'])
         elif name == 'vonmises':
             return self._vonmises(theta, p['k'])
         elif name == 'symmetric_beta':
@@ -3684,7 +3772,12 @@ class IsingExtModel:
         self.nu = nu
 
         if percep_model is None:
-            self.percep_model = PerceptionModel()
+            # IEM lives in allocentric/physical coordinates: gamma is a sum of
+            # exp(i*angle) over PHYSICAL target angles, so the perception model
+            # must apply no warp (identity) and uniform weight. A non-identity
+            # neural_angle_dist (e.g. the default) is a category error for IEM.
+            self.percep_model = PerceptionModel(neural_angle_dist=None,
+                                                angle_weight=None)
         else:
             assert isinstance(percep_model,PerceptionModel),\
             "percep_model must be a PerceptionModel object."
