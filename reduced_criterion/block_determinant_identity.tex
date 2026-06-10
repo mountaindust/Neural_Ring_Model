@@ -1,0 +1,152 @@
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{microtype}
+\usepackage[margin=1in]{geometry}
+
+\title{The block-determinant identity\\
+       (and how the reduced criterion uses it)}
+\author{}
+\date{}
+
+% Convenience operators
+\DeclareMathOperator{\sign}{sign}
+\DeclareMathOperator{\eig}{eig}
+\DeclareMathOperator{\Hess}{Hess}
+
+\begin{document}
+
+\maketitle
+
+Reference note for the \texttt{'reduced'} stability criterion in
+\texttt{decision\_model.py} (\texttt{NBM.\_discrim\_reduced} /
+\texttt{IEM.\_discrim\_reduced}). Explains why the slow stability test is
+evaluated as $\sign(\det J)$ rather than by inverting $A$.
+
+\section{The identity}
+
+For a block matrix with $A$ square and invertible and $d$ a scalar,
+\[
+J=\begin{pmatrix} A & b \\ c & d\end{pmatrix},
+\qquad
+\det(J) = \det(A)\,\underbrace{\left(d - c\,A^{-1}b\right)}_{\lambda_{\text{slow}}}.
+\]
+
+The quantity $d - c A^{-1} b$ is the \textbf{Schur complement} of $A$ in $J$
+(written $J/A$). In our $3\times 3$ coupled Jacobian on
+$(\gamma_{\mathrm{re}}, \gamma_{\mathrm{im}}, \theta)$:
+
+\begin{itemize}
+  \item $A$ = the $2\times 2$ $\gamma$ block $\partial(d\gamma/dt)/\partial\gamma$,
+  \item $b = \partial(d\gamma/dt)/\partial\theta$ ($2\times 1$ column),
+  \item $c = \partial(d\theta/dt)/\partial\gamma$ ($1\times 2$ row),
+  \item $d = \partial(d\theta/dt)/\partial\theta$ (scalar; $=0$ for NBM,
+        $=-K\,R/2$ for IEM at an SC eq).
+\end{itemize}
+
+So $\lambda_{\text{slow}} = d - c A^{-1} b$ is a single real number.
+
+\section{Proof (block LU factorization)}
+
+Factor the coupling out of $J$:
+\[
+\begin{pmatrix} A & b \\ c & d\end{pmatrix}
+=
+\begin{pmatrix} I & 0 \\ c A^{-1} & 1\end{pmatrix}
+\begin{pmatrix} A & b \\ 0 & d - cA^{-1}b\end{pmatrix}.
+\]
+
+Check by multiplying out the bottom row of the product:
+\begin{itemize}
+  \item bottom-left: $cA^{-1}\cdot A + 1\cdot 0 = c$ \checkmark
+  \item bottom-right: $cA^{-1}\cdot b + 1\cdot(d - cA^{-1}b) = d$ \checkmark
+\end{itemize}
+
+(top row is trivially $A$, $b$). The determinant of a product is the product
+of determinants:
+\begin{itemize}
+  \item left factor: lower-triangular with unit diagonal blocks
+        $\implies \det = 1\cdot 1 = 1$,
+  \item right factor: upper block-triangular
+        $\implies \det = \det(A)\cdot(d - cA^{-1}b)$.
+\end{itemize}
+
+Therefore $\det(J) = \det(A)\cdot(d - cA^{-1}b) = \det(A)\cdot\lambda_{\text{slow}}$.
+\hfill$\blacksquare$
+
+\section{Why $\lambda_{\text{slow}}$ is the slow eigenvalue}
+
+In the timescale-separated (slaved) reduction, $\gamma$ is fast and tracks its
+equilibrium branch $\gamma = h(\theta)$, leaving the 1-D slow flow
+$d\theta/dt = g(h(\theta))$. Its linearization is the total derivative
+\[
+\lambda_{\text{slow}}
+= \frac{d}{d\theta}\,g(h(\theta))
+= \underbrace{d}_{\partial_\theta(d\theta/dt)}
++ \; c\,\underbrace{h'(\theta)}_{=\,-A^{-1}b}
+= d - cA^{-1}b.
+\]
+
+$h'(\theta) = -A^{-1}b$ comes from differentiating the branch condition
+$F(h(\theta), \theta) = 0$ in $\theta$. Reading it physically: perturb
+$\theta \to$ the $\gamma$-equilibrium shifts by $h'(\theta) \to$ that shift
+feeds back into $d\theta/dt$ through $c$. The direct term $d$ plus this
+indirect $\gamma$-mediated term is the net slow restoring rate.
+
+$\lambda_{\text{slow}}$ is also the leading ($\lambda \to 0$) term of the
+\textbf{exact} eigenvalue equation $\lambda = d - c (A - \lambda I)^{-1} b$:
+setting $\lambda = 0$ inside the resolvent is precisely the adiabatic
+elimination of $\gamma$.
+
+\section{How the criterion uses it}
+
+$A$ is symmetric (the $\gamma$-dynamics is a gradient flow,
+$A = -\Hess \hat F$), so its eigenvalues are real. Once the \textbf{Hurwitz
+gate} passes (both $\eig(A) < -\mathrm{tol}$, i.e. the $\gamma$-branch is
+attracting), the two eigenvalues are negative reals and
+\[
+\det(A) = \mu_1 \mu_2 > 0.
+\]
+
+With a positive prefactor, $\det(J)$ and $\lambda_{\text{slow}}$ share a sign:
+\[
+\boxed{\;\lambda_{\text{slow}} < 0 \iff \det(J) < 0\;}
+\]
+
+So the slow-mode stability test is just $\sign(\det J)$ --- \textbf{no
+$A^{-1}$}. The criterion is therefore:
+\begin{enumerate}
+  \item $A$ Hurwitz (fast/$\gamma$ layer attracting), \textbf{and}
+  \item $\det(J) < 0$ (slow/$\theta$ layer stable).
+\end{enumerate}
+
+\subsection{Why $\det(J)$ instead of computing $\lambda_{\text{slow}}$ directly}
+
+Near a \textbf{$\gamma$-fold} (saddle-node of the fixed-heading
+$\gamma$-equilibrium), one eigenvalue of $A \to 0$, so $A^{-1}$ --- and hence
+$\lambda_{\text{slow}} = d - cA^{-1}b$ itself --- \textbf{diverges}
+($|\lambda_{\text{slow}}| \to \infty$). The sign is still unambiguous, but the
+literal Schur expression is numerically ill-conditioned.
+$\det(J) = \det(A)\cdot\lambda_{\text{slow}}$ stays \textbf{bounded}
+($\det(A) \to 0$ cancels the blow-up) and keeps the correct sign.
+
+Measured at the island fold tip $\approx(2.467, 2.633)$:
+$\min|\eig(A)| \approx 8\mathrm{e}{-4}$, $|\lambda_{\text{slow}}| \approx 308$,
+while $\det(J) \approx -0.25$. Verdict-identical to the Schur form across the
+island grid (0/538 mismatches); unit-tested in
+\texttt{tests/test\_reduced\_criterion.py}
+(\texttt{test\_schur\_block\_determinant\_identity\_*},
+\texttt{test\_reduced\_robust\_near\_gamma\_fold}).
+
+A useful structural note: the ill-conditioned and the delicate-decision
+regimes are \textbf{anti-correlated}. Near a fold $|\lambda_{\text{slow}}|$ is
+large (the slow mode is far from marginal, sign robust); a \emph{marginal}
+slow eigenvalue ($\lambda_{\text{slow}} \approx 0$, where sign is delicate)
+only occurs where $A$ is well-conditioned. You never face both difficulties at
+once.
+
+\end{document}

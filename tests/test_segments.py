@@ -357,3 +357,12 @@ check("l=0 capsule dist matches circle", dist_cap, dist_cir, tol=1e-10)
 print(f"\n{'='*40}")
 print(f"Results: {passed} passed, {failed} failed")
 print(f"{'='*40}")
+
+
+def test_segments():
+    """Pytest entry point: the checks run at import; fail if any failed."""
+    assert failed == 0, f"{failed} capsule-geometry checks failed"
+
+
+if __name__ == '__main__' and failed > 0:
+    exit(1)

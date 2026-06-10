@@ -8,7 +8,7 @@ Companion analysis for the `'reduced'` stability criterion on `NeuralBandModel`
   equilibrium (the dynamics `plot_walkers` integrates). Stable iff the fast γ
   block `A` is Hurwitz **and** the slow Schur complement `λ_slow = d − c·A⁻¹·b`
   is negative; the sign is read off as `sign(det J)` (block-determinant
-  identity, see `block_determinant_identity.md`) to stay well-conditioned at
+  identity, see `block_determinant_identity.tex`) to stay well-conditioned at
   γ-folds.
 - **`coupled`** — full 3×3 eigenvalue test; stability of the non-separated
   continuous ODE, which additionally sees coupled γ–θ Hopf / limit-cycle

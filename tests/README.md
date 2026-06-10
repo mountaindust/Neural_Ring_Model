@@ -1,0 +1,81 @@
+# Tests — running convention
+
+This directory mixes **two kinds of tests by design**, plus one **slow, run-it-deliberately
+research script**. There is no `pytest.ini`/`pyproject.toml`; pytest runs on naming-convention
+defaults. [`conftest.py`](conftest.py) only adds the repo root to `sys.path` so
+`import decision_model` resolves.
+
+## TL;DR
+
+```sh
+pytest tests/                      # runs the whole fast suite (everything except broad_validation)
+python tests/test_broad_validation.py   # the slow cross-model validation — run on purpose, not in routine testing
+```
+
+Every file except `test_broad_validation.py` is collected and run by `pytest tests/`.
+
+## The two tiers
+
+### 1. pytest-native correctness/unit tests
+Discrete `test_*` functions with `assert`s. Run under pytest; some also re-invoke pytest or
+their own functions from a `__main__` block, so `python tests/<file>.py` works too.
+
+- [`test_half_angle_torque.py`](test_half_angle_torque.py) — dθ/dt half-angle torque law (NBM
+  neural-angle form, IEM physical form), torque shape + the ±π branch-cut jump, the
+  `convert_angles` 4π-wrap regression, K-doubling Jacobian invariance, and walker
+  noise/blind-spot behavior.
+- [`test_reduced_criterion.py`](test_reduced_criterion.py) — correctness of the `'reduced'`
+  stability criterion: Schur block-determinant identity, Schur == slaved slow flow, the
+  documented vonmises (1.5, 0) `reduced`-vs-`discrim_a` disagreement, `reduced == coupled` in a
+  non-Hopf regime, and the defaults.
+- [`test_trajectory_intersection.py`](test_trajectory_intersection.py) —
+  `Targets.check_trajectory_intersection` and `_min_dist_segments` across circle/delta/capsule.
+
+### 2. Numerics-verification scripts (also pytest-discoverable)
+These run their checks at **module import** using `check_*`/`ok`/`raises` helpers that tally
+module-level `passed`/`failed` counters and print a per-check banner (max-diff vs tolerance,
+per-family sections). The rich printed output is the point — keep them script-style.
+
+Each exposes a single bridging `def test_<name>(): assert failed == 0` so that **`pytest`
+genuinely fails when a check fails** (pytest captures the banner and shows it on failure), and
+guards its `exit(1)` under `if __name__ == '__main__'` so running directly still returns a
+non-zero exit code. `python tests/<file>.py` and `pytest` therefore agree.
+
+- [`test_perception_spline.py`](test_perception_spline.py) — precomputed integral splines
+  (forward/inverse/roundtrip/symmetry/endpoints/validation) vs quad/brentq/scipy references for
+  every warp family, plus end-to-end `_integrate_neural_weight` invariance.
+- [`test_lin_cutoff.py`](test_lin_cutoff.py) — the analytic `'lin_cutoff'` (trapezoidal) family:
+  closed-form integral + inverse vs a quad reference, saturation/normalization, and end-to-end
+  as both a warp and a weight.
+- [`test_intervals.py`](test_intervals.py) — occlusion/blocking interval arithmetic
+  (`_subtract_intervals_circle`, `_unwrap_interval`, `_subtract_interval_pair`) and
+  `_integrate_neural_weight`.
+- [`test_segments.py`](test_segments.py) — capsule target geometry (`check_target_overlap`,
+  `get_dist_to_targets`, `get_percep_angles`, `_get_target_signals`; zero/finite width, end-on
+  viewing, ±π wrap, partial occlusion, l=0 → circle degeneracy).
+- [`test_warp_weight_decouple.py`](test_warp_weight_decouple.py) — the original example of this
+  bridging pattern. New decoupled warp/weight API: cross-family warp+weight, per-role params,
+  tied-vs-uniform equivalence, respline isolation, read-only `warp_params`/`weight_params`
+  views, and error paths.
+
+## ⚠️ The slow one — run deliberately
+
+[`test_broad_validation.py`](test_broad_validation.py) is a **research-grade cross-model
+comparison**, not a unit test. It compares NBM vs IEM self-consistent equilibria over a
+238-point spatial grid × {delta, circle} × {no-warp, power `c=0.5`} using
+`multiprocessing.Pool`, with worker count from [`parallel_config.py`](../parallel_config.py).
+
+- All work lives inside `if __name__ == '__main__':`, so **`pytest` imports it but runs
+  nothing** — it is intentionally excluded from the routine suite.
+- Run it **only on purpose**, with `python` (not pytest), on the many-core machine:
+  ```sh
+  python tests/test_broad_validation.py
+  ```
+- It takes a long time and saturates cores — do not fold it into a default test run or CI step.
+
+## Why some tests aren't `assert`-style
+
+The numerics scripts cross-check spline/quad/brentq paths across whole parameter sweeps and
+report per-check max-error vs tolerance. That diagnostic narrative is far more useful for
+debugging a tolerance regression than a bare pass/fail would be, which is why they stay
+script-style and are bridged into pytest rather than rewritten as many tiny `test_*` functions.

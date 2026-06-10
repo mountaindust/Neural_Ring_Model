@@ -264,5 +264,12 @@ raises(lambda: PM(neural_angle_dist='lin_cutoff', a_warp=1.0, b_warp=0.5),
 # ========================================================
 print(f"\n=== RESULTS: {passed} passed, {failed} failed ===")
 # ========================================================
-if failed > 0:
+
+
+def test_lin_cutoff():
+    """Pytest entry point: the checks run at import; fail if any failed."""
+    assert failed == 0, f"{failed} lin_cutoff checks failed"
+
+
+if __name__ == '__main__' and failed > 0:
     exit(1)

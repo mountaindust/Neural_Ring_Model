@@ -685,5 +685,12 @@ finally:
 # ========================================================
 print(f"\n=== RESULTS: {passed} passed, {failed} failed ===")
 # ========================================================
-if failed > 0:
+
+
+def test_perception_spline():
+    """Pytest entry point: the checks run at import; fail if any failed."""
+    assert failed == 0, f"{failed} perception-spline checks failed"
+
+
+if __name__ == '__main__' and failed > 0:
     exit(1)

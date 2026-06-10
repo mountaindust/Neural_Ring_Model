@@ -435,5 +435,12 @@ check_scalar("cutoff vs mesh: two intervals",
 # ========================================================
 print(f"\n=== RESULTS: {passed} passed, {failed} failed ===")
 # ========================================================
-if failed > 0:
+
+
+def test_intervals():
+    """Pytest entry point: the checks run at import; fail if any failed."""
+    assert failed == 0, f"{failed} interval-arithmetic checks failed"
+
+
+if __name__ == '__main__' and failed > 0:
     exit(1)
