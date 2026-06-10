@@ -205,7 +205,7 @@ def _single_track(nbm, std, *, walk_std=0.75*np.pi, noise_exp=0, seed=0,
     fig, ax = plt.subplots()
     nbm.plot_walkers(dt=0.1, v=1, std=std, walk_std=walk_std, noise_exp=noise_exp,
                      repetitions=1, max_steps=max_steps, start_loc=(0.0, 0.0),
-                     start_angle=start_angle, plot_tracks=True, ax=ax)
+                     start_angle=start_angle, ax=ax)
     line = ax.get_lines()[-1]
     xd, yd = line.get_xdata(), line.get_ydata()
     plt.close(fig)
@@ -306,7 +306,7 @@ def _one_step_loc(nbm, std, noise_exp, seed, start_angle, R_exp=1, dt=0.1, v=1):
     fig, ax = plt.subplots()
     nbm.plot_walkers(dt=dt, v=v, std=std, walk_std=0.5*np.pi, noise_exp=noise_exp,
                      R_exp=R_exp, repetitions=1, max_steps=1, start_loc=(0.0, 0.0),
-                     start_angle=start_angle, plot_tracks=True, ax=ax)
+                     start_angle=start_angle, ax=ax)
     line = ax.get_lines()[-1]
     loc = np.array([line.get_xdata()[1], line.get_ydata()[1]])
     plt.close(fig)

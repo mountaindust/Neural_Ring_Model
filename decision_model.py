@@ -8,7 +8,7 @@ import warnings
 import numpy as np
 from scipy.integrate import solve_ivp, quad
 from scipy.optimize import root, brentq
-from scipy.interpolate import RectBivariateSpline, CubicSpline
+from scipy.interpolate import CubicSpline
 from scipy.special import i0
 from scipy.stats import vonmises
 from scipy.stats import beta as beta_dist
@@ -3441,12 +3441,12 @@ class NeuralBandModel:
     def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
                      noise_exp=0, R_exp=None, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
-                     plot_tracks=False, ax=None, title=None, wb_plot=False):
+                     alpha=1.0, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the neural band torque model on
         a dt step size with state-gated angular Gaussian noise. Repeat for a
-        number of repetitions and plot a heat map of these walks in 2D space.
+        number of repetitions and plot the resulting trajectories in 2D space.
 
         The heading noise amplitude is sigma*(1-R)^noise_exp, where R=|gamma| is
         the coherence strength: a random walk when R->0 (undecided / no targets
@@ -3519,11 +3519,13 @@ class NeuralBandModel:
             Proximity threshold for declaring a target "found". The walker
             stops when the distance to any target surface is less than this
             value. If None (default), uses v*dt (one step size).
-        plot_tracks : bool
-            Whether or not to overlay the walker trajectories
+        alpha : float, optional (default 1.0)
+            Opacity passed to the track plotting call (0 = fully transparent,
+            1 = fully opaque). Lower values let overlapping trajectories reveal
+            path density when many walks are aggregated.
         ax : matplotlib axis, optional
             If provided, plot on this axis instead of creating a new figure and
-            axis. The colorbar is attached to ax.figure.
+            axis.
         title : str, optional
             Title for the plot. If not provided, a default title is used.
         wb_plot : bool
@@ -3638,81 +3640,29 @@ class NeuralBandModel:
         self.percep_model.focal_angle = orig_angle
         self.gamma = orig_gamma
 
-        # concatenate walks
-        walks = sum(all_walks, [])
-
-        # Convert list to 2xN array: row of x-vals then row of y-vals
-        walks = np.column_stack(walks)
-        # Detect good bin edges
-        dim_min = np.floor(walks.min(axis=1))
-        dim_max = np.ceil(walks.max(axis=1))
-        n_xedges = max(2, round((dim_max[0]-dim_min[0])/0.25))
-        n_yedges = max(2, round((dim_max[1]-dim_min[1])/0.25))
-        xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
-        yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
-
-        H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:],
-                                           bins=(xedges,yedges))
-        # Keep original H for interpolation (shape: (len(xcenters), len(ycenters)))
-        H_for_spline = H.copy()
-        # For plotting with imshow, use transposed version
-        H_plot = H_for_spline.T
-
         if ax is None:
             local_plot = True
             if wb_plot:
                 fig = plt.figure(figsize=(6.5,4))
             else:
                 fig = plt.figure(figsize=(5.5,5))
+            ax = fig.add_subplot(aspect='equal')
         else:
             local_plot = False
-            fig = ax.figure
-
-        # Get bin centers
-        xcenters = (xedges[:-1] + xedges[1:]) / 2
-        ycenters = (yedges[:-1] + yedges[1:]) / 2
-        # Interpolate to finer grid for smoother plotting
-        # Guard against degenerate bin centers: RectBivariateSpline defaults to
-        # bicubic (kx=ky=3) and needs at least 4 points per axis. Walks with
-        # little spatial spread (e.g. a single near-straight track) produce
-        # fewer bins, so fall back to a plain imshow in that case.
-        if xcenters.size < 4 or ycenters.size < 4:
-            # fall back to simple imshow without interpolation
-            default_title = 'Random walker paths\n and histogram'
-            if local_plot:
-                ax = fig.add_subplot(aspect='equal')
-            else:
-                ax.set_aspect('equal')
-            im = ax.imshow(H_plot, extent=(xedges[0], xedges[-1], yedges[0], yedges[-1]),
-                           origin='lower', interpolation='nearest', aspect='equal')
-            fig.colorbar(im, ax=ax)
-        else:
-            x_fine = np.linspace(xcenters[0], xcenters[-1], 1000)
-            y_fine = np.linspace(ycenters[0], ycenters[-1], 1000)
-            spline_interp = RectBivariateSpline(xcenters, ycenters, H_for_spline)
-            H_fine = spline_interp(x_fine, y_fine).T  # transpose to shape (len(y_fine), len(x_fine))
-            # Plot interpolated histogram
-            default_title = 'Random walker paths\n and interpolated histogram'
-            if local_plot:
-                ax = fig.add_subplot(aspect='equal')
-            else:
-                ax.set_aspect('equal')
-            im = ax.imshow(H_fine, extent=(x_fine[0], x_fine[-1], y_fine[0], y_fine[-1]),
-                           origin='lower', interpolation='bilinear', aspect='equal')
-            fig.colorbar(im, ax=ax)
+            ax.set_aspect('equal')
 
         if title is not None:
             ax.set_title(title)
         else:
-            ax.set_title(default_title)
+            ax.set_title('Random walker paths')
 
         self.percep_model.targets.plot_targets_to_axis(ax)
 
-        # Plot individual walks
-        if plot_tracks:
-            for walk in all_walks:
-                walk = np.column_stack(walk)
-                ax.plot(walk[0,:], walk[1,:], 'k')
+        # Plot each walker trajectory. alpha sets track opacity: lower values let
+        # overlapping paths reveal where the walkers concentrate.
+        for walk in all_walks:
+            walk = np.column_stack(walk)
+            ax.plot(walk[0,:], walk[1,:], 'k', alpha=alpha)
 
         if local_plot:
             plt.show()
@@ -4726,12 +4676,12 @@ class IsingExtModel:
     def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
                      noise_exp=0, R_exp=None, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
-                     plot_tracks=False, ax=None, title=None, wb_plot=False):
+                     alpha=1.0, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the Ising torque model on a dt
         step size with state-gated angular Gaussian noise. Repeat for a number
-        of repetitions and plot a heat map of these walks in 2D space.
+        of repetitions and plot the resulting trajectories in 2D space.
 
         The heading noise amplitude is sigma*(1-R)^noise_exp, where R=|gamma| is
         the coherence strength: a random walk when R->0 (undecided / no targets
@@ -4800,11 +4750,13 @@ class IsingExtModel:
             Proximity threshold for declaring a target "found". The walker
             stops when the distance to any target surface is less than this
             value. If None (default), uses v*dt (one step size).
-        plot_tracks : bool
-            Whether or not to overlay the walker trajectories
+        alpha : float, optional (default 1.0)
+            Opacity passed to the track plotting call (0 = fully transparent,
+            1 = fully opaque). Lower values let overlapping trajectories reveal
+            path density when many walks are aggregated.
         ax : matplotlib axis, optional
             If provided, plot on this axis instead of creating a new figure and
-            axis. The colorbar is attached to ax.figure.
+            axis.
         title : str, optional
             Title for the plot. If not provided, a default title is used.
         wb_plot : bool
@@ -4916,95 +4868,29 @@ class IsingExtModel:
         self.percep_model.focal_loc = orig_loc
         self.percep_model.focal_angle = orig_angle
 
-        # concatenate walks
-        walks = sum(all_walks, [])
-
-        # Convert list to 2xN array: row of x-vals then row of y-vals
-        walks = np.column_stack(walks)
-        # Detect good bin edges
-        dim_min = np.floor(walks.min(axis=1))
-        dim_max = np.ceil(walks.max(axis=1))
-        n_xedges = max(2, round((dim_max[0]-dim_min[0])/0.25))
-        n_yedges = max(2, round((dim_max[1]-dim_min[1])/0.25))
-        xedges = np.linspace(dim_min[0], dim_max[0], n_xedges)
-        yedges = np.linspace(dim_min[1], dim_max[1], n_yedges)
-
-        H, xedges, yedges = np.histogram2d(walks[0,:],walks[1,:], 
-                                           bins=(xedges,yedges))
-        # Keep original H for interpolation (shape: (len(xcenters), len(ycenters)))
-        H_for_spline = H.copy()
-        # For plotting with imshow, use transposed version
-        H_plot = H_for_spline.T
-
         if ax is None:
             local_plot = True
             if wb_plot:
                 fig = plt.figure(figsize=(6.5,4))
             else:
                 fig = plt.figure(figsize=(5.5,5))
+            ax = fig.add_subplot(aspect='equal')
         else:
             local_plot = False
-            fig = ax.figure
-
-        # Get bin centers
-        xcenters = (xedges[:-1] + xedges[1:]) / 2
-        ycenters = (yedges[:-1] + yedges[1:]) / 2
-        # Interpolate to finer grid for smoother plotting
-        # Guard against degenerate bin centers
-        default_title = 'Random walker path histogram, interpolated'
-        if xcenters.size < 2 or ycenters.size < 2:
-            # fall back to simple imshow without interpolation
-            if local_plot:
-                ax = fig.add_subplot(aspect='equal')
-            else:
-                ax.set_aspect('equal')
-            im = ax.imshow(H_plot, extent=(xedges[0], xedges[-1], yedges[0], yedges[-1]),
-                           origin='lower', interpolation='nearest', aspect='equal')
-            fig.colorbar(im, ax=ax)
-        else:
-            x_fine = np.linspace(xcenters[0], xcenters[-1], 1000)
-            y_fine = np.linspace(ycenters[0], ycenters[-1], 1000)
-            spline_interp = RectBivariateSpline(xcenters, ycenters, H_for_spline)
-            H_fine = spline_interp(x_fine, y_fine).T  # transpose to shape (len(y_fine), len(x_fine))
-            # Plot interpolated histogram
-            if local_plot:
-                ax = fig.add_subplot(aspect='equal')
-            else:
-                ax.set_aspect('equal')
-            im = ax.imshow(H_fine, extent=(x_fine[0], x_fine[-1], y_fine[0], y_fine[-1]),
-                           origin='lower', interpolation='bilinear', aspect='equal')
-            fig.colorbar(im, ax=ax)
+            ax.set_aspect('equal')
 
         if title is not None:
             ax.set_title(title)
         else:
-            ax.set_title(default_title)
-
-        # Display actual historgram
-        # ax = fig.add_subplot(title='Random walker path histogram',
-        #                      aspect='equal')
-        # X, Y = np.meshgrid(xedges, yedges)
-        # ax.pcolormesh(X, Y, H)
-
-        # Old display with interpolation
-        # ax = fig.add_subplot(title='Random walker path histogram, interpolated',
-        #                      aspect='equal')
-        # im = NonUniformImage(ax, interpolation='bilinear')
-        # xcenters = (xedges[:-1] + xedges[1:]) / 2
-        # ycenters = (yedges[:-1] + yedges[1:]) / 2
-        # im.set_data(xcenters, ycenters, H)
-        # ax.add_image(im)
-        # self.percep_model.targets.plot_targets_to_axis(ax)
-        # ax.set_xlim(dim_min[0],dim_max[0])
-        # ax.set_ylim(dim_min[1],dim_max[1])
+            ax.set_title('Random walker paths')
 
         self.percep_model.targets.plot_targets_to_axis(ax)
 
-        # Plot individual walks
-        if plot_tracks:
-            for walk in all_walks:
-                walk = np.column_stack(walk)
-                ax.plot(walk[0,:], walk[1,:], 'k')
+        # Plot each walker trajectory. alpha sets track opacity: lower values let
+        # overlapping paths reveal where the walkers concentrate.
+        for walk in all_walks:
+            walk = np.column_stack(walk)
+            ax.plot(walk[0,:], walk[1,:], 'k', alpha=alpha)
 
         if local_plot:
             plt.show()
