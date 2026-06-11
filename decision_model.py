@@ -3438,10 +3438,120 @@ class NeuralBandModel:
             return ax
 
 
+    def _simulate_one_walk(self, args):
+        '''Simulate a single walker trajectory for plot_walkers.
+
+        Pulled out of plot_walkers so the repetitions can be dispatched to a
+        multiprocessing pool (one task per repetition). Uses a per-walk RNG
+        seeded from the supplied seed (an independent np.random.SeedSequence
+        spawned in the parent) -- self.rng is deliberately NOT used here, since
+        it would be duplicated across pool workers and yield identical walks.
+
+        Mutates self.percep_model.focal_loc/focal_angle and self.gamma as
+        scratch (re-initialized from the start_* args at the top of each call);
+        the caller restores the originals once all walks finish. In a pool each
+        worker holds its own pickled copy of self, so this is safe.
+
+        Parameters
+        ----------
+        args : tuple
+            (n, seed, start_loc, start_angle, start_gamma, dt, v, std,
+             walk_std, noise_exp, R_exp, max_steps, target_tol). n is the
+             repetition index (used only in the max_steps warning); seed is a
+             np.random.SeedSequence (or any np.random.default_rng seed).
+
+        Returns
+        -------
+        walk : (2, n_steps) float ndarray
+            Column-stacked (x, y) positions of the trajectory.
+        warn : str or None
+            max_steps-exceeded warning message, or None if a target was found.
+            Returned rather than warned in-process so warnings surface from the
+            parent regardless of whether a pool was used.
+        '''
+        (n, seed, start_loc, start_angle, start_gamma, dt, v, std, walk_std,
+         noise_exp, R_exp, max_steps, target_tol) = args
+        rng = np.random.default_rng(seed)
+        targets = self.percep_model.targets
+
+        self.percep_model.focal_loc = np.array(start_loc, dtype=float).copy()
+        self.percep_model.focal_angle = start_angle
+        self.gamma = start_gamma
+        walk = [self.percep_model.focal_loc.copy()]
+        warn = None
+        for step in range(max_steps):
+            if np.any(targets.get_dist_to_targets(
+                      self.percep_model.focal_loc) < target_tol):
+                break
+            old_loc = self.percep_model.focal_loc.copy()
+            # Blind fast-path: if no target is visible at all, gamma
+            # collapses to 0, the deterministic torque vanishes, and the
+            # walker searches at the random-walk intensity walk_std -- set
+            # INDEPENDENTLY of the committed std (orthogonal knobs), so it
+            # re-acquires even in gentle constant-noise mode. walk_std=0
+            # freezes the blind drift. A cheap fast-path skips the dgamma/dt
+            # solve on a blind step.
+            neur, _ = self.percep_model.get_neural_signals()
+            if neur.size == 0:
+                self.gamma = 0 + 0j
+                dtheta = 0.0
+                sigma_eff = walk_std
+            else:
+                dtheta = self.dtheta_dt()
+                R = np.abs(self.gamma)
+                # Visible: gated noise sigma*(1-R)^noise_exp -- a random walk
+                # when R->0 (undecided) and low-noise homing when R->1
+                # (committed); noise_exp=0 recovers a constant sigma*dW.
+                sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                if R > 0.0:
+                    s = dtheta / (self.K * R)        # = sin(Theta/2), in [-1,1]
+                    if noise_exp != 0:
+                        # Heading-aligned modulation cos(Theta/2), Theta = the
+                        # torque's angle (NBM: arg(gamma); IEM: the egocentric
+                        # consensus). Derived from dtheta = K*R*sin(Theta/2):
+                        #   cos(Theta/2) = sqrt(1 - (dtheta/(K*R))^2)
+                        # (the +root; Theta/2 in (-pi/2, pi/2]). Full noise
+                        # facing consensus (Theta=0), zero facing away
+                        # (Theta=+-pi); in quadrature with the torque so
+                        # corrective swings back are noise-free.
+                        sigma_eff *= np.sqrt(max(0.0, 1.0 - s * s))
+                    if R_exp != 1:
+                        # Exponent on the drift's coherence: the walker's
+                        # pursuit torque becomes K*R^R_exp*sin(Theta/2)
+                        # (R_exp=1 is the model's dtheta_dt). Affects only the
+                        # walker's drift here -- NOT the deterministic SC /
+                        # bifurcation / basin machinery (which keeps R^1).
+                        dtheta = self.K * R ** R_exp * s
+            # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
+            # here (only the resulting heading is wrapped on assignment below).
+            # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
+            # so the per-unit-time angular variance is independent of step size.
+            if sigma_eff > 0.0:
+                noise = sigma_eff * rng.normal() * np.sqrt(dt)
+            else:
+                noise = 0.0
+            theta = self.percep_model.focal_angle + dtheta*dt + noise
+            mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
+            self.percep_model.focal_loc += mv_vec
+            self.percep_model.focal_angle = convert_angles(theta)
+            walk.append(self.percep_model.focal_loc.copy())
+            if np.any(targets.check_trajectory_intersection(
+                      old_loc, self.percep_model.focal_loc)):
+                break
+        else:
+            dists = targets.get_dist_to_targets(self.percep_model.focal_loc)
+            warn = (
+                f"Walker {n} reached max_steps ({max_steps}). "
+                f"Final position: ({self.percep_model.focal_loc[0]:.2f}, "
+                f"{self.percep_model.focal_loc[1]:.2f}), "
+                f"closest target distance: {dists.min():.4f}")
+        return np.column_stack(walk), warn
+
+
     def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
                      noise_exp=0, R_exp=None, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
-                     alpha=1.0, ax=None, title=None, wb_plot=False):
+                     alpha=1.0, pool=None, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the neural band torque model on
@@ -3523,6 +3633,11 @@ class NeuralBandModel:
             Opacity passed to the track plotting call (0 = fully transparent,
             1 = fully opaque). Lower values let overlapping trajectories reveal
             path density when many walks are aggregated.
+        pool : multiprocessing.Pool, optional
+            If provided, the repetitions are distributed across this pool (one
+            task per walk) via pool.map. Each walk uses its own independent RNG
+            stream (see Notes), so parallel and serial runs are statistically
+            equivalent. If None (default), the walks run serially.
         ax : matplotlib axis, optional
             If provided, plot on this axis instead of creating a new figure and
             axis.
@@ -3534,6 +3649,18 @@ class NeuralBandModel:
         Returns
         -------
         ax : matplotlib axis, if ax was provided as an argument. Otherwise, None.
+
+        Notes
+        -----
+        Each repetition is driven by an independent RNG stream spawned from
+        self.rng (via np.random.SeedSequence.spawn), not by self.rng directly.
+        This is what makes pooling safe: a bound method dispatched to a
+        multiprocessing pool carries a pickled copy of self -- and hence of
+        self.rng -- to every worker, so drawing from self.rng inside the walk
+        would give duplicate noise across workers. Spawning per-walk seeds in
+        the parent keeps the walks independent and reproducible regardless of
+        whether a pool is used, while still drawing from self.rng so successive
+        plot_walkers calls differ.
         '''
 
         if start_loc is None:
@@ -3559,81 +3686,33 @@ class NeuralBandModel:
         orig_angle = self.percep_model.focal_angle
         orig_gamma = self.gamma
 
-        targets = self.percep_model.targets
-        all_walks = []
+        # Independent, reproducible per-walk RNG seeds spawned from self.rng so
+        # repetitions are statistically independent (each walk seeds its own
+        # Generator -- self.rng is not used in the walk loop, which would
+        # otherwise be duplicated across pool workers; see Notes). Drawing the
+        # base entropy from self.rng keeps successive plot_walkers calls
+        # different.
+        child_seeds = np.random.SeedSequence(
+            int(self.rng.integers(0, 2**63 - 1))).spawn(repetitions)
+        walk_args = [
+            (n, child_seeds[n], start_loc, start_angle, orig_gamma, dt, v, std,
+             walk_std, noise_exp, R_exp, max_steps, target_tol)
+            for n in range(repetitions)]
 
-        for n in range(repetitions):
-            self.percep_model.focal_loc = start_loc.copy()
-            self.percep_model.focal_angle = start_angle
-            self.gamma = orig_gamma
-            walk = [start_loc.copy()]
-            for step in range(max_steps):
-                if np.any(targets.get_dist_to_targets(
-                          self.percep_model.focal_loc) < target_tol):
-                    break
-                old_loc = self.percep_model.focal_loc.copy()
-                # Blind fast-path: if no target is visible at all, gamma
-                # collapses to 0, the deterministic torque vanishes, and the
-                # walker searches at the random-walk intensity walk_std -- set
-                # INDEPENDENTLY of the committed std (orthogonal knobs), so it
-                # re-acquires even in gentle constant-noise mode. walk_std=0
-                # freezes the blind drift. A cheap fast-path skips the dgamma/dt
-                # solve on a blind step.
-                neur, _ = self.percep_model.get_neural_signals()
-                if neur.size == 0:
-                    self.gamma = 0 + 0j
-                    dtheta = 0.0
-                    sigma_eff = walk_std
-                else:
-                    dtheta = self.dtheta_dt()
-                    R = np.abs(self.gamma)
-                    # Visible: gated noise sigma*(1-R)^noise_exp -- a random walk
-                    # when R->0 (undecided) and low-noise homing when R->1
-                    # (committed); noise_exp=0 recovers a constant sigma*dW.
-                    sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
-                    if R > 0.0:
-                        s = dtheta / (self.K * R)        # = sin(Theta/2), in [-1,1]
-                        if noise_exp != 0:
-                            # Heading-aligned modulation cos(Theta/2), Theta = the
-                            # torque's angle (NBM: arg(gamma); IEM: the egocentric
-                            # consensus). Derived from dtheta = K*R*sin(Theta/2):
-                            #   cos(Theta/2) = sqrt(1 - (dtheta/(K*R))^2)
-                            # (the +root; Theta/2 in (-pi/2, pi/2]). Full noise
-                            # facing consensus (Theta=0), zero facing away
-                            # (Theta=+-pi); in quadrature with the torque so
-                            # corrective swings back are noise-free.
-                            sigma_eff *= np.sqrt(max(0.0, 1.0 - s * s))
-                        if R_exp != 1:
-                            # Exponent on the drift's coherence: the walker's
-                            # pursuit torque becomes K*R^R_exp*sin(Theta/2)
-                            # (R_exp=1 is the model's dtheta_dt). Affects only the
-                            # walker's drift here -- NOT the deterministic SC /
-                            # bifurcation / basin machinery (which keeps R^1).
-                            dtheta = self.K * R ** R_exp * s
-                # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
-                # here (only the resulting heading is wrapped on assignment below).
-                # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
-                # so the per-unit-time angular variance is independent of step size.
-                if sigma_eff > 0.0:
-                    noise = sigma_eff * self.rng.normal() * np.sqrt(dt)
-                else:
-                    noise = 0.0
-                theta = self.percep_model.focal_angle + dtheta*dt + noise
-                mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
-                self.percep_model.focal_loc += mv_vec
-                self.percep_model.focal_angle = convert_angles(theta)
-                walk.append(self.percep_model.focal_loc.copy())
-                if np.any(targets.check_trajectory_intersection(
-                          old_loc, self.percep_model.focal_loc)):
-                    break
-            else:
-                dists = targets.get_dist_to_targets(self.percep_model.focal_loc)
-                warnings.warn(
-                    f"Walker {n} reached max_steps ({max_steps}). "
-                    f"Final position: ({self.percep_model.focal_loc[0]:.2f}, "
-                    f"{self.percep_model.focal_loc[1]:.2f}), "
-                    f"closest target distance: {dists.min():.4f}")
-            all_walks.append(list(walk))
+        # One task per repetition; dispatch to the pool if provided, else run
+        # serially. The helper mutates self.percep_model.focal_loc/angle and
+        # self.gamma as scratch (restored below in the serial path).
+        if pool is None:
+            results = [self._simulate_one_walk(a) for a in walk_args]
+        else:
+            results = pool.map(self._simulate_one_walk, walk_args)
+
+        all_walks = [walk for walk, _ in results]
+        # Surface any max_steps warnings from the parent so they are visible
+        # whether or not a pool (separate processes) was used.
+        for _, warn in results:
+            if warn is not None:
+                warnings.warn(warn)
 
         # Restore focal location, angle, and gamma
         self.percep_model.focal_loc = orig_loc
@@ -3658,10 +3737,10 @@ class NeuralBandModel:
 
         self.percep_model.targets.plot_targets_to_axis(ax)
 
-        # Plot each walker trajectory. alpha sets track opacity: lower values let
-        # overlapping paths reveal where the walkers concentrate.
+        # Plot each walker trajectory (already column-stacked by the walk
+        # helper). alpha sets track opacity: lower values let overlapping paths
+        # reveal where the walkers concentrate.
         for walk in all_walks:
-            walk = np.column_stack(walk)
             ax.plot(walk[0,:], walk[1,:], 'k', alpha=alpha)
 
         if local_plot:
@@ -4673,10 +4752,120 @@ class IsingExtModel:
             return ax
         
 
+    def _simulate_one_walk(self, args):
+        '''Simulate a single walker trajectory for plot_walkers.
+
+        Pulled out of plot_walkers so the repetitions can be dispatched to a
+        multiprocessing pool (one task per repetition). Uses a per-walk RNG
+        seeded from the supplied seed (an independent np.random.SeedSequence
+        spawned in the parent) -- self.rng is deliberately NOT used here, since
+        it would be duplicated across pool workers and yield identical walks.
+
+        Mutates self.percep_model.focal_loc/focal_angle and self.gamma as
+        scratch (re-initialized from the start_* args at the top of each call);
+        the caller restores the originals once all walks finish. In a pool each
+        worker holds its own pickled copy of self, so this is safe.
+
+        Parameters
+        ----------
+        args : tuple
+            (n, seed, start_loc, start_angle, start_gamma, dt, v, std,
+             walk_std, noise_exp, R_exp, max_steps, target_tol). n is the
+             repetition index (used only in the max_steps warning); seed is a
+             np.random.SeedSequence (or any np.random.default_rng seed).
+
+        Returns
+        -------
+        walk : (2, n_steps) float ndarray
+            Column-stacked (x, y) positions of the trajectory.
+        warn : str or None
+            max_steps-exceeded warning message, or None if a target was found.
+            Returned rather than warned in-process so warnings surface from the
+            parent regardless of whether a pool was used.
+        '''
+        (n, seed, start_loc, start_angle, start_gamma, dt, v, std, walk_std,
+         noise_exp, R_exp, max_steps, target_tol) = args
+        rng = np.random.default_rng(seed)
+        targets = self.percep_model.targets
+
+        self.percep_model.focal_loc = np.array(start_loc, dtype=float).copy()
+        self.percep_model.focal_angle = start_angle
+        self.gamma = start_gamma
+        walk = [self.percep_model.focal_loc.copy()]
+        warn = None
+        for step in range(max_steps):
+            if np.any(targets.get_dist_to_targets(
+                      self.percep_model.focal_loc) < target_tol):
+                break
+            old_loc = self.percep_model.focal_loc.copy()
+            # Blind fast-path: if no target is visible at all, gamma
+            # collapses to 0, the deterministic torque vanishes, and the
+            # walker searches at the random-walk intensity walk_std -- set
+            # INDEPENDENTLY of the committed std (orthogonal knobs), so it
+            # re-acquires even in gentle constant-noise mode. walk_std=0
+            # freezes the blind drift. A cheap fast-path skips the dgamma/dt
+            # solve on a blind step.
+            neur, _ = self.percep_model.get_neural_signals()
+            if neur.size == 0:
+                self.gamma = 0 + 0j
+                dtheta = 0.0
+                sigma_eff = walk_std
+            else:
+                dtheta = self.dtheta_dt()
+                R = np.abs(self.gamma)
+                # Visible: gated noise sigma*(1-R)^noise_exp -- a random walk
+                # when R->0 (undecided) and low-noise homing when R->1
+                # (committed); noise_exp=0 recovers a constant sigma*dW.
+                sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
+                if R > 0.0:
+                    s = dtheta / (self.K * R)        # = sin(Theta/2), in [-1,1]
+                    if noise_exp != 0:
+                        # Heading-aligned modulation cos(Theta/2), Theta = the
+                        # torque's angle (NBM: arg(gamma); IEM: the egocentric
+                        # consensus). Derived from dtheta = K*R*sin(Theta/2):
+                        #   cos(Theta/2) = sqrt(1 - (dtheta/(K*R))^2)
+                        # (the +root; Theta/2 in (-pi/2, pi/2]). Full noise
+                        # facing consensus (Theta=0), zero facing away
+                        # (Theta=+-pi); in quadrature with the torque so
+                        # corrective swings back are noise-free.
+                        sigma_eff *= np.sqrt(max(0.0, 1.0 - s * s))
+                    if R_exp != 1:
+                        # Exponent on the drift's coherence: the walker's
+                        # pursuit torque becomes K*R^R_exp*sin(Theta/2)
+                        # (R_exp=1 is the model's dtheta_dt). Affects only the
+                        # walker's drift here -- NOT the deterministic SC /
+                        # bifurcation / basin machinery (which keeps R^1).
+                        dtheta = self.K * R ** R_exp * s
+            # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
+            # here (only the resulting heading is wrapped on assignment below).
+            # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
+            # so the per-unit-time angular variance is independent of step size.
+            if sigma_eff > 0.0:
+                noise = sigma_eff * rng.normal() * np.sqrt(dt)
+            else:
+                noise = 0.0
+            theta = self.percep_model.focal_angle + dtheta*dt + noise
+            mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
+            self.percep_model.focal_loc += mv_vec
+            self.percep_model.focal_angle = convert_angles(theta)
+            walk.append(self.percep_model.focal_loc.copy())
+            if np.any(targets.check_trajectory_intersection(
+                      old_loc, self.percep_model.focal_loc)):
+                break
+        else:
+            dists = targets.get_dist_to_targets(self.percep_model.focal_loc)
+            warn = (
+                f"Walker {n} reached max_steps ({max_steps}). "
+                f"Final position: ({self.percep_model.focal_loc[0]:.2f}, "
+                f"{self.percep_model.focal_loc[1]:.2f}), "
+                f"closest target distance: {dists.min():.4f}")
+        return np.column_stack(walk), warn
+
+
     def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
                      noise_exp=0, R_exp=None, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
-                     alpha=1.0, ax=None, title=None, wb_plot=False):
+                     alpha=1.0, pool=None, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the Ising torque model on a dt
@@ -4754,6 +4943,11 @@ class IsingExtModel:
             Opacity passed to the track plotting call (0 = fully transparent,
             1 = fully opaque). Lower values let overlapping trajectories reveal
             path density when many walks are aggregated.
+        pool : multiprocessing.Pool, optional
+            If provided, the repetitions are distributed across this pool (one
+            task per walk) via pool.map. Each walk uses its own independent RNG
+            stream (see Notes), so parallel and serial runs are statistically
+            equivalent. If None (default), the walks run serially.
         ax : matplotlib axis, optional
             If provided, plot on this axis instead of creating a new figure and
             axis.
@@ -4765,6 +4959,21 @@ class IsingExtModel:
         Returns
         -------
         ax : matplotlib axis, if ax was provided as an argument. Otherwise, None.
+
+        Notes
+        -----
+        Each repetition is driven by an independent RNG stream spawned from
+        self.rng (via np.random.SeedSequence.spawn), not by self.rng directly.
+        This is what makes pooling safe: a bound method dispatched to a
+        multiprocessing pool carries a pickled copy of self -- and hence of
+        self.rng -- to every worker, so drawing from self.rng inside the walk
+        would give duplicate noise across workers. Spawning per-walk seeds in
+        the parent keeps the walks independent and reproducible regardless of
+        whether a pool is used, while still drawing from self.rng so successive
+        plot_walkers calls differ. As part of this, each repetition now also
+        resets self.gamma to its call-time value (the IC for the first visible
+        dgamma/dt solve), so the walks no longer carry gamma over from one to
+        the next.
         '''
 
         if start_loc is None:
@@ -4788,85 +4997,40 @@ class IsingExtModel:
             R_exp = 1 if noise_exp == 0 else 1.0 / noise_exp
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
+        orig_gamma = self.gamma
 
-        targets = self.percep_model.targets
-        all_walks = []
+        # Independent, reproducible per-walk RNG seeds spawned from self.rng so
+        # repetitions are statistically independent (each walk seeds its own
+        # Generator -- self.rng is not used in the walk loop, which would
+        # otherwise be duplicated across pool workers; see Notes). Drawing the
+        # base entropy from self.rng keeps successive plot_walkers calls
+        # different.
+        child_seeds = np.random.SeedSequence(
+            int(self.rng.integers(0, 2**63 - 1))).spawn(repetitions)
+        walk_args = [
+            (n, child_seeds[n], start_loc, start_angle, orig_gamma, dt, v, std,
+             walk_std, noise_exp, R_exp, max_steps, target_tol)
+            for n in range(repetitions)]
 
-        for n in range(repetitions):
-            self.percep_model.focal_loc = start_loc.copy()
-            self.percep_model.focal_angle = start_angle
-            walk = [start_loc.copy()]
-            for step in range(max_steps):
-                if np.any(targets.get_dist_to_targets(
-                          self.percep_model.focal_loc) < target_tol):
-                    break
-                old_loc = self.percep_model.focal_loc.copy()
-                # Blind fast-path: if no target is visible at all, gamma
-                # collapses to 0, the deterministic torque vanishes, and the
-                # walker searches at the random-walk intensity walk_std -- set
-                # INDEPENDENTLY of the committed std (orthogonal knobs), so it
-                # re-acquires even in gentle constant-noise mode. walk_std=0
-                # freezes the blind drift. A cheap fast-path skips the dgamma/dt
-                # solve on a blind step.
-                neur, _ = self.percep_model.get_neural_signals()
-                if neur.size == 0:
-                    self.gamma = 0 + 0j
-                    dtheta = 0.0
-                    sigma_eff = walk_std
-                else:
-                    dtheta = self.dtheta_dt()
-                    R = np.abs(self.gamma)
-                    # Visible: gated noise sigma*(1-R)^noise_exp -- a random walk
-                    # when R->0 (undecided) and low-noise homing when R->1
-                    # (committed); noise_exp=0 recovers a constant sigma*dW.
-                    sigma_eff = std * np.clip(1.0 - R, 0.0, 1.0) ** noise_exp
-                    if R > 0.0:
-                        s = dtheta / (self.K * R)        # = sin(Theta/2), in [-1,1]
-                        if noise_exp != 0:
-                            # Heading-aligned modulation cos(Theta/2), Theta = the
-                            # torque's angle (NBM: arg(gamma); IEM: the egocentric
-                            # consensus). Derived from dtheta = K*R*sin(Theta/2):
-                            #   cos(Theta/2) = sqrt(1 - (dtheta/(K*R))^2)
-                            # (the +root; Theta/2 in (-pi/2, pi/2]). Full noise
-                            # facing consensus (Theta=0), zero facing away
-                            # (Theta=+-pi); in quadrature with the torque so
-                            # corrective swings back are noise-free.
-                            sigma_eff *= np.sqrt(max(0.0, 1.0 - s * s))
-                        if R_exp != 1:
-                            # Exponent on the drift's coherence: the walker's
-                            # pursuit torque becomes K*R^R_exp*sin(Theta/2)
-                            # (R_exp=1 is the model's dtheta_dt). Affects only the
-                            # walker's drift here -- NOT the deterministic SC /
-                            # bifurcation / basin machinery (which keeps R^1).
-                            dtheta = self.K * R ** R_exp * s
-                # dtheta_dt() is a turning RATE, not an angle, so it is NOT wrapped
-                # here (only the resulting heading is wrapped on assignment below).
-                # The diffusion term scales as sqrt(dt) (Wiener increment), NOT dt,
-                # so the per-unit-time angular variance is independent of step size.
-                if sigma_eff > 0.0:
-                    noise = sigma_eff * self.rng.normal() * np.sqrt(dt)
-                else:
-                    noise = 0.0
-                theta = self.percep_model.focal_angle + dtheta*dt + noise
-                mv_vec = v*dt*np.array([np.cos(theta),np.sin(theta)])
-                self.percep_model.focal_loc += mv_vec
-                self.percep_model.focal_angle = convert_angles(theta)
-                walk.append(self.percep_model.focal_loc.copy())
-                if np.any(targets.check_trajectory_intersection(
-                          old_loc, self.percep_model.focal_loc)):
-                    break
-            else:
-                dists = targets.get_dist_to_targets(self.percep_model.focal_loc)
-                warnings.warn(
-                    f"Walker {n} reached max_steps ({max_steps}). "
-                    f"Final position: ({self.percep_model.focal_loc[0]:.2f}, "
-                    f"{self.percep_model.focal_loc[1]:.2f}), "
-                    f"closest target distance: {dists.min():.4f}")
-            all_walks.append(list(walk))
+        # One task per repetition; dispatch to the pool if provided, else run
+        # serially. The helper mutates self.percep_model.focal_loc/angle and
+        # self.gamma as scratch (restored below in the serial path).
+        if pool is None:
+            results = [self._simulate_one_walk(a) for a in walk_args]
+        else:
+            results = pool.map(self._simulate_one_walk, walk_args)
 
-        # Restore focal location and angle
+        all_walks = [walk for walk, _ in results]
+        # Surface any max_steps warnings from the parent so they are visible
+        # whether or not a pool (separate processes) was used.
+        for _, warn in results:
+            if warn is not None:
+                warnings.warn(warn)
+
+        # Restore focal location, angle, and gamma
         self.percep_model.focal_loc = orig_loc
         self.percep_model.focal_angle = orig_angle
+        self.gamma = orig_gamma
 
         if ax is None:
             local_plot = True
@@ -4886,10 +5050,10 @@ class IsingExtModel:
 
         self.percep_model.targets.plot_targets_to_axis(ax)
 
-        # Plot each walker trajectory. alpha sets track opacity: lower values let
-        # overlapping paths reveal where the walkers concentrate.
+        # Plot each walker trajectory (already column-stacked by the walk
+        # helper). alpha sets track opacity: lower values let overlapping paths
+        # reveal where the walkers concentrate.
         for walk in all_walks:
-            walk = np.column_stack(walk)
             ax.plot(walk[0,:], walk[1,:], 'k', alpha=alpha)
 
         if local_plot:
