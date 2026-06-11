@@ -30,9 +30,10 @@ intentionally do not exercise.
   middle target (the reborn-center-branch recapture), and how to tune a
   controllable (e.g. 1:2:1) split while keeping the bifurcation x-locations fixed.
 - `three_target_fly.py` / `three_target_locust.py` — worked double-bifurcation
-  setups (three targets 40° apart at radius 5 / radius 3) tuned to the fly /
-  locust bifurcation locations with a ~1:2:1 split. Run each directly; they use a
-  10-core pool for `plot_walkers`.
+  setups (three targets 40° apart; fly radius 5 / target r=0.5, locust radius 3 /
+  target r=0.1) tuned to each species' bifurcation locations and gated to match the
+  empirical `godm_heatmap_{fly3,locust3}.png` densities (tight, loop-free branches).
+  Run each directly; they use a 10-core pool for `plot_walkers`.
 
 Run:
 
