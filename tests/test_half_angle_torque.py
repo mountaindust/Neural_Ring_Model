@@ -301,12 +301,14 @@ def _offaxis_model():
 
 
 def _one_step_loc(nbm, std, noise_exp, seed, start_angle, R_exp=1, dt=0.1, v=1):
-    """Walker's actual (x,y) after a single step (the second track point)."""
+    """Walker's actual (x,y) after a single step (the second track point).
+    R_exp=None omits the kwarg so plot_walkers' own default is exercised."""
     nbm.rng = np.random.default_rng(seed); nbm.gamma = 0 + 0j
     fig, ax = plt.subplots()
+    kw = {} if R_exp is None else {'R_exp': R_exp}
     nbm.plot_walkers(dt=dt, v=v, std=std, walk_std=0.5*np.pi, noise_exp=noise_exp,
-                     R_exp=R_exp, repetitions=1, max_steps=1, start_loc=(0.0, 0.0),
-                     start_angle=start_angle, ax=ax)
+                     repetitions=1, max_steps=1, start_loc=(0.0, 0.0),
+                     start_angle=start_angle, ax=ax, **kw)
     line = ax.get_lines()[-1]
     loc = np.array([line.get_xdata()[1], line.get_ydata()[1]])
     plt.close(fig)
@@ -325,7 +327,12 @@ def _predict_loc(nbm, std, noise_exp, seed, start_angle, with_cos, R_exp=1,
     sig = std * max(0.0, 1.0 - R) ** noise_exp
     if with_cos and noise_exp != 0 and R > 0.0:
         sig *= np.cos(Theta / 2)
-    z0 = np.random.default_rng(seed).normal()
+    # Mirror plot_walkers' per-walk seeding: it draws one int from self.rng
+    # (= default_rng(seed), set by _one_step_loc) and spawns a child
+    # SeedSequence per repetition; the walk's RNG is default_rng(child[0]).
+    base = int(np.random.default_rng(seed).integers(0, 2**63 - 1))
+    child = np.random.SeedSequence(base).spawn(1)[0]
+    z0 = np.random.default_rng(child).normal()
     th = start_angle + drift * dt + sig * z0 * np.sqrt(dt)
     return Theta, R, v * dt * np.array([np.cos(th), np.sin(th)])
 
@@ -361,22 +368,21 @@ def test_walk_std_default_is_half_pi():
         assert d == pytest.approx(0.5 * np.pi)
 
 
-def test_R_exp_default_resolves_regime_aware():
-    """R_exp default is None: resolves to 1 when noise_exp==0 (model torque) and
-    1/noise_exp otherwise."""
+def test_R_exp_default_is_one():
+    """R_exp default is a flat 1 (the model torque) for every noise_exp -- the
+    old regime-aware None -> 1/noise_exp coupling was removed."""
     import inspect
     for cls in (dm.NeuralBandModel, dm.IsingExtModel):
-        assert inspect.signature(cls.plot_walkers).parameters['R_exp'].default is None
+        assert inspect.signature(cls.plot_walkers).parameters['R_exp'].default == 1
     nbm = _offaxis_model(); ang = np.pi / 2
-    # noise_exp=0 -> R_exp resolves to 1 (matches explicit R_exp=1)
-    _, _, p0 = _predict_loc(nbm, 2.0, 0, 1, ang, with_cos=False, R_exp=1)
-    assert np.allclose(p0, _one_step_loc(nbm, 2.0, 0, 1, ang, R_exp=None), atol=1e-12)
-    # noise_exp=2 -> R_exp resolves to 1/2 (matches explicit 0.5, NOT 1)
-    _, _, p2 = _predict_loc(nbm, 2.0, 2, 1, ang, with_cos=True, R_exp=0.5)
-    act2 = _one_step_loc(nbm, 2.0, 2, 1, ang, R_exp=None)
-    assert np.allclose(p2, act2, atol=1e-12)
-    _, _, p2_unit = _predict_loc(nbm, 2.0, 2, 1, ang, with_cos=True, R_exp=1)
-    assert not np.allclose(p2_unit, act2, atol=1e-9)
+    # noise_exp=2 with std=0 (noise off -> RNG-independent, location set purely by
+    # drift): the default-driven step is the model torque (R_exp=1), NOT the old
+    # 1/noise_exp = 0.5 boost.
+    act = _one_step_loc(nbm, 0.0, 2, 1, ang, R_exp=None)   # omit -> plot_walkers default
+    _, _, p_unit = _predict_loc(nbm, 0.0, 2, 1, ang, with_cos=True, R_exp=1)
+    assert np.allclose(p_unit, act, atol=1e-12)
+    _, _, p_half = _predict_loc(nbm, 0.0, 2, 1, ang, with_cos=True, R_exp=0.5)
+    assert not np.allclose(p_half, act, atol=1e-9)
 
 
 def test_R_exp_scales_walker_drift():

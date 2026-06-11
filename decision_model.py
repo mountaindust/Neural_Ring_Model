@@ -3549,7 +3549,7 @@ class NeuralBandModel:
 
 
     def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
-                     noise_exp=0, R_exp=None, repetitions=20, max_steps=1500,
+                     noise_exp=0, R_exp=1, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
                      alpha=1.0, pool=None, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
@@ -3605,16 +3605,11 @@ class NeuralBandModel:
             for p!=0) zeros the noise when facing away from consensus (Theta=+-pi)
             and leaves it full facing consensus (Theta=0), in quadrature with the
             sin(Theta/2) torque so corrective swings back are noise-free.
-        R_exp : float or None, optional (default None)
+        R_exp : float, optional (default 1)
             Exponent on the coherence R in the WALKER's drift (pursuit) torque:
-            the heading update uses K*R^R_exp*sin(Theta/2) in place of the model's
-            K*R*sin(Theta/2). If None (default), a regime-aware value is used:
-            1 (the model's dtheta_dt unchanged) when noise_exp==0, else 1/noise_exp
-            -- stronger pursuit at intermediate coherence (R^R_exp > R for R<1),
-            mirroring noise_exp's exponent on (1-R) and balancing the explore->
-            commit handoff. R_exp=1 forces the model torque regardless of mode.
-            This affects ONLY the walker's drift here -- the deterministic SC
-            equilibria / bifurcation / basin machinery keep R^1.
+            the heading update uses K*R^R_exp*sin(Theta/2). R_exp=1 is the model's
+            K*R*sin(Theta/2). This affects ONLY the walker's drift -- the
+            deterministic SC equilibria / bifurcation / basin machinery keep R^1.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -3677,11 +3672,6 @@ class NeuralBandModel:
             # (1-R)^p gate tames once the walker commits. (Blind steps use
             # walk_std directly, independent of this choice.)
             std = 0.1 if noise_exp == 0 else walk_std
-        if R_exp is None:
-            # Regime-aware default for the drift exponent: 1 (the model torque)
-            # in constant mode, else 1/noise_exp -- stronger pursuit at
-            # intermediate R, balancing the (1-R)^noise_exp noise gate.
-            R_exp = 1 if noise_exp == 0 else 1.0 / noise_exp
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
         orig_gamma = self.gamma
@@ -4863,7 +4853,7 @@ class IsingExtModel:
 
 
     def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
-                     noise_exp=0, R_exp=None, repetitions=20, max_steps=1500,
+                     noise_exp=0, R_exp=1, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
                      alpha=1.0, pool=None, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
@@ -4915,16 +4905,11 @@ class IsingExtModel:
             for p!=0) zeros the noise when facing away from consensus (Theta=+-pi)
             and leaves it full facing consensus (Theta=0), in quadrature with the
             sin(Theta/2) torque so corrective swings back are noise-free.
-        R_exp : float or None, optional (default None)
+        R_exp : float, optional (default 1)
             Exponent on the coherence R in the WALKER's drift (pursuit) torque:
-            the heading update uses K*R^R_exp*sin(Theta/2) in place of the model's
-            K*R*sin(Theta/2). If None (default), a regime-aware value is used:
-            1 (the model's dtheta_dt unchanged) when noise_exp==0, else 1/noise_exp
-            -- stronger pursuit at intermediate coherence (R^R_exp > R for R<1),
-            mirroring noise_exp's exponent on (1-R) and balancing the explore->
-            commit handoff. R_exp=1 forces the model torque regardless of mode.
-            This affects ONLY the walker's drift here -- the deterministic SC
-            equilibria / bifurcation / basin machinery keep R^1.
+            the heading update uses K*R^R_exp*sin(Theta/2). R_exp=1 is the model's
+            K*R*sin(Theta/2). This affects ONLY the walker's drift -- the
+            deterministic SC equilibria / bifurcation / basin machinery keep R^1.
         repetitions : int
             Number of walks to perform and aggregate
         max_steps : int
@@ -4990,11 +4975,6 @@ class IsingExtModel:
             # (1-R)^p gate tames once the walker commits. (Blind steps use
             # walk_std directly, independent of this choice.)
             std = 0.1 if noise_exp == 0 else walk_std
-        if R_exp is None:
-            # Regime-aware default for the drift exponent: 1 (the model torque)
-            # in constant mode, else 1/noise_exp -- stronger pursuit at
-            # intermediate R, balancing the (1-R)^noise_exp noise gate.
-            R_exp = 1 if noise_exp == 0 else 1.0 / noise_exp
         orig_loc = self.percep_model.focal_loc.copy()
         orig_angle = self.percep_model.focal_angle
         orig_gamma = self.gamma
