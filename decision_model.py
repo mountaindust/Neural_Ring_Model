@@ -2514,6 +2514,50 @@ class NeuralBandModel:
         return np.array([dg.real, dg.imag])
 
 
+    def _self_consistent_jac(self, x, focal_loc, h=1e-7):
+        '''Central-difference Jacobian of `_self_consistent_eq`.
+
+        Supplied to the `hybr` polish in `sc_equilib` to make root-finding
+        equivariant under the theta -> -theta mirror. `_self_consistent_eq`
+        is y-flip symmetric to ~1e-20 (negating theta negates only the
+        imaginary residual), but hybr's *built-in* Jacobian uses one-sided
+        forward differences whose positive `+h` step direction breaks that
+        symmetry: the iterate trajectory from a start is then not the mirror
+        of the trajectory from the sign-flipped start, so near a saddle-node
+        the polish can converge to different members of the equilibrium pair
+        at (x, y) vs (x, -y) -- visible as y-asymmetry in bifurcation diagrams
+        that should be mirror-symmetric. A central difference perturbs both
+        +h and -h, so it is invariant under theta -> -theta; with it the whole
+        hybrj Newton/dogleg iteration is equivariant and the self-consistent
+        equilibrium set is exactly mirror-symmetric. (The forward/backward
+        dgamma_dt evaluations also make the Jacobian estimate second-order
+        accurate, which the polish doesn't need but doesn't hurt.)
+
+        Parameters
+        ----------
+        x : length 2 ndarray
+            [theta, R] as in `_self_consistent_eq`.
+        focal_loc : array-like of length 2
+            (x,y) location of the observer.
+        h : float, optional
+            finite-difference step (default 1e-7).
+
+        Returns
+        -------
+        2x2 ndarray : d[Re,Im] / d[theta, R]
+        '''
+        x = np.asarray(x, dtype=float)
+        n = x.size
+        J = np.empty((n, n))
+        for i in range(n):
+            step = np.zeros(n)
+            step[i] = h
+            f_plus = self._self_consistent_eq(x + step, focal_loc)
+            f_minus = self._self_consistent_eq(x - step, focal_loc)
+            J[:, i] = (f_plus - f_minus) / (2 * h)
+        return J
+
+
     def gamma_equilib(self, focal_angle=None, focal_loc=None,
                       stability_criterion='reduced'):
         '''Find gamma equilibria of dgamma/dt at a fixed observer heading.
@@ -2679,7 +2723,8 @@ class NeuralBandModel:
         final_Rs = []
         for theta_c in candidates:
             sol = root(self._self_consistent_eq, [theta_c, R_probe],
-                       args=(focal_loc,), method='hybr', tol=1e-10)
+                       args=(focal_loc,), method='hybr', tol=1e-10,
+                       jac=self._self_consistent_jac)
             if not sol.success:
                 continue
             theta_eq = convert_angles(sol.x[0])
@@ -2699,21 +2744,35 @@ class NeuralBandModel:
             # two genuine equilibria can share a theta to within the
             # angular tolerance while differing in R, so theta alone is
             # not enough to distinguish them.
-            close_check = False
-            for existing_angle, existing_R in zip(final_angles,
-                                                   final_Rs):
+            close_idx = None
+            for j, (existing_angle, existing_R) in enumerate(
+                    zip(final_angles, final_Rs)):
                 angle_diff = np.abs(convert_angles(
                     theta_eq - existing_angle))
                 R_diff = np.abs(R_eq - existing_R)
                 if angle_diff < 0.02 and R_diff < 0.01:
-                    close_check = True
+                    close_idx = j
                     break
-            if not close_check:
+            gamma_eq = R_eq + 0j
+            if close_idx is None:
                 final_angles.append(theta_eq)
                 final_Rs.append(R_eq)
-                gamma_eq = R_eq + 0j
                 stability.append(stability_test(
                     gamma_eq, theta_eq, focal_loc))
+            elif not stability[close_idx]:
+                # The first-kept member of this near-coincident pair is
+                # UNSTABLE. Near a saddle-node a stable and an unstable
+                # equilibrium can collide to within the (angle, R) dedup
+                # tolerance even with the full (theta, R) test; which member
+                # is found first depends on the brentq candidate order, which
+                # REVERSES under the y-mirror, so keeping "the first" makes the
+                # survivor's stability -- and the stable count -- flip between
+                # (x, y) and (x, -y). Prefer the STABLE member (a mirror-
+                # invariant choice) so the count stays correct and y-symmetric.
+                if stability_test(gamma_eq, theta_eq, focal_loc):
+                    final_angles[close_idx] = theta_eq
+                    final_Rs[close_idx] = R_eq
+                    stability[close_idx] = True
 
         return final_angles, stability
     
