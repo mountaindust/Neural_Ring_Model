@@ -219,6 +219,11 @@ dt-convergence data (120 seeds, total integration time held fixed):
 
 ## Worked examples: `three_target_fly.py` and `three_target_locust.py`
 
+> **Note:** the centre-skew analysis below predates the GODM-data match. The shipped
+> scripts were since retuned (lower T, higher K, the foveal weight `a_weight` as the
+> split lever, and the **locust corrected to 35°**), and the data turned out to be
+> *outer*-biased for the locust — see [three_target_findings.md](three_target_findings.md).
+
 Two runnable scripts in this folder apply the above to the experimental layouts:
 three targets 40° apart, **fly** at radius 5 with **target radius 0.5** (diameter
 1), **locust** at radius 3 with **target radius 0.1** (diameter 0.2). The target

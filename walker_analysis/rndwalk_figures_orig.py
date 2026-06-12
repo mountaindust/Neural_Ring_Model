@@ -1,6 +1,7 @@
-"""Representative walker figures for the half-angle (sin(arg(gamma)/2)) model.
+"""Representative walker figures for the half-angle (sin(arg(gamma)/2)) model 
+with constant noise at std 0.1. 
 
-Produces 13 heatmap-with-tracks figures documenting walker behavior under the
+Produces 13 walker-track figures documenting walker behavior under the
 half-angle heading torque dtheta/dt = K*R*sin(arg(gamma)/2). The figures sweep the
 turning gain K to show how it shapes the approach; with the corrected turning
 step (the rate is no longer wrapped before the Euler update) every
@@ -53,12 +54,11 @@ def figure(locs, geom, K, fname, title, *, r=None, max_steps=1500,
     fig, ax = plt.subplots(figsize=(5.0, 5.0))
     nbm.plot_walkers(dt=0.1, v=1, std=0.1, repetitions=30, max_steps=max_steps,
                      start_loc=(0.0, 0.0), start_angle=0.0,
-                     plot_tracks=True, ax=ax, title=title)
+                     ax=ax, title=title)
     # mark target positions for clarity
     ax.plot(locs[:, 0], locs[:, 1], 'r*', markersize=12, zorder=5)
     # optionally clamp the view so a single escaping walker does not blow up
-    # the auto-scaled axes (the heatmap bins are still computed over the full
-    # range, so resolution in-window is unchanged)
+    # the auto-scaled axes
     if xlim is not None:
         ax.set_xlim(*xlim)
     if ylim is not None:

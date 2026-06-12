@@ -29,11 +29,17 @@ intentionally do not exercise.
 - `three_target_analysis.md` — why three-target walkers consistently pick the
   middle target (the reborn-center-branch recapture), and how to tune a
   controllable (e.g. 1:2:1) split while keeping the bifurcation x-locations fixed.
-- `three_target_fly.py` / `three_target_locust.py` — worked double-bifurcation
-  setups (three targets 40° apart; fly radius 5 / target r=0.5, locust radius 3 /
-  target r=0.1) tuned to each species' bifurcation locations and gated to match the
-  empirical `godm_heatmap_{fly3,locust3}.png` densities (tight, loop-free branches).
-  Run each directly; they use a 10-core pool for `plot_walkers`.
+- `three_target_fly.py` / `three_target_locust.py` — three-target walker models tuned
+  to the GODM data (fly 40°/radius 5/r=0.5; **locust 35°**/radius 3/r=0.1 — the
+  empirical locust separation, verified from the data). The centre/outer split is
+  matched via the foveal weight `a_weight`; the fly matches (~45% centre), the locust
+  is a clean near-match (a documented tension). Run each directly (10-core pool).
+- `three_target_findings.md` — the data match, the split-tuning sweeps (`a_weight` is
+  the lever; std/start-heading/T are not), and the locust clean-vs-outer tension.
+- `decision_skeleton.py` — the deterministic decision-track skeleton (two sequential
+  binary decisions) over the GODM heatmaps; `birth_mechanism.md` /
+  `skeleton_birth_analysis.py` work out where the bifurcations are born/die on the
+  y=0 cut.
 
 Run:
 
