@@ -81,13 +81,13 @@ its current literal value; convert opportunistically when next editing.
 | [compare_sc_vm.ipynb](compare_sc_vm.ipynb) | 73 | `Pool(10)` |
 | [debug_all_unstable.ipynb](debug_all_unstable.ipynb) | 50 | `Pool(10)` |
 | [debug_all_unstable.ipynb](debug_all_unstable.ipynb) | 76 | `Pool(10)` |
-| [neural_band.ipynb](neural_band.ipynb) | 68 | `Pool(4)` |
-| [neural_band.ipynb](neural_band.ipynb) | 133 | `Pool(4)` |
-| [neural_band.ipynb](neural_band.ipynb) | 147 | `Pool(4)` |
+| [neural_band.ipynb](neural_band.ipynb) | 68 | `Pool(10)` |
+| [neural_band.ipynb](neural_band.ipynb) | 133 | `Pool(10)` |
+| [neural_band.ipynb](neural_band.ipynb) | 147 | `Pool(10)` |
 | [neural_band.ipynb](neural_band.ipynb) | 210 | `Pool(10)` |
 | [neural_band.ipynb](neural_band.ipynb) | 272 | `Pool(10)` |
 | [neural_band.ipynb](neural_band.ipynb) | 334 | `Pool(10)` |
-| [ising_workbook.ipynb](ising_workbook.ipynb) | 56 | `Pool(4)` |
+| [ising_workbook.ipynb](ising_workbook.ipynb) | 56 | `Pool(10)` |
 
 To migrate a notebook cell, replace `Pool(N)` with `Pool(get_n_workers())`
 and add `from parallel_config import get_n_workers` to an early setup
