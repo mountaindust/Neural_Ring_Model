@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import decision_model as model
-import walker_analysis.decision_skeleton as ds
+import plots.decision_skeleton as ds  # moved to plots/
 
 pi = np.pi
 cm = model.convert_angles

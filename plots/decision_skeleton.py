@@ -24,7 +24,7 @@ bifurcation branch diagram along a horizontal cut, showing which equilibrium
 *directions* are born and which die, and where (what the count-only
 ``plot_bifurcation_diagram`` throws away).
 
-Run:  python walker_analysis/decision_skeleton.py fly --branch-diagram
+Run:  python plots/decision_skeleton.py fly --branch-diagram
 """
 import os
 import sys
@@ -53,9 +53,9 @@ FLY_LOCS = np.array([[5.0000,  0.0000],
                      [3.8302,  3.2139],
                      [3.8302, -3.2139]])
 FLY = dict(locs=FLY_LOCS, r=0.5,
-           a_warp=0.45*pi, b_warp=0.92*pi,
-           a_weight=0.20*pi, b_weight=0.80*pi,
-           K=3.5, T=0.10,
+           a_warp=0.65*pi, b_warp=0.92*pi,    # a_warp 0.65pi (refit): first bifurcation
+           a_weight=0.20*pi, b_weight=0.80*pi, #   pushed out to the empirical x
+           K=2.0, T=0.10,                      # K=2 (refit); K does not affect the skeleton
            xlim=(-0.3, 5.3), ylim=(-3.6, 3.6))
 
 # Locust: 3 targets at radius 3, target radius 0.1. The EMPIRICAL locust3 separation
@@ -613,7 +613,10 @@ def _heatmap_overlay(case, nm, ax):
             ax.set_xlim(extent[0] - pad, extent[1] + pad)
             ax.set_ylim(extent[2] - pad, extent[3] + pad)
             return lambda P: np.atleast_2d(np.asarray(P, float))   # identity
-        import godm_heatmaps
+        # godm_heatmaps lives in walker_analysis/ (the empirical-data engine); this
+        # script is in plots/, so import it by package path (project root is on
+        # sys.path from the top-of-file insert).
+        from walker_analysis import godm_heatmaps
         img, extent, posts = godm_heatmaps.compute_heatmap(base + '3', verbose=False)
         if img is None:
             raise RuntimeError('compute_heatmap returned no image')
@@ -704,7 +707,10 @@ def main(argv):
         nm = _build_model(cfg)
         # midline + two off-axis cuts (the compromise arms leave the midline)
         extra = (0.5, 1.0) if args.case.startswith('fly') else (0.3, 0.6)
-        save = args.save or os.path.join(here, f'branch_diagram_{args.case}.png')
+        # The branch diagram is an analysis diagnostic, not a publication figure, so it
+        # is written to ../walker_analysis/ (the skeleton figure stays here in plots/).
+        wa = os.path.join(os.path.dirname(here), 'walker_analysis')
+        save = args.save or os.path.join(wa, f'branch_diagram_{args.case}.png')
         plot_branch_diagram(nm, y0=0.0, xlim=(0.0, cfg['xlim'][1]),
                             num_x=args.num_x, extra_y=extra,
                             title=f'{args.case}: SC-equilibrium branches (births/deaths)',

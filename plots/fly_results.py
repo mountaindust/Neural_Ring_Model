@@ -1,15 +1,18 @@
-"""Publication panel: fly three-target walker tracks over the GODM fly3 heatmap.
+"""Publication panel: fly walker tracks over the empirical GODM heatmap.
 
-Loads the self-contained ``three_target_fly_refine.npz`` (walker tracks + the
-empirical heatmap + parameters + Pearson corr) written by
-``three_target_fly_refine.py`` and renders a single, undistorted panel suitable
-for a journal subplot: the empirical occupancy heatmap with a random selection of
-walker trajectories overlaid at alpha=0.4.
+Loads a self-contained ``*_target_fly_refine.npz`` (walker tracks + the empirical
+heatmap + parameters + Pearson corr) written by ``three_target_fly_refine.py`` or
+``two_target_fly_refine.py`` and renders a single, undistorted panel suitable for a
+journal subplot: the empirical occupancy heatmap with a random selection of walker
+trajectories overlaid at alpha=0.4.
 
-No pandas / GODM-data dependency -- everything needed is in the npz.
+No pandas / GODM-data dependency -- everything needed is in the npz. The output
+name follows the target count read from the npz: ``fly_results_<n>target.png``.
 
-Run:  python walker_analysis/fly_results.py
-      NR_MAX_TRACKS=200 python walker_analysis/fly_results.py    # tune overlay density
+Run:  python plots/fly_results.py            # 3-target (default)
+      python plots/fly_results.py 2          # 2-target
+      python plots/fly_results.py 3target     # 3-target (explicit)
+      NR_MAX_TRACKS=200 python plots/fly_results.py 2   # tune overlay density
 """
 import os
 import sys
@@ -20,8 +23,15 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-NPZ = os.path.join(HERE, 'three_target_fly_refine.npz')
-OUT = os.path.join(HERE, 'fly_results_3target.png')
+
+# case key -> source npz (written by the matching *_target_fly_refine.py)
+NPZ_BY_CASE = {
+    '2': 'two_target_fly_refine.npz',
+    '3': 'three_target_fly_refine.npz',
+}
+# accepted CLI spellings -> case key
+_ALIASES = {'2': '2', '2target': '2', 'two': '2',
+            '3': '3', '3target': '3', 'three': '3'}
 
 # Overlaying all tracks at alpha=0.4 saturates the bright ridge and hides the
 # heatmap underneath, so a random subset is drawn. Override with NR_MAX_TRACKS.
@@ -31,15 +41,23 @@ SUBSET_SEED = 0
 
 
 def main():
-    if not os.path.exists(NPZ):
-        sys.exit('missing %s -- run three_target_fly_refine.py first '
-                 '(NR_REPS=2500 for the std=4.0 result)' % NPZ)
-    d = np.load(NPZ, allow_pickle=True)
+    arg = (sys.argv[1] if len(sys.argv) > 1 else '3').lower()
+    case = _ALIASES.get(arg)
+    if case is None:
+        sys.exit('unknown case %r; choose from %s' % (arg, sorted(set(_ALIASES))))
+    npz_path = os.path.join(HERE, NPZ_BY_CASE[case])
+    if not os.path.exists(npz_path):
+        sys.exit('missing %s -- run %s_target_fly_refine.py first (NR_REPS=2500)'
+                 % (npz_path, {'2': 'two', '3': 'three'}[case]))
+
+    d = np.load(npz_path, allow_pickle=True)
     walks = d['walks']                      # object array of (2, n) tracks
     ref_img = d['ref_img']
     extent = tuple(d['extent'].tolist())    # (xmin, xmax, ymin, ymax)
+    n_targets = len(d['target_locs'])
     f = lambda k: float(d[k])
     pi = np.pi
+    out = os.path.join(HERE, 'fly_results_%dtarget.png' % n_targets)
 
     n_total = len(walks)
     if n_total > MAX_TRACKS:
@@ -48,7 +66,8 @@ def main():
     else:
         idx = np.arange(n_total)
         n_plotted = n_total
-    print('plotting %d of %d tracks (alpha=%.2f)' % (n_plotted, n_total, TRACK_ALPHA))
+    print('case %d-target: plotting %d of %d tracks (alpha=%.2f)'
+          % (n_targets, n_plotted, n_total, TRACK_ALPHA))
 
     # --- figure: equal aspect so 1 x-unit == 1 y-unit (no distortion) ---
     x0, x1, y0, y1 = extent
@@ -75,21 +94,21 @@ def main():
                  f('a_warp')/pi, f('b_warp')/pi, f('a_weight')/pi, f('b_weight')/pi,
                  f('noise_exp'), f('R_exp'),
                  f('start_pos_std'), np.degrees(f('start_head_std'))))
-    title = ('Fly 3-target walker tracks on GODM heatmap '
+    title = ('Fly %d-target walker tracks on GODM heatmap '
              '(showing %d/%d tracks)\n%s\ncorr(all)=%.3f'
-             % (n_plotted, n_total, params, f('corr_all')))
+             % (n_targets, n_plotted, n_total, params, f('corr_all')))
     ax.set_title(title, fontsize=8)
 
-    fig.savefig(OUT, dpi=300, bbox_inches='tight', pad_inches=0.05)
+    fig.savefig(out, dpi=300, bbox_inches='tight', pad_inches=0.05)
     plt.close(fig)
     # Report final raster size so the >=4 in / 300 dpi requirement is verifiable.
     try:
         from PIL import Image
-        w_px, h_px = Image.open(OUT).size
+        w_px, h_px = Image.open(out).size
         print('wrote %s  (%d x %d px = %.2f x %.2f in @ 300 dpi)'
-              % (OUT, w_px, h_px, w_px / 300.0, h_px / 300.0))
+              % (out, w_px, h_px, w_px / 300.0, h_px / 300.0))
     except Exception:
-        print('wrote', OUT)
+        print('wrote', out)
 
 
 if __name__ == '__main__':

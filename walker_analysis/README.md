@@ -22,29 +22,37 @@ intentionally do not exercise.
 
 ## Contents
 
-- `rndwalk_figures.py` — regenerates the representative figures below.
+- `rndwalk_figures_orig.py` — regenerates the representative K-series figures below.
 - `godm_heatmaps.py` — reproduces the empirical (x, y) occupancy heatmaps from
   Sridhar et al. 2021 for side-by-side comparison with the model (see
-  "Empirical comparison heatmaps" below).
+  "Empirical comparison heatmaps" below). This is the empirical-data engine; the
+  publication scripts in `../plots/` import it.
 - `three_target_analysis.md` — why three-target walkers consistently pick the
-  middle target (the reborn-center-branch recapture), and how to tune a
-  controllable (e.g. 1:2:1) split while keeping the bifurcation x-locations fixed.
-- `three_target_fly.py` / `three_target_locust.py` — three-target walker models tuned
-  to the GODM data (fly 40°/radius 5/r=0.5; **locust 35°**/radius 3/r=0.1 — the
-  empirical locust separation, verified from the data). The centre/outer split is
-  matched via the foveal weight `a_weight`; the fly matches (~45% centre), the locust
-  is a clean near-match (a documented tension). Run each directly (10-core pool).
-- `three_target_findings.md` — the data match, the split-tuning sweeps (`a_weight` is
-  the lever; std/start-heading/T are not), and the locust clean-vs-outer tension.
-- `decision_skeleton.py` — the deterministic decision-track skeleton (two sequential
-  binary decisions) over the GODM heatmaps; `birth_mechanism.md` /
-  `skeleton_birth_analysis.py` work out where the bifurcations are born/die on the
-  y=0 cut.
+  middle target (the reborn-center-branch recapture); the early (~80-walker)
+  split-tuning exploration. **Its "`a_weight` is the lever" conclusion is superseded
+  for the fly** by the high-realization refit (see `../plots/`).
+- `three_target_fly.py` / `three_target_locust.py` — three-target walker quick-look
+  models on the GODM geometry (fly 40°/radius 5/r=0.5; **locust 35°**/radius 3/r=0.1).
+  The fly was GODM-refit (**K=2, a_warp=0.65π, std=4** → ~45% centre); the locust is
+  still the older `a_weight`/`std` tuning (a clean near-match — a documented tension).
+  Run each directly (10-core pool).
+- `three_target_findings.md` — the data match and the split levers. **At high
+  realization count the levers are `a_warp` / `K` / `std`, not `a_weight`** (which is
+  saturated); plus the locust clean-vs-outer tension.
+- `birth_mechanism.md` / `skeleton_birth_analysis.py` — where the bifurcations are
+  born/die on the y=0 cut (pitchfork-vs-saddle-node mechanism).
+
+**Publication figures live in [`../plots/`](../plots/)** (moved out of here): the
+GODM-substructure walker match (`fly_results.py` → `fly_results_{2,3}target.png`, fed
+by the npz producers `three_target_fly_refine.py` / `two_target_fly_refine.py`) and the
+deterministic decision-track skeletons (`decision_skeleton.py` →
+`skeleton_{fly,locust}.png`, `branch_diagram_{fly,locust}.png`). Those scripts import
+`decision_model`, `parallel_config`, and this directory's `godm_heatmaps`.
 
 Run:
 
 ```
-python walker_analysis/rndwalk_figures.py
+python walker_analysis/rndwalk_figures_orig.py
 ```
 
 Each figure overlays the tracks of 30 walkers. Shared setup: observer

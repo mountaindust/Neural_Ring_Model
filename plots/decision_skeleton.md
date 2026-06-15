@@ -3,9 +3,11 @@
 > **Note (later work):** this documents the original skeleton feature. The tracer has
 > since gained the **second-bifurcation diamond** (each arm splits into {outer, centre},
 > the "two sequential binary decisions"), the `skip_unstable` option, a midline pin for
-> symmetry, and the data-matched parameters (fly `a_warp=0.45/a_weight=0.20`; **locust
+> symmetry, and the data-matched parameters (fly **`a_warp=0.65/a_weight=0.20, K=2`** —
+> GODM-refit to push the first bifurcation out, see
+> [three_target_fly_refine_findings.md](three_target_fly_refine_findings.md); **locust
 > 35°**, `a_warp=0.40/a_weight=0.10`). For the current state and the GODM data match see
-> [three_target_findings.md](three_target_findings.md).
+> [three_target_findings.md](../walker_analysis/three_target_findings.md).
 
 Draws the PNAS-style "main decision tracks" for the three-target experiments
 **deterministically from the model's bifurcation structure** — no hand-drawing, no
@@ -25,43 +27,48 @@ field is read straight from
 - [skeleton_fly.png](skeleton_fly.png), [skeleton_locust.png](skeleton_locust.png) —
   the skeleton over the empirical GODM heatmaps. The black tracks land on the bright
   heatmap ridges in both species.
-- [branch_diagram_fly.png](branch_diagram_fly.png),
-  [branch_diagram_locust.png](branch_diagram_locust.png) — the (x, θ) + (x, R)
+- [branch_diagram_fly.png](../walker_analysis/branch_diagram_fly.png),
+  [branch_diagram_locust.png](../walker_analysis/branch_diagram_locust.png) — the (x, θ) + (x, R)
   bifurcation **branch diagram** (equilibrium *directions* and coherence vs observer
   position, not just stable counts).
 
 ## CLI
 
 ```
-python walker_analysis/decision_skeleton.py fly                 # skeleton over heatmap
-python walker_analysis/decision_skeleton.py locust --branch-diagram
-python walker_analysis/decision_skeleton.py fly --no-heatmap    # skeleton over target circles
+python plots/decision_skeleton.py fly                 # skeleton over heatmap
+python plots/decision_skeleton.py locust --branch-diagram
+python plots/decision_skeleton.py fly --no-heatmap    # skeleton over target circles
 ```
 
 ## The midline bifurcation cascade (what is born/dies where)
 
 The branch diagram shows the cascade is richer than the "one stable → goes unstable →
-two appear" sketch. For the **fly** (the locust is the same, scaled):
+two appear" sketch. For the **fly** (at the refit `a_warp=0.65π`; the locust cascade is
+qualitatively the same at its own `a_warp=0.40π`):
 
 | x | event |
 |---|---|
-| ~0.90 | **First bifurcation**: the two compromise arms (±22°) are *born* by saddle-node — while the center (0°) is **still stable**. Two branches appear *alongside* center; they don't replace it. |
-| ~1.55 | Center (0°) **destabilizes** (the inner saddles merge into it). |
-| ~2.6  | Center is **reborn stable**. |
-| ~3.05 | **Outer-target branches** (±74°) are *born* by a **separate** saddle-node. |
+| ~1.3 | **First bifurcation**: the two compromise arms (±25°) are *born* by saddle-node — while the center (0°) is **still stable**. Two branches appear *alongside* center; they don't replace it. |
+| ~2.4 | Center (0°) **destabilizes** (the inner saddles merge into it). |
+| ~3.0  | Center is **reborn stable**. |
+| ~3.3 | **Outer-target branches** (±80°) are *born* by a **separate** saddle-node. |
+
+(Raising `a_warp` from the old 0.45π to 0.65π pushed every event in this cascade
+outward — first bifurcation ~0.9→~1.3, etc. — which is the point: the walker commits
+later and stops peeling toward the targets too early.)
 
 **The reborn center and the outer-target branches are born at *different* x, in
-distinct bifurcation events.** The reborn center comes *first* (fly ≈2.6 vs ≈3.05;
+distinct bifurcation events.** The reborn center comes *first* (fly ≈3.0 vs ≈3.3;
 locust ≈1.55 vs ≈1.8). The second-bifurcation region is a tight cluster of
 saddle-nodes (with some near-fold solver jitter, visible in the diagram).
 
 The *mechanism* of this separation — the center is a **pitchfork** (re-stabilizes
 once the outer targets swing past neural ±90° broadside) while the outer is an
 **Ising saddle-node** (a marginal single-target commitment, fragile to T / weight /
-separation) — is worked out in [birth_mechanism.md](birth_mechanism.md)
+separation) — is worked out in [birth_mechanism.md](../walker_analysis/birth_mechanism.md)
 (parameter sweeps, kernels, the 9-gon ring; figure
-[birth_mechanism.png](birth_mechanism.png)), via
-[skeleton_birth_analysis.py](skeleton_birth_analysis.py).
+[birth_mechanism.png](../walker_analysis/birth_mechanism.png)), via
+[skeleton_birth_analysis.py](../walker_analysis/skeleton_birth_analysis.py).
 
 ## A modeling finding worth flagging
 
@@ -71,7 +78,7 @@ stable-consensus **compromise ridges** that only *noisy* walkers populate. So yo
 cannot get the outer tracks from deterministic walkers; you need the
 bifurcation / SC-equilibrium skeleton, which is what this module computes. (This is
 the deterministic counterpart of the reborn-center recapture documented in
-[three_target_analysis.md](three_target_analysis.md).)
+[three_target_analysis.md](../walker_analysis/three_target_analysis.md).)
 
 ## How the tracer works
 
@@ -102,8 +109,8 @@ No merge step is needed — the three leaves ride distinct branches to distinct 
 
 ## Notes / caveats
 
-- **Model parameters are copied** from the current [three_target_fly.py](three_target_fly.py)
-  / [three_target_locust.py](three_target_locust.py) (which already carry the corrected
+- **Model parameters are copied** from the current [three_target_fly.py](../walker_analysis/three_target_fly.py)
+  / [three_target_locust.py](../walker_analysis/three_target_locust.py) (which already carry the corrected
   radii — fly 0.5, locust 0.1 — and per-geometry warps). Those scripts are figure
   programs with `plot_walkers` side effects in `__main__`, so they cannot be imported;
   the constants are duplicated and flagged to **keep in sync**.

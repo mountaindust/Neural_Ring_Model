@@ -3,8 +3,18 @@
 A mechanism study prompted by the upper-left (y=0) panels of the branch diagrams:
 on the midline the reborn-center stable direction appears well *before* the
 outer-target stable directions. This explains why and what controls the separation.
-Reproduce with [skeleton_birth_analysis.py](skeleton_birth_analysis.py); the summary
-figure is [birth_mechanism.png](birth_mechanism.png).
+
+**Reproducing the analysis and figures.** The engine is
+[skeleton_birth_analysis.py](skeleton_birth_analysis.py) — its `make_model`,
+`landmarks`, and `ninegon` helpers compute every birth/death x-location and the
+parameter sweeps in the tables below (run it directly for the landmark smoke test; it
+prints the x-locations, it does not itself write PNGs). The figures are assembled from
+those outputs:
+- `birth_mechanism.png` (the summary) and `birth_mechanism_knobs.png` (the T / gap /
+  `a_weight` sweeps) — composed from `skeleton_birth_analysis.py`'s `landmarks` sweeps.
+- `branch_diagram_ninegon.png` — the 9-gon (x, θ)+(x, R) branch diagram, from
+  [../plots/decision_skeleton.py](../plots/decision_skeleton.py)'s `plot_branch_diagram`
+  on the `skeleton_birth_analysis.ninegon()` geometry.
 
 ## TL;DR
 
@@ -27,7 +37,14 @@ all-targets consensus is "easy", but committing to ONE outer target (a symmetry
 break) needs more order**, so the observer must get closer (higher coherence R)
 before the outer lock can exist.
 
-## The midline cascade (fly default: 3 targets, 40°, radius 5, r=0.5, T=0.2)
+## The midline cascade (mechanism-study operating point)
+
+> Operating point for the numbers in this doc: 3 targets, 40°, radius 5, r=0.5, at the
+> `skeleton_birth_analysis.make_model` defaults `a_warp=0.47π, a_weight=0.40π, T=0.2`
+> (**not** the shipped fly tuning, which is `a_warp=0.65π, a_weight=0.20π, T=0.10` and so
+> shifts the absolute x-locations outward). The *mechanism* — pitchfork vs saddle-node,
+> center reborn first — is tuning-invariant; the specific x-values below are at this
+> operating point.
 
 | x | event | type |
 |---|---|---|
@@ -202,6 +219,8 @@ The targets (positions, sizes) are fixed by the experiment, so the legal knobs a
   for the gap); `b_weight = 0.80π` is already near the outer-earliest optimum.
 
 **Caveat (modeling):** T and the warp also set the *first* bifurcation and the overall
-walker behavior, which `three_target_fly.py` tuned to match the heatmap. Lowering T or
-`a_warp` to pull the outer in shifts the **whole** cascade, so the heatmap match would
-need re-checking — these are not free relative to that fit.
+walker behavior, which the shipped fly tuning fixes to match the heatmap (the GODM
+refit: `a_warp=0.65π, T=0.10` — see
+[../plots/three_target_fly_refine_findings.md](../plots/three_target_fly_refine_findings.md)).
+Lowering T or `a_warp` to pull the outer in shifts the **whole** cascade, so the heatmap
+match would need re-checking — these are not free relative to that fit.

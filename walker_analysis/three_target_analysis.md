@@ -1,5 +1,15 @@
 # Three-target walkers and the center-target bias
 
+> **Status (read first).** The *mechanism* here — the center-target bias and the
+> reborn-center recapture — is still the model's behavior, and this doc is the
+> foundation for [gated_pq_analysis.md](gated_pq_analysis.md) (the decoupled gated-noise
+> follow-up). But the *tuning* conclusions below (the "`angle_weight` is the lever"
+> framing, the 1:2:1 target, the Route 1/Route 2 noise recipes, and the per-knob center
+> tables) were worked out at ~80 walkers and are **superseded** by the high-realization
+> GODM refit: at N≥1000 `a_weight` is saturated and the split levers are `a_warp` / `K` /
+> `std`. For the current fly tuning and the data match see
+> [../plots/three_target_fly_refine_findings.md](../plots/three_target_fly_refine_findings.md).
+
 Why three-target walkers in `NeuralBandModel.plot_walkers` consistently choose the
 **middle** target instead of producing a clean double bifurcation to all three —
 and how to recover an arbitrary (e.g. 1:2:1) split while keeping the bifurcation

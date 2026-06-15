@@ -1,9 +1,13 @@
 """Three-target FRUIT FLY walkers, REFINED for substructure matching vs GODM.
 
 A high-realization sibling of ``three_target_fly.py`` (which is left untouched to
-preserve the shipped result). The model and its tuned knobs are IDENTICAL -- the
-endpoint split is already matched (~45% centre, see three_target_findings.md). What
-changes here is the *measurement*:
+preserve the shipped result). It started from three_target_fly.py's knobs but has
+since been refit against the GODM heatmap (see three_target_fly_refine_findings.md):
+**K lowered 3.5->2.0** (the model default; lower K gentles the peel and de-biases the
+centre) and **a_warp raised 0.45->0.65pi** (pushes the first bifurcation out to the
+empirical x, so walkers stop peeling toward the targets too early). These also let the
+SAME parameterization fit the 2-target case (two_target_fly_refine.py). What else
+changes from the shipped script is the *measurement*:
 
   1. Many more realizations (default 1500; full worker pool from machine_config),
      so the occupancy field is statistically smooth.
@@ -18,9 +22,9 @@ changes here is the *measurement*:
   3. Rendered on the EXACT same extent, target geometry, orientation, blur, and
      y-mirror as godm_heatmap_fly3 -- so the two panels are pixel-comparable.
 
-Run:  python walker_analysis/three_target_fly_refine.py            # default reps
-      NR_REPS=3000 python walker_analysis/three_target_fly_refine.py
-      python walker_analysis/three_target_fly_refine.py 800         # reps as arg
+Run:  python plots/three_target_fly_refine.py            # default reps
+      NR_REPS=3000 python plots/three_target_fly_refine.py
+      python plots/three_target_fly_refine.py 800         # reps as arg
 """
 import os
 import sys
@@ -44,13 +48,29 @@ target_locs = np.array([[5.0000,  0.0000],
                         [3.8302, -3.2139]])
 R = 0.5
 
-# --- retuned model knobs (IDENTICAL to three_target_fly.py -- split already matched) ---
-A_WARP, B_WARP = 0.45*pi, 0.92*pi
+# --- model knobs (refit vs GODM; see three_target_fly_refine_findings.md) ---
+# a_warp sets the first-bifurcation x: raising it pushes the up/down split outward so
+# walkers stop committing to the targets too early (the empirical ridge reaches the
+# outer targets from higher x than the early-peeling walkers did). 0.65pi lands the
+# 3-target split ~on the data and lets the SAME warp help the 2-target case.
+# IMPORTANT: pushing a_warp out only helps once K is low (K=2) -- at K=3.5 the longer
+# trunk over-recaptures to the reborn centre branch. b_warp also sets the rear blind
+# spot / the 2nd bifurcation. Override with NR_A_WARP.
+A_WARP = float(os.environ.get('NR_A_WARP', 0.65)) * pi
+B_WARP = 0.92*pi
 # a_weight is the centre/outer split lever (three_target_findings.md); overridable
 # for sweeping. Lower a_weight releases more walkers to the outer targets.
 A_WEIGHT = float(os.environ.get('NR_A_WEIGHT', 0.20)) * pi
 B_WEIGHT = 0.80*pi
-K, T = 3.5, 0.10
+# K is the turning gain dtheta/dt = K*R*sin(Theta/2). It does NOT move the bifurcation
+# locations (K-invariant; see .claude/rules/torque-and-stability.md) but sets how
+# SHARPLY the walker peels once past one: higher K -> tighter pull to the dead-ahead
+# consensus -> MORE corner-cutting + centre recapture (worse vs GODM); lower K -> gentler
+# peel, walkers ride the trunk longer and reach the outer targets along the empirical
+# ridge. K=2 (the model default) fits best; 3.5 (the old refine value) over-peeled.
+# Override with NR_K.
+K = float(os.environ.get('NR_K', 2.0))
+T = 0.10
 NOISE_EXP, R_EXP = 2.0, 3.0
 # std is the centre de-bias lever AT HIGH REALIZATION COUNT. The shipped
 # three_target_fly.py uses std=2.5, which three_target_findings.md reported as ~45-49%

@@ -2,14 +2,18 @@
 
 Three circle targets 40 deg apart at radius 5, target radius 0.5 -- positions and size
 FIXED by the experiment. The walker starts at the origin and makes two sequential
-binary decisions (up/down, then outer/centre), reaching all three targets. Tuning vs
-the early prototype: lower T (sharper, cleaner commitment), higher K (tighter turns),
-and a NARROW foveal weight window (a_weight) chosen so the centre/outer target split
-matches the data (~45% centre). Bifurcation locations are set by the warp; a_warp keeps
-the branches on the empirical heatmap ridge (godm_heatmap_fly3.png).
+binary decisions (up/down, then outer/centre), reaching all three targets.
 
-See three_target_findings.md for the data match, the split-tuning sweeps (a_weight is
-the lever), and the matching deterministic skeleton (decision_skeleton.py).
+Knobs are the GODM-refit set (see plots/three_target_fly_refine_findings.md): a_warp=0.65pi
+pushes the first bifurcation out to the empirical x so walkers stop committing to the
+targets too early; K=2 (the model default) gives a gentle turn so they ride the trunk
+to the targets instead of corner-cutting; std=4 de-biases the centre at high realization
+count. (The earlier values K=3.5/a_warp=0.45/std=2.5 over-peeled and were centre-heavy
+at high N.) Bifurcation x is set by the warp; the noise knobs only rebalance the split.
+
+See three_target_findings.md (data match, the levers) and
+plots/three_target_fly_refine.py / plots/three_target_fly_refine_findings.md (the high-realization
+GODM substructure match these knobs were fit against).
 
 Run:  python walker_analysis/three_target_fly.py
 """
@@ -32,17 +36,19 @@ target_locs = np.array([[5.0000,  0.0000],
                         [3.8302, -3.2139]])
 R = 0.5
 
-# --- retuned model knobs ---
-A_WARP, B_WARP = 0.45*pi, 0.92*pi      # a_warp kept near the original so the consensus
-#   branches sit on the empirical heatmap ridge; b_warp keeps the rear blind spot.
-A_WEIGHT, B_WEIGHT = 0.20*pi, 0.80*pi  # narrow foveal weight window: tuned so the
-#   centre/outer target split matches the data (~45% centre); a smaller a_weight
-#   releases more walkers to the outer targets (uniform weight is the most
-#   centre-biased). See three_target_findings.md.
-K, T = 3.5, 0.10                       # higher K (tighter turns), lower T (cleaner)
+# --- model knobs (refit vs the GODM heatmap; see plots/three_target_fly_refine_findings.md) ---
+A_WARP, B_WARP = 0.65*pi, 0.92*pi      # a_warp sets the first-bifurcation x: 0.65pi pushes
+#   the up/down commitment out to the empirical x so walkers don't peel toward the targets
+#   too early; b_warp keeps the rear blind spot / sets the second bifurcation.
+A_WEIGHT, B_WEIGHT = 0.20*pi, 0.80*pi  # foveal weight window. At high realization count
+#   a_weight is SATURATED -- not the split lever the early low-N work took it for; the
+#   real levers are a_warp (bifurcation x), K (peel sharpness), std (centre de-bias).
+K, T = 2.0, 0.10                       # K=2 (model default): a gentle turn. K does NOT move
+#   the bifurcation (K-invariant); higher K corner-cuts onto a target and over-recaptures
+#   to centre -- worse vs the data. Lower K lets walkers ride the trunk to the targets.
 # Gated noise (decoupled R^p drift / (1-R)^q gate):
 NOISE_EXP, R_EXP = 2.0, 3.0
-STD, V, DT = 2.5, 0.30, 0.05           # std set with a_weight for the ~45% centre split
+STD, V, DT = 4.0, 0.30, 0.05           # std de-biases the centre at high N (~45% centre)
 TARGET_TOL = 0.20
 REPETITIONS, MAX_STEPS, SEED = 80, 4000, 3
 
