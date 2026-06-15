@@ -66,9 +66,13 @@ the only knob changed from the shipped config; `K`, `T`, warp, `a_weight`, and t
 gated-noise exponents are identical. (`three_target_fly_std_sweep.png` shows the
 tradeoff; reproduce any single point with `NR_STD=<v> python ... three_target_fly_refine.py`.)
 
-A modest **start scatter** (`pos_std=0.20`, `head_std=12°`, override `NR_POS_STD`/
+A modest **start scatter** (`pos_std=0.075`, `head_std=12°`, override `NR_POS_STD`/
 `NR_HEAD_STD`) mimics the empirical release variability and broadens the walker trunk
-to match GODM's broad near-origin ridge; it is documented not to move the split.
+toward GODM's near-origin ridge; it does not move the split, and the Pearson
+correlation is insensitive to it (`pos_std` 0.20→0.075: corr(all) 0.768→0.766,
+corr(support) 0.738 unchanged — the metric is set by the trident, not the trunk
+width). `pos_std=0.075` is tight enough to keep the straight-to-centre tracks on the
+y=0 ridge; 0.20 spread them visibly above/below it.
 
 ## Residual mismatches (the honest limits)
 

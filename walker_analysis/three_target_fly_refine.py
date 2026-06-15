@@ -70,7 +70,7 @@ MAX_STEPS, SEED = 4000, 3
 # mimics that scatter. Documented in three_target_findings.md to barely move the
 # centre/outer split (start-heading spread 0->+-55 deg: 67->62% centre), so it is a
 # render-fidelity knob, not a split-tuning one. Override with NR_POS_STD / NR_HEAD_STD.
-START_POS_STD = float(os.environ.get('NR_POS_STD', 0.20))      # sigma of x,y start jitter
+START_POS_STD = float(os.environ.get('NR_POS_STD', 0.075))     # sigma of x,y start jitter
 START_HEAD_STD = float(os.environ.get('NR_HEAD_STD', np.radians(12.0)))  # sigma of heading
 
 # Many realizations for a smooth field; override with NR_REPS or argv[1].
@@ -196,6 +196,29 @@ def main():
     corr_all, corr_sup = similarity(walk_img, ref_img)
     print('heatmap similarity vs GODM fly3:  corr(all)=%.3f  corr(support)=%.3f'
           % (corr_all, corr_sup))
+
+    # Self-contained npz: walker tracks + the empirical heatmap + every parameter
+    # needed to label/plot a publication panel (so a plotting script needs neither
+    # pandas nor the GODM data). Object array of (2, n) tracks -> load with
+    # allow_pickle=True.
+    here = os.path.dirname(os.path.abspath(__file__))
+    npz = os.path.join(here, 'three_target_fly_refine.npz')
+    # Build the object array by fill (np.array(list_of_(2,n), dtype=object) tries
+    # to make a regular 2-D array and fails when the track lengths differ).
+    walks_obj = np.empty(len(walks), dtype=object)
+    for i, w in enumerate(walks):
+        walks_obj[i] = w
+    np.savez(npz,
+             walks=walks_obj,
+             ref_img=ref_img, extent=np.array(EXTENT, float),
+             corr_all=corr_all, corr_support=corr_sup, split=counts,
+             reps=REPETITIONS, seed=SEED,
+             K=K, T=T, std=STD, v=V, dt=DT,
+             a_warp=A_WARP, b_warp=B_WARP, a_weight=A_WEIGHT, b_weight=B_WEIGHT,
+             noise_exp=NOISE_EXP, R_exp=R_EXP, target_tol=TARGET_TOL,
+             start_pos_std=START_POS_STD, start_head_std=START_HEAD_STD,
+             target_locs=target_locs, target_R=R, godm_case=GODM_CASE)
+    print('wrote', npz)
 
     fig, ax = plt.subplots(1, 4, figsize=(21, 5.5))
     # Panel 0: empirical reference
