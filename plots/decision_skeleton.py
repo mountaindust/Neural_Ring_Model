@@ -639,10 +639,11 @@ def _heatmap_overlay(case, nm, ax):
 
 
 def make_figure(case, *, heatmap=True, ds_step=0.02, save=None, ax=None,
-                skip_unstable=False):
+                skip_unstable=True):
     """Build the deterministic-skeleton figure for ``case`` in CASES ('fly', 'locust'),
     overlaid on the empirical GODM heatmap (graceful fallback to target circles).
-    ``skip_unstable`` omits the centre's unstable interlude."""
+    ``skip_unstable`` (default True) breaks the centre track across its SC-unstable
+    interlude, leaving a gap; set False to draw it continuously through."""
     if case not in CASES:
         raise ValueError(f"case must be one of {sorted(CASES)}, got {case!r}")
     cfg = CASES[case]
@@ -664,15 +665,15 @@ def make_figure(case, *, heatmap=True, ds_step=0.02, save=None, ax=None,
 
     plot_skeleton(tree, ax, transform=transform, skip_unstable=skip_unstable)
     ax.set_aspect('equal')
-    ax.set_title(f'{case}: deterministic decision-track skeleton'
-                 + (' over GODM heatmap' if transform is not None else ''))
+    ax.set_title(f'{case} stable-track skeleton'
+                 + (' over empirical heatmap' if transform is not None else ''))
 
     hit = {t.target_idx for t in tree.arrivals()}
     if hit != set(range(len(nm.percep_model.targets.locs))):
         warnings.warn(f"{case}: not all targets reached; hit {sorted(hit)} "
                       f"(arrivals: {sorted(t.target_idx for t in tree.arrivals())})")
     if save:
-        fig.savefig(save, dpi=140, bbox_inches='tight')
+        fig.savefig(save, dpi=300, bbox_inches='tight')
         print('wrote', save)
     return fig
 
@@ -692,8 +693,9 @@ def main(argv):
                         'instead of the skeleton figure')
     p.add_argument('--no-heatmap', action='store_true',
                    help='skeleton over target circles only (skip the GODM heatmap)')
-    p.add_argument('--skip-unstable', action='store_true',
-                   help='omit the centre track where its direction is SC-unstable')
+    p.add_argument('--show-unstable', action='store_true',
+                   help='draw the centre track continuously THROUGH its SC-unstable '
+                        'interlude (default: break it, leaving a gap)')
     p.add_argument('--ds', type=float, default=0.02, help='streamline step size')
     p.add_argument('--num-x', type=int, default=400, help='branch-diagram x samples')
     p.add_argument('--save', default=None)
@@ -718,7 +720,7 @@ def main(argv):
     else:
         save = args.save or os.path.join(here, f'skeleton_{args.case}.png')
         make_figure(args.case, heatmap=not args.no_heatmap, ds_step=args.ds, save=save,
-                    skip_unstable=args.skip_unstable)
+                    skip_unstable=not args.show_unstable)
 
     if not args.no_show:
         plt.show()
