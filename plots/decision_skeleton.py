@@ -268,7 +268,7 @@ def plot_branch_diagram(nm, *, y0=0.0, xlim=None, num_x=400, criterion='reduced'
         fig.suptitle(title)
     fig.tight_layout()
     if save:
-        fig.savefig(save, dpi=130, bbox_inches='tight')
+        fig.savefig(save, dpi=300, bbox_inches='tight')
         print('wrote', save)
     return fig
 
