@@ -14,10 +14,16 @@ skeleton is then a forking streamline integration of that field.
 
 This module is standalone (imports ``decision_model`` but edits nothing in it). The
 fly/locust model setups below *mirror* the walker scripts ``three_target_fly.py`` /
-``three_target_locust.py`` (figure scripts with ``plot_walkers`` side effects in
-``__main__``, so they cannot be imported). **Keep the two in sync**; only the
-deterministic warp/weight/geometry/K/T are reproduced here (the noise knobs
-std/v/noise_exp/R_exp are irrelevant to the deterministic skeleton).
+``three_target_locust.py`` (and, for the two-target cases, ``two_target_fly_refine.py``)
+-- figure scripts with ``plot_walkers`` side effects in ``__main__``, so they cannot be
+imported. **Keep the two in sync**; only the deterministic warp/weight/geometry/K/T are
+reproduced here (the noise knobs std/v/noise_exp/R_exp are irrelevant to the
+deterministic skeleton).
+
+Two-target cases (``fly2`` / ``locust2``) trace a simple **Y**: a single midline trunk
+rides the straight-ahead compromise heading up to one pitchfork, where it forks into
+one arm per target and stops -- there is no on-midline (centre) target, so no
+straight-through centre route and no second bifurcation. See ``trace_skeleton``.
 
 Phase 0 deliverable: ``plot_branch_diagram`` -- a proper (x, theta) + (x, R)
 bifurcation branch diagram along a horizontal cut, showing which equilibrium
@@ -56,7 +62,7 @@ FLY = dict(locs=FLY_LOCS, r=0.5,
            a_warp=0.65*pi, b_warp=0.92*pi,    # a_warp 0.65pi (refit): first bifurcation
            a_weight=0.20*pi, b_weight=0.80*pi, #   pushed out to the empirical x
            K=2.0, T=0.10,                      # K=2 (refit); K does not affect the skeleton
-           xlim=(-0.3, 5.3), ylim=(-3.6, 3.6))
+           xlim=(-0.3, 5.3), ylim=(-3.6, 3.6), godm_case='fly3')
 
 # Locust: 3 targets at radius 3, target radius 0.1. The EMPIRICAL locust3 separation
 # is 35 deg (verified from the GODM data posts), NOT the 40 deg the original
@@ -67,12 +73,40 @@ LOCUST_LOCS = np.array([[3.0,             0.0],
                         [3.0*np.cos(_la),  3.0*np.sin(_la)],
                         [3.0*np.cos(_la), -3.0*np.sin(_la)]])
 LOCUST = dict(locs=LOCUST_LOCS, r=0.1,
-              a_warp=0.40*pi, b_warp=0.90*pi,
+              a_warp=0.50*pi, b_warp=0.90*pi,
               a_weight=0.10*pi, b_weight=0.80*pi,
               K=6.0, T=0.10,
-              xlim=(-0.3, 3.3), ylim=(-2.4, 2.4))
+              xlim=(-0.3, 3.3), ylim=(-2.4, 2.4), godm_case='locust3')
 
-CASES = {'fly': FLY, 'locust': LOCUST}
+# Fly two-target: GODM fly2 (60 deg separation, distance 5) -> two circle targets at
+# +-30 deg, radius 5 = (4.330, +-2.5), target radius 0.5. Mirrors two_target_fly_refine.py
+# (which imports the 3-target fly params verbatim -- same fly, same setup, two targets):
+# the SAME warp/weight/K/T as FLY, only the geometry differs. The model splits at x~2.2.
+_fa2 = pi/6.0                                   # 30 deg (half of the 60 deg separation)
+FLY2_LOCS = np.array([[5.0*np.cos(_fa2),  5.0*np.sin(_fa2)],
+                      [5.0*np.cos(_fa2), -5.0*np.sin(_fa2)]])   # (4.330, +-2.5)
+FLY2 = dict(locs=FLY2_LOCS, r=0.5,
+            a_warp=0.65*pi, b_warp=0.92*pi,
+            a_weight=0.20*pi, b_weight=0.80*pi,
+            K=2.0, T=0.10,
+            xlim=(-0.3, 4.8), ylim=(-3.0, 3.0), godm_case='fly2')
+
+# Locust two-target: GODM locust2 (45 deg separation, distance 2) -> two targets at
+# +-22.5 deg. Mirrors LOCUST exactly as FLY2 mirrors FLY: same distance 3 model frame
+# and the SAME warp/weight/K/T as LOCUST, only the separation differs (35->45 deg).
+# CAVEAT: unlike fly2, locust2 has no walker-refine/findings validation -- these knobs
+# are ASSUMED (reused from locust3). The --branch-diagram pitchfork and the make_figure
+# arrival check are the validation hooks; re-tune a_warp if the split is not clean.
+_la2 = np.radians(45.0)
+LOCUST2_LOCS = np.array([[3.0*np.cos(_la2/2),  3.0*np.sin(_la2/2)],
+                         [3.0*np.cos(_la2/2), -3.0*np.sin(_la2/2)]])
+LOCUST2 = dict(locs=LOCUST2_LOCS, r=0.1,
+               a_warp=0.50*pi, b_warp=0.90*pi,
+               a_weight=0.10*pi, b_weight=0.80*pi,
+               K=6.0, T=0.10,
+               xlim=(-0.3, 3.3), ylim=(-2.0, 2.0), godm_case='locust2')
+
+CASES = {'fly': FLY, 'fly2': FLY2, 'locust': LOCUST, 'locust2': LOCUST2}
 
 
 def _build_model(cfg):
@@ -353,7 +387,12 @@ def trace_skeleton(nm, start_loc=(0.0, 0.0), start_heading=0.0, *, ds=0.02,
     (theta, R) continuity to a target.
     """
     targets = nm.percep_model.targets
-    center_idx = int(np.argmin(np.abs(np.asarray(targets.locs)[:, 1])))  # on-midline target
+    # The on-midline (centre) target, or None when none sits on y=0 (the 2-target /
+    # even-symmetric case: both targets straddle the midline). center_idx is None is the
+    # single switch the no-centre logic keys off below.
+    _locs_y = np.asarray(targets.locs)[:, 1]
+    _ci = int(np.argmin(np.abs(_locs_y)))
+    center_idx = _ci if abs(_locs_y[_ci]) < 1e-6 else None
     # Is the whole problem mirror-symmetric about the x-axis (targets symmetric, start
     # on the axis heading along it)? If so the centre route lies EXACTLY on y=0, and we
     # pin it there -- otherwise the root, riding the SC-unstable centre branch through
@@ -434,7 +473,28 @@ def trace_skeleton(nm, start_loc=(0.0, 0.0), start_heading=0.0, *, ds=0.02,
             #     first multistable point -- the first bifurcation for a single-stable
             #     start, or immediately if the origin is already tri-stable. ---
             stable_now = [d for d in dd if d[2]]
-            if allow_fork and not has_forked and len(stable_now) >= 2:
+            if allow_fork and not has_forked and center_idx is None:
+                # No centre target (2-target / even-symmetric). The two arms are born
+                # (saddle-node) at the FIRST bifurcation while the straight-ahead
+                # compromise (centre, theta=0) is still stable, then the centre DIES at
+                # a SECOND bifurcation. A walker riding the stable centre does not peel
+                # off until the centre itself goes unstable, so the trunk forks at the
+                # centre's DEATH (the empirical long-trunk split), not the arms' birth.
+                # The root rides the centre via lock_root until here; then fork into the
+                # stable arms and stop -- there is no continuation/centre leaf.
+                cen = min(dd, key=lambda d: abs(model.convert_angles(d[0])))
+                centre_alive = cen[2] and abs(model.convert_angles(cen[0])) < np.radians(8.0)
+                if not centre_alive and len(stable_now) >= 2:
+                    for d in stable_now:
+                        arm_side = int(np.sign(d[0])) if abs(d[0]) > 1e-3 else 0
+                        child = Track(next_id[0], tk.id, loc, d[0], 'fork', side=arm_side)
+                        next_id[0] += 1
+                        tracks.append(child)
+                        queue.append(child)
+                    has_forked = True
+                    tk.death = dict(reason='fork', loc=loc.copy(), target_idx=None)
+                    return
+            elif allow_fork and not has_forked and len(stable_now) >= 2:
                 cont = min(stable_now, key=lambda d: _metric(d[0], d[1], h, Rp, r_weight))
                 for d in stable_now:
                     if d is cont:
@@ -480,7 +540,7 @@ def trace_skeleton(nm, start_loc=(0.0, 0.0), start_heading=0.0, *, ds=0.02,
             #     committed heading th2 jumps by > fold_thresh as it commits to the
             #     outer branch), also seed a CENTRE-bound route -- the second binary
             #     decision {outer target, centre target} (the PNAS dashed diamond). ---
-            if (second_fork and side != 0 and not fold_forked
+            if (second_fork and center_idx is not None and side != 0 and not fold_forked
                     and abs(model.convert_angles(th2 - h)) > fold_thresh):
                 cvec = np.asarray(targets.locs)[center_idx] - loc
                 bearing_c = np.arctan2(cvec[1], cvec[0])
@@ -592,19 +652,19 @@ def plot_skeleton(tree, ax, *, transform=None, color='k', lw=1.8,
                 break   # the two arms share one fork point
 
 
-def _heatmap_overlay(case, nm, ax):
+def _heatmap_overlay(godm_case, nm, ax):
     """Try to draw the empirical GODM heatmap as a background. Returns a transform
     (model-frame -> heatmap-frame) on success, or None (and draws target circles)
-    on any failure -- so the figure degrades gracefully without the GODM data."""
+    on any failure -- so the figure degrades gracefully without the GODM data.
+    ``godm_case`` is the GODM case string ('fly3'/'fly2'/'locust3'/'locust2')."""
     try:
         _here = os.path.dirname(os.path.abspath(__file__))
         if _here not in sys.path:          # so the import works regardless of CWD
             sys.path.insert(0, _here)
-        base = case.split('_')[0]          # tolerate any suffix; 'fly'/'locust'
         # fast path: a cached heatmap (model geometry now matches the data, so the
         # frames coincide -> identity transform); falls through to a full recompute
         # if no cache exists.
-        cache = os.path.join(_here, f'_hm_{base}3.npz')
+        cache = os.path.join(_here, f'_hm_{godm_case}.npz')
         if os.path.exists(cache):
             d = np.load(cache)
             img, extent = d['img'], tuple(d['extent'])
@@ -617,7 +677,7 @@ def _heatmap_overlay(case, nm, ax):
         # script is in plots/, so import it by package path (project root is on
         # sys.path from the top-of-file insert).
         from walker_analysis import godm_heatmaps
-        img, extent, posts = godm_heatmaps.compute_heatmap(base + '3', verbose=False)
+        img, extent, posts = godm_heatmaps.compute_heatmap(godm_case, verbose=False)
         if img is None:
             raise RuntimeError('compute_heatmap returned no image')
         post_xy = np.array(list(posts.values()), float)
@@ -632,7 +692,7 @@ def _heatmap_overlay(case, nm, ax):
         ax.set_ylim(extent[2] - pad, extent[3] + pad)
         return transform
     except Exception as exc:        # GODM repo absent, import error, etc.
-        warnings.warn(f"GODM heatmap unavailable for {case!r} ({exc}); "
+        warnings.warn(f"GODM heatmap unavailable for {godm_case!r} ({exc}); "
                       "drawing target circles only.")
         nm.percep_model.targets.plot_targets_to_axis(ax)
         return None
@@ -656,7 +716,7 @@ def make_figure(case, *, heatmap=True, ds_step=0.02, save=None, ax=None,
     else:
         fig = ax.figure
 
-    transform = _heatmap_overlay(case, nm, ax) if heatmap else None
+    transform = _heatmap_overlay(cfg['godm_case'], nm, ax) if heatmap else None
     if transform is None and not heatmap:
         nm.percep_model.targets.plot_targets_to_axis(ax)
     if transform is None:
