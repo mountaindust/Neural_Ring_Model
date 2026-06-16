@@ -3,6 +3,8 @@
 .virtual_documents
 .Rhistory
 *.png
+*.jpg
+*.tif
 !VM_bifurcations/*.png
 !weighting_analysis/*.png
 .~*

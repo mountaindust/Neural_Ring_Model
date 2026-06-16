@@ -31,6 +31,7 @@ bifurcation branch diagram along a horizontal cut, showing which equilibrium
 ``plot_bifurcation_diagram`` throws away).
 
 Run:  python plots/decision_skeleton.py fly --branch-diagram
+      python plots/decision_skeleton.py diagram-both   # combined fly+locust headings
 """
 import os
 import sys
@@ -300,6 +301,62 @@ def plot_branch_diagram(nm, *, y0=0.0, xlim=None, num_x=400, criterion='reduced'
     axes[0, 0].legend(loc='upper right', fontsize=8, framealpha=0.9)
     if title:
         fig.suptitle(title)
+    fig.tight_layout()
+    if save:
+        fig.savefig(save, dpi=300, bbox_inches='tight')
+        print('wrote', save)
+    return fig
+
+
+def plot_diagram_both(*, y_cuts=(0.0, 0.5, 1.0), num_x=400, criterion='reduced',
+                      save=None):
+    """Combined fly-over-locust SC-equilibrium branch diagram.
+
+    Stacks the *heading* (x, theta) panel of the fly branch diagram (top row) over
+    that of the locust (bottom row), one column per y-cut -- i.e. the first row of
+    each case's ``plot_branch_diagram`` output, with the (x, R) coherence row of
+    both dropped. Each case keeps its own x-extent (fly to ~5.3, locust to ~3.3), so
+    the rows do not share an x-axis. The cut titles are drawn on the top (fly) row
+    only; the locust row uses the SAME cuts, so repeating them would be redundant.
+    Per-panel rendering mirrors ``plot_branch_diagram``.
+    """
+    cases = [('fly', 'fly equilib. heading $\\theta$ (deg)'),
+             ('locust', 'locust equilib. heading $\\theta$ (deg)')]
+    ncols = len(y_cuts)
+    fig, axes = plt.subplots(2, ncols, figsize=(5.2 * ncols, 7.0), squeeze=False)
+    for row, (case, ylabel) in enumerate(cases):
+        cfg = CASES[case]
+        nm = _build_model(cfg)
+        xlim = (0.0, cfg['xlim'][1])
+        xs = np.linspace(xlim[0], xlim[1], num_x)
+        for col, yc in enumerate(y_cuts):
+            stable, unstable, n_stable = _branch_scan(nm, yc, xs, criterion)
+            ax_th = axes[row, col]
+
+            bif_x = _cluster(xs[1:][np.diff(n_stable) != 0], gap=0.12)
+            for bx in bif_x:
+                ax_th.axvline(bx, color='0.8', lw=0.8, ls='--', zorder=0)
+
+            ax_th.scatter(unstable['x'], np.degrees(unstable['th']), s=4,
+                          facecolors='none', edgecolors='tab:red', lw=0.5,
+                          label='unstable', zorder=2)
+            ax_th.scatter(stable['x'], np.degrees(stable['th']), s=5,
+                          color='tab:blue', label='stable', zorder=3)
+
+            ax_th.set_ylim(-185, 185)
+            ax_th.set_yticks([-180, -90, -67, -22, 0, 22, 67, 90, 180])
+            ax_th.grid(True, alpha=0.25)
+            # y-label only on the left-most column (tighter figure)
+            if col == 0:
+                ax_th.set_ylabel(ylabel)
+            # cut title only on the top (fly) row -- the locust row shares the cuts
+            if row == 0:
+                ax_th.set_title(f'cut y = {yc:.2f}')
+            # x-label only on the bottom (locust) row -- the same 'observer x' for all
+            if row == len(cases) - 1:
+                ax_th.set_xlabel('observer x')
+    axes[0, 0].legend(loc='upper right', fontsize=8, framealpha=0.9)
+    fig.suptitle('Self-consistent equilibrium branches')
     fig.tight_layout()
     if save:
         fig.savefig(save, dpi=300, bbox_inches='tight')
@@ -747,7 +804,9 @@ def main(argv):
     p = argparse.ArgumentParser(
         description='Deterministic decision-track skeleton from the model bifurcation '
                     'structure (default: skeleton over the empirical GODM heatmap).')
-    p.add_argument('case', choices=sorted(CASES), help='fly or locust')
+    p.add_argument('case', choices=sorted(CASES) + ['diagram-both'],
+                   help='fly or locust (skeleton/branch diagram), or "diagram-both" '
+                        'for the combined fly-over-locust heading branch diagram')
     p.add_argument('--branch-diagram', action='store_true',
                    help='Phase 0: plot the (x,theta)+(x,R) bifurcation branch diagram '
                         'instead of the skeleton figure')
@@ -762,8 +821,19 @@ def main(argv):
     p.add_argument('--no-show', action='store_true')
     args = p.parse_args(argv)
 
-    cfg = CASES[args.case]
     here = os.path.dirname(os.path.abspath(__file__))
+
+    if args.case == 'diagram-both':
+        # The branch diagram is an analysis diagnostic, not a publication figure, so it
+        # is written to ../walker_analysis/ (the skeleton figures stay here in plots/).
+        wa = os.path.join(os.path.dirname(here), 'walker_analysis')
+        save = args.save or os.path.join(wa, 'branch_diagram_both.png')
+        plot_diagram_both(num_x=args.num_x, save=save)
+        if not args.no_show:
+            plt.show()
+        return
+
+    cfg = CASES[args.case]
 
     if args.branch_diagram:
         nm = _build_model(cfg)
