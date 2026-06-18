@@ -3277,7 +3277,7 @@ class NeuralBandModel:
                                  overlay_basins=False, basin_R_seed=0.15,
                                  basin_n_coarse=64, basin_n_bisect=12,
                                  basin_min_sep_factor=2.3, basin_min_area=3,
-                                 basin_wheel_radius=None, basin_bg_alpha=0.7):
+                                 basin_wheel_radius=None, basin_bg_alpha=0.9):
         '''Plot a 2D colormap showing the number of stable self-consistent
         equilibria as a function of observer (x,y) location.
 
@@ -3693,7 +3693,11 @@ class NeuralBandModel:
         from matplotlib.patches import Wedge, Patch
         import matplotlib.patheffects as pe
 
-        palette = ['#F0C300', '#1463C8', '#D55E00', '#2CA02C', '#9467BD']
+        # warm "autumn" categorical colors (gold -> orange -> brick red ->
+        # brown). viridis (the count background) owns the whole cool->yellow
+        # range, so cool wheel colors wash out against it; these warm tones
+        # contrast at every count level.
+        palette = ['#F5D742', '#DD6B0E', '#BC3B26', '#8A4B1E', '#5C3A1E']
 
         def rank_color(r):
             return palette[r % len(palette)]

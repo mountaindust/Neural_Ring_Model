@@ -12,7 +12,7 @@
 The neutral-seed basin **wheel overlay** prototyped here (`basin_mesh.py` /
 `basin_mesh_fly.py`) has been ported into NBM as an option on the bifurcation
 diagram: `NeuralBandModel.plot_bifurcation_diagram(overlay_basins=True)` draws
-the count colormap (dimmed, default α=0.7 via `basin_bg_alpha`) with a basin
+the count colormap (dimmed, default α=0.9 via `basin_bg_alpha`) with a basin
 wheel at each region.
 Ported methods now live in `decision_model.py` (NBM):
 
