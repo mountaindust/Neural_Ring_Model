@@ -448,14 +448,17 @@ class Targets:
         return dist_list
 
 
-    def plot_targets_to_axis(self, ax):
+    def plot_targets_to_axis(self, ax, zorder=5):
         '''Plots the targets on a given axis object.
+
+        zorder sets the draw layer (default 5, above direction-mesh quivers);
+        pass a higher value to draw the targets on top of e.g. basin wheels.
         '''
 
         target_color = '0.5'  # medium grey
         # Render targets above other layers (e.g., direction-mesh quivers)
         # and fully opaque so they hide arrows passing through them.
-        zo = 5
+        zo = zorder
 
         if self.geom_name is None:
             # delta functions
@@ -2411,7 +2414,8 @@ class NeuralBandModel:
         self.rng = np.random.default_rng()
 
 
-    def dgamma_dt(self, t=None, gamma=None, focal_angle=None, focal_loc=None):
+    def dgamma_dt(self, t=None, gamma=None, focal_angle=None, focal_loc=None,
+                  signals=None):
         '''Get the complex time derivative of gamma according to the
         Ising model. For use directly in ODE solvers.
 
@@ -2445,7 +2449,15 @@ class NeuralBandModel:
         Theta = np.angle(gamma)
         R = np.abs(gamma)
 
-        neur_angles, rho = self.percep_model.get_neural_signals(focal_angle, focal_loc)
+        # ``signals`` lets a caller pass precomputed (neural_angles, rho)
+        # when the heading is held fixed across many evaluations (an ODE
+        # solve / root find at constant focal_angle), avoiding a redundant
+        # perception recompute per call. When None, fetch as usual.
+        if signals is None:
+            neur_angles, rho = self.percep_model.get_neural_signals(
+                focal_angle, focal_loc)
+        else:
+            neur_angles, rho = signals
         if neur_angles.size == 0:
             return -gamma
         
@@ -2799,7 +2811,7 @@ class NeuralBandModel:
 
 
     def run_dgamma_dt(self, focal_angle=None, focal_loc=None, init_gamma=None,
-                      t_Final=100):
+                      t_Final=100, warn=True):
         '''Solve the dgamma/dt equation and look for solutions to approach a
         stable equilibrium for the neural band model. Uses LSODA solver from
         scipy with a real-valued reformulation so that stiff-capable solvers
@@ -2830,13 +2842,22 @@ class NeuralBandModel:
         if init_gamma is None:
             init_gamma = self.gamma
 
+        # The heading is fixed for the whole integration, so the perception
+        # signals are invariant: fetch them ONCE and reuse on every RHS
+        # evaluation (the solver calls the RHS dozens of times per
+        # relaxation). Exact (~1e-14) and ~9x faster than recomputing per
+        # call -- speeds every caller, walkers included (dtheta_dt ->
+        # run_dgamma_dt each heading step).
+        signals = self.percep_model.get_neural_signals(focal_angle, focal_loc)
+
         # Reformulate the complex ODE as a real 2D system so that LSODA
         # (a stiff-capable solver) can be used. Near-zero Jacobian eigenvalues
         # in the slow manifold between equilibria make LSODA significantly
         # more efficient than explicit RK45 with restarted windows.
         def dgamma_real(t, y):
             gamma = y[0] + 1j*y[1]
-            dg = self.dgamma_dt(t, gamma, focal_angle, focal_loc)
+            dg = self.dgamma_dt(t, gamma, focal_angle, focal_loc,
+                                signals=signals)
             return [dg.real, dg.imag]
 
         y0 = [np.real(init_gamma), np.imag(init_gamma)]
@@ -2844,7 +2865,8 @@ class NeuralBandModel:
 
         result = sol.y[0,-1] + 1j*sol.y[1,-1]
         tol = 1e-4
-        if np.abs(self.dgamma_dt(None, result, focal_angle, focal_loc)) > tol:
+        if warn and np.abs(self.dgamma_dt(None, result, focal_angle,
+                                          focal_loc, signals=signals)) > tol:
             print("Warning: Integration may not have reached equilibrium.")
         return result
 
@@ -3251,7 +3273,11 @@ class NeuralBandModel:
                                  num_y=29, refinement_levels=3, max_count=None,
                                  boundary_dilation=1,
                                  pool=None, ax=None, title=None, wb_plot=False,
-                                 stability_criterion='reduced'):
+                                 stability_criterion='reduced',
+                                 overlay_basins=False, basin_R_seed=0.15,
+                                 basin_n_coarse=64, basin_n_bisect=12,
+                                 basin_min_sep_factor=2.3, basin_min_area=3,
+                                 basin_wheel_radius=None, basin_bg_alpha=0.7):
         '''Plot a 2D colormap showing the number of stable self-consistent
         equilibria as a function of observer (x,y) location.
 
@@ -3467,7 +3493,8 @@ class NeuralBandModel:
         ax.imshow(img, origin='lower',
                   extent=[xlim[0], xlim[1], ylim[0], ylim[1]],
                   aspect='equal', interpolation='nearest',
-                  cmap=cmap, norm=norm)
+                  cmap=cmap, norm=norm,
+                  alpha=basin_bg_alpha if overlay_basins else None)
 
         self.percep_model.targets.plot_targets_to_axis(ax)
 
@@ -3488,6 +3515,15 @@ class NeuralBandModel:
         else:
             ax.set_title('Neural band bifurcation diagram (reduced)')
 
+        if overlay_basins:
+            self._overlay_basin_wheels(
+                ax, img, lambda i, j: idx_to_xy(i + 0.5, j + 0.5),
+                xlim, ylim, pool=pool,
+                stability_criterion=stability_criterion,
+                R_seed=basin_R_seed, n_coarse=basin_n_coarse,
+                n_bisect=basin_n_bisect, min_sep_factor=basin_min_sep_factor,
+                min_area=basin_min_area, wheel_radius=basin_wheel_radius)
+
         if local_plot:
             ax.legend(title='# stable\nequilibria', loc='center left',
                       bbox_to_anchor=(1.02, 0.5), frameon=False)
@@ -3495,6 +3531,252 @@ class NeuralBandModel:
             plt.show()
         else:
             return ax
+
+
+    # ------------------------------------------------------------------
+    # Basin-of-attraction wheels: optional overlay for the bifurcation
+    # diagram (overlay_basins=True). At an observer location, sweeping the
+    # heading around the circle from a neutral (uncommitted) neural state,
+    # each heading commits under the slaved-gamma flow to one stable
+    # self-consistent direction -- the "basin" of that direction. A wheel
+    # shows those heading-basins (annulus arcs) and the directions (arrows).
+    # Migrated from the basin_estimation/ vetting prototype.
+    # ------------------------------------------------------------------
+
+    def _basin_destination(self, focal_loc, theta0, gamma_seed, stable,
+                           dt=0.1, n_steps=2000, conv_tol=1e-5,
+                           min_R=0.05, max_dist=0.15):
+        """Index into ``stable`` of the direction a neutral observer at
+        heading ``theta0`` commits to under the slaved flow (re-equilibrate
+        gamma each heading step via run_dgamma_dt, then step theta by the
+        half-angle torque), or -1 if it does not commit (no convergence,
+        collapsed coherence, or lands away from any stable direction)."""
+        theta = theta0
+        gamma = gamma_seed
+        R = abs(gamma)
+        converged = False
+        for _ in range(n_steps):
+            gamma = self.run_dgamma_dt(focal_angle=theta, focal_loc=focal_loc,
+                                       init_gamma=gamma, warn=False)
+            R = abs(gamma)
+            dtheta = self.dtheta_dt(theta=theta, gamma=gamma,
+                                    focal_loc=focal_loc)
+            theta = convert_angles(theta + dtheta * dt)
+            if abs(dtheta) < conv_tol:
+                converged = True
+                break
+        if (not converged) or R < min_R or len(stable) == 0:
+            return -1
+        dists = [abs(convert_angles(theta - s)) for s in stable]
+        j = int(np.argmin(dists))
+        return j if dists[j] < max_dist else -1
+
+    def basin_arcs_at_focal_loc(self, focal_loc, R_seed=0.15, n_coarse=64,
+                                n_bisect=12, stability_criterion='reduced'):
+        """Heading-basin partition for the stable directions at one location.
+
+        Sweeps the heading from a fixed neutral seed (arg 0, |gamma|=R_seed)
+        and records which stable direction each heading commits to under the
+        slaved flow, refining basin boundaries by destination-flip bisection.
+
+        Returns a dict with keys 'focal_loc', 'stable' (sorted stable
+        directions), 'arcs' (list of (theta_start, theta_end, label) covering
+        the circle; label indexes 'stable', or -1 for a no-commit arc), and
+        'widths' ({label: total arc width}).
+        """
+        focal_loc = np.asarray(focal_loc, dtype=float)
+        ang, stab = self.sc_equilib(focal_loc=focal_loc,
+                                    stability_criterion=stability_criterion)
+        stable = sorted(a for a, s in zip(ang, stab) if s)
+        if len(stable) == 0:
+            return {'focal_loc': tuple(focal_loc), 'stable': [],
+                    'arcs': [(-np.pi, np.pi, -1)], 'widths': {-1: 2 * np.pi}}
+        if len(stable) == 1:
+            return {'focal_loc': tuple(focal_loc), 'stable': stable,
+                    'arcs': [(-np.pi, np.pi, 0)], 'widths': {0: 2 * np.pi}}
+
+        seed = R_seed + 0j
+        thetas = np.linspace(-np.pi, np.pi, n_coarse, endpoint=False)
+        labels = [self._basin_destination(focal_loc, th, seed, stable)
+                  for th in thetas]
+
+        step = 2 * np.pi / n_coarse
+        seps = []
+        for i in range(n_coarse):
+            a_lab, b_lab = labels[i], labels[(i + 1) % n_coarse]
+            if a_lab == b_lab:
+                continue
+            lo, hi = thetas[i], thetas[i] + step
+            for _ in range(n_bisect):
+                mid = 0.5 * (lo + hi)
+                if self._basin_destination(focal_loc, convert_angles(mid),
+                                           seed, stable) == a_lab:
+                    lo = mid
+                else:
+                    hi = mid
+            seps.append(convert_angles(0.5 * (lo + hi)))
+
+        if not seps:
+            lab = int(labels[0])
+            return {'focal_loc': tuple(focal_loc), 'stable': stable,
+                    'arcs': [(-np.pi, np.pi, lab)], 'widths': {lab: 2 * np.pi}}
+
+        seps.sort()
+        arcs, widths = [], {}
+        for k in range(len(seps)):
+            s_start = seps[k]
+            s_end = seps[(k + 1) % len(seps)]
+            span = (s_end - s_start) % (2 * np.pi)
+            mid = convert_angles(s_start + 0.5 * span)
+            lab = self._basin_destination(focal_loc, mid, seed, stable)
+            arcs.append((s_start, convert_angles(s_start + span), lab))
+            widths[lab] = widths.get(lab, 0.0) + span
+        return {'focal_loc': tuple(focal_loc), 'stable': stable,
+                'arcs': arcs, 'widths': widths}
+
+    def _basin_arcs_worker(self, args):
+        """Pool-friendly wrapper (one (x,y) per task; mirrors the
+        _count_stable_at dispatch pattern)."""
+        focal_loc, R_seed, n_coarse, n_bisect, crit = args
+        return self.basin_arcs_at_focal_loc(
+            focal_loc, R_seed=R_seed, n_coarse=n_coarse, n_bisect=n_bisect,
+            stability_criterion=crit)
+
+    @staticmethod
+    def _basin_wheel_placement(count_field, xy_of_pixel, min_sep, min_area=3):
+        """Choose wheel locations from a stable-count raster: one
+        representative per connected count-region at its deepest-interior
+        cell (distance-transform argmax), with a low-count min-area filter
+        (drop boundary-jitter fragments) and a richest-first min-separation
+        merge (keep the highest-count wheel in a cluster, drop nearby lower
+        ones). Deterministic and mirror-symmetric for a symmetric count
+        field. Modular by design -- an alternative placement strategy can
+        replace this without touching compute or render.
+
+        count_field : 2D int array, stable count per pixel (row=y, col=x).
+        xy_of_pixel : callable (i_col, j_row) -> (x, y).
+        Returns a list of (x, y) wheel locations.
+        """
+        from scipy.ndimage import label, distance_transform_edt
+        maxc = int(count_field.max())
+        cand = []   # (count, depth, x, y)
+        for k in range(1, maxc + 1):
+            lab, n = label(count_field == k)
+            for c in range(1, n + 1):
+                mask = (lab == c)
+                if mask.sum() < min_area and k < 3:
+                    continue
+                dt = distance_transform_edt(np.pad(mask, 1))[1:-1, 1:-1]
+                j, i = np.unravel_index(int(np.argmax(dt)), dt.shape)
+                x, y = xy_of_pixel(i, j)
+                cand.append((k, float(dt.max()), x, y))
+        cand.sort(key=lambda t: (-t[0], -t[1]))   # richest, then deepest
+        kept = []
+        for _k, _depth, x, y in cand:
+            if all((x - kx) ** 2 + (y - ky) ** 2 >= min_sep ** 2
+                   for kx, ky in kept):
+                kept.append((x, y))
+        return kept
+
+    @staticmethod
+    def _render_basin_wheels(ax, wheels, r_out):
+        """Draw basin wheels on an axis. Contained -- hand it the axis and the
+        fully-computed wheel data and it does only matplotlib.
+
+        Each wheel is a thin annulus partitioned into a location's
+        heading-basin arcs plus an arrow per reachable stable direction;
+        color is categorical by basin RANK (largest->smallest: gold, blue,
+        vermilion, green, purple), a no-commit arc is light gray, and a
+        single-direction cell draws a lone arrow with no annulus. The rank
+        legend is added with add_artist so it coexists with the count legend.
+        """
+        from matplotlib.patches import Wedge, Patch
+        import matplotlib.patheffects as pe
+
+        palette = ['#F0C300', '#1463C8', '#D55E00', '#2CA02C', '#9467BD']
+
+        def rank_color(r):
+            return palette[r % len(palette)]
+
+        r_in = 0.83 * r_out
+        ring_w = r_out - r_in
+        stroke = [pe.withStroke(linewidth=1.8, foreground='black')]
+        max_rank = 1
+        for w in wheels:
+            cx, cy = w['focal_loc']
+            stable, arcs, widths = w['stable'], w['arcs'], w['widths']
+            nz = [lab for lab in range(len(stable))
+                  if widths.get(lab, 0.0) > 1e-9]
+            if not nz:
+                continue
+            order = sorted(nz, key=lambda l: -widths[l])
+            rank_of = {lab: r for r, lab in enumerate(order)}
+            max_rank = max(max_rank, len(order))
+            multi = len(nz) >= 2
+            if multi:
+                for (s_start, s_end, lab) in arcs:
+                    span = (s_end - s_start) % (2 * np.pi)
+                    if len(arcs) == 1:
+                        span = 2 * np.pi
+                    if span <= 1e-9:
+                        continue
+                    th1 = np.degrees(s_start)
+                    col = ('lightgray' if lab < 0
+                           else rank_color(rank_of.get(lab, 0)))
+                    ax.add_patch(Wedge((cx, cy), r_out, th1,
+                                       th1 + np.degrees(span), width=ring_w,
+                                       facecolor=col, edgecolor='0.3',
+                                       lw=0.3, zorder=5))
+                cap = r_in
+            else:
+                cap = r_out
+            for lab in nz:
+                ang = stable[lab]
+                frac = widths[lab] / (2 * np.pi)
+                L = cap * (0.30 + 0.70 * frac) if multi else cap
+                ax.annotate('', xy=(cx + L * np.cos(ang), cy + L * np.sin(ang)),
+                            xytext=(cx, cy), zorder=6,
+                            arrowprops=dict(arrowstyle='-|>',
+                                            color=rank_color(rank_of[lab]),
+                                            lw=1.3, shrinkA=0, shrinkB=0,
+                                            mutation_scale=5,
+                                            path_effects=stroke))
+        names = ['largest basin', '2nd largest', '3rd largest',
+                 '4th largest', '5th largest']
+        handles = [Patch(facecolor=rank_color(i), edgecolor='0.3',
+                         label=names[i]) for i in range(max_rank)]
+        leg = ax.legend(handles=handles, loc='lower left', fontsize=7,
+                        framealpha=0.9, title='basin wheel: rank by size',
+                        title_fontsize=7)
+        ax.add_artist(leg)
+
+    def _overlay_basin_wheels(self, ax, count_field, xy_of_pixel, xlim, ylim,
+                              pool=None, stability_criterion='reduced',
+                              R_seed=0.15, n_coarse=64, n_bisect=12,
+                              min_sep_factor=2.3, min_area=3,
+                              wheel_radius=None):
+        """Place wheels on the count raster, compute their basin arcs
+        (optionally in parallel via ``pool``), and render onto ``ax``."""
+        if wheel_radius is None:
+            wheel_radius = 0.03 * max(xlim[1] - xlim[0], ylim[1] - ylim[0])
+        cells = self._basin_wheel_placement(
+            count_field, xy_of_pixel, min_sep=min_sep_factor * wheel_radius,
+            min_area=min_area)
+        # drop any wheel whose location lands on a target (the observer-at-a-
+        # target case is degenerate and the target disk would cover it anyway)
+        tg = self.percep_model.targets
+        cells = [c for c in cells
+                 if not tg.check_target_overlap(
+                     np.asarray(c, dtype=float)).any()]
+        args = [(tuple(c), R_seed, n_coarse, n_bisect, stability_criterion)
+                for c in cells]
+        if pool is None:
+            wheels = [self._basin_arcs_worker(a) for a in args]
+        else:
+            wheels = pool.map(self._basin_arcs_worker, args)
+        self._render_basin_wheels(ax, wheels, wheel_radius)
+        # draw the targets fully opaque, on top of the wheels
+        tg.plot_targets_to_axis(ax, zorder=7)
 
 
     def _simulate_one_walk(self, args):

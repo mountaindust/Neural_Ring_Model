@@ -7,6 +7,43 @@
 > into `decision_model.py`). The plan below is preserved as the record of
 > how the estimator was vetted.
 
+## Migration into decision_model — basin-wheel overlay (2026-06-18)
+
+The neutral-seed basin **wheel overlay** prototyped here (`basin_mesh.py` /
+`basin_mesh_fly.py`) has been ported into NBM as an option on the bifurcation
+diagram: `NeuralBandModel.plot_bifurcation_diagram(overlay_basins=True)` draws
+the count colormap (dimmed, default α=0.7 via `basin_bg_alpha`) with a basin
+wheel at each region.
+Ported methods now live in `decision_model.py` (NBM):
+
+- `basin_arcs_at_focal_loc` — per-location heading→stable-direction basin
+  partition (neutral-seed slaved flow + destination-flip bisection). **Public.**
+- `_basin_destination` — one slaved-flow trajectory's destination index.
+- `_basin_wheel_placement` — deepest-interior + low-count min-area filter +
+  richest-first min-separation merge (the `region` placement). Modular (static).
+- `_render_basin_wheels` — the wheel glyph (θ-basin annulus + arrows,
+  categorical rank colors, rank legend). Contained (static).
+- `_overlay_basin_wheels` / `_basin_arcs_worker` — orchestration + pool wrapper.
+
+Also folded in (general speedup): `run_dgamma_dt` now fetches
+`get_neural_signals` **once per call** (the heading is fixed for the whole
+integration) via a new `signals=` hook on `dgamma_dt` — exact (~1e-14) and
+~9× faster, benefiting every caller including walkers.
+
+**This directory is slated for retirement** (can proceed on a separate
+branch). Cleanup checklist:
+
+- `basin_arcs.py`, `basin_mesh.py`, `basin_mesh_fly.py` — superseded by the
+  NBM methods; remove or keep only as throwaway demos.
+- `theta_scan.py`, `basin_via_theta.py` — the prototype's model wiring and the
+  OLD scan-based `compute_basins_at_focal_loc` (a *different*, γ-branch-extent
+  estimator — **not** what the overlay uses); decide keep-as-record vs remove.
+- **Keep** `findings.md` + `free_energy_derivation.md` as the vetting record.
+- **Not migrated** (prototype-only, intentionally left behind): the scan-based
+  `compute_basins_at_focal_loc`, the commitment/two-branch probes, target/R_sc
+  descriptors, grid placement (`adaptive_cells`), and the single-panel figure
+  scaffolding.
+
 Standalone exploratory work to validate a basin-of-attraction estimator
 for stable self-consistent equilibria in NBM, before any changes to
 `decision_model.py`. Mirrors the structure of `VM_bifurcations/`:
