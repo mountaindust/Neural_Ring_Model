@@ -117,7 +117,7 @@ End-to-end vetting of the basin-estimation machinery lives in [basin_estimation/
 
 ## Open TODOs
 
-Engineering TODOs (IEM `run_dgamma_dt` LSODA port; cell-center sampling; residual heading-noise floor; foveal `angle_weight` commitment signal; two-panel bifurcation+basin plot; §9 basin-ratio recompute) now live in **[TODO.md](TODO.md)**.
+Engineering TODOs (IEM `run_dgamma_dt` LSODA port; cell-center sampling; residual heading-noise floor; foveal `angle_weight` commitment signal; two-panel bifurcation+basin plot) now live in **[TODO.md](TODO.md)**.
 
 ## Common gotchas
 

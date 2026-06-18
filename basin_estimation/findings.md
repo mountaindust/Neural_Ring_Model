@@ -2016,12 +2016,32 @@ glyph (not as the basin width). The slaved-flow bisection in
 **basin-attribution bisection deferred in §4.7 / §13.5(5)** and can be
 promoted into the estimator.
 
+### 14.8a Scope decision — first paper (2026-06-16)
+
+The two-panel deliverable adopts a **fixed-seed basin protocol**: at each
+heading θ, seed γ at a fixed neutral state (neural arg = 0, i.e. consensus
+straight ahead; R a small constant in the *indecision* range, ~0.1–0.2 —
+below the committed R ≳ 0.4 seen in walker sims, above the R ≈ 0
+arg-degeneracy) and run the slaved flow
+to its destination stable eq. This yields a **single-valued,
+history-independent** basin map — the fixed seed removes the
+"from-which-committed-state" ambiguity of §14.9 — and a per-direction
+robustness scalar = basin **arc width**. The slaved-flow bisection in
+`fold_kick_demo.py` remains the boundary-finder, now seeded *neutrally*
+instead of from the committed γ.
+
+The **committed-walker** basin-attribution recompute (history-dependent;
+the full both-sides-at-both-stables §9 redo) is **out of first-paper
+scope**, along with the fold/R-collapse "fragility" glyph and the
+θ-noise *escape-rate* question (which needs the noise characterized).
+These are future work that more fully characterizes the separatrices.
+
 ### 14.9 Caveats / still open
 
 - Only the CCW boundary was bisected; the CW boundary was taken at the
   genuine smooth saddle (−2.38). Smooth saddles are true separatrices, so
   this is safe, but a full dynamical §9 recompute would bisect both sides
-  at every stable.
+  at every stable (deferred — out of first-paper scope; see §14.8a).
 - θ_dyn is the **deterministic** (small-noise-limit) basin-attribution
   boundary. A finite-amplitude θ-noise walker's *effective* basin and its
   escape rate across a fold-mediated boundary still need the first-passage
@@ -2032,3 +2052,30 @@ promoted into the estimator.
   correct initial condition for "a committed walker whose heading is
   perturbed," and it matches `plot_walkers`. A genuinely non-slaved γ
   would widen the basin further — but the model slaves γ.
+
+## 15. Neutral-seed basin prototype — validation (2026-06-16)
+
+`basin_estimation/basin_arcs.py` implements the first-paper fixed-seed
+protocol (§14.8a): neutral seed (arg 0, R = 0.15), slaved flow to the
+destination stable eq, basin boundaries by destination-flip bisection,
+basin **arc width** per stable direction as the robustness scalar.
+`basin_mesh.py` renders the panel-B mesh of allocentric robustness arrows
+(length ∝ arc width) over the stable-count colormap.
+
+**Validation at (4.0, 1.5), VM-k055:** 2 stable (reduced = coupled = 2).
+Neutral-seed basin widths close = 254°, far = 106° ⇒ ratio **2.40×** —
+consistent with §14's *dynamical* ≈ 2× and unlike the §9 *scan-fold*
+5.35× artifact. (Neutral-seed far basin is slightly narrower than §14's
+committed-walker 119°, as expected: an uncommitted observer is a touch
+less likely to resolve to the far target.) The seed is decision-relevant
+on only **~4% of headings** (a thin near-fold wedge), confirming
+seed-choice insensitivity over the bulk of the circle.
+
+**Commitment probe** (uncommitted R = 0.15 vs committed R = 1.0): in the
+sensitive wedge the uncommitted seed → close target, the committed seed →
+far target ⇒ **commitment is required to hold the farther / weaker-
+perception target**; the uncommitted walker defaults to the closer one.
+The two SC-eq R's are nearly equal (far 1.000, close 0.918), so here the
+discriminator is perception strength, not equilibrium R. Full
+characterization (wide-fold regions; the consensus-vs-target and
+three-target/locust cases) is deferred — see TODO.md.
