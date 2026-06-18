@@ -755,6 +755,30 @@ def _heatmap_overlay(godm_case, nm, ax):
         return None
 
 
+def _draw_targets(nm, ax, transform=None, color='0.5', zorder=4):
+    """Filled grey target circles at their true radius, mapped through ``transform``
+    (model-frame -> heatmap-frame) when one is given so they register with the
+    heatmap. A similarity transform maps circles to circles, so the radius is carried
+    through via the transformed edge distance -- accurate in either frame. Mirrors
+    decision_model.Targets.plot_targets_to_axis (same '0.5' grey); drawn under the
+    skeleton (zorder 4 < the skeleton's 5) so the tracks stay visible into the target."""
+    targets = nm.percep_model.targets
+    if targets.geom_name != 'circle':       # all skeleton CASES are circles; be safe
+        targets.plot_targets_to_axis(ax)
+        return
+    locs = np.asarray(targets.locs, float)
+    rr = targets.r
+    for n, loc in enumerate(locs):
+        r_n = float(rr[n] if isinstance(rr, np.ndarray) else rr)
+        if transform is not None:
+            c = np.asarray(transform(loc), float).ravel()[:2]
+            edge = np.asarray(transform(loc + np.array([r_n, 0.0])), float).ravel()[:2]
+            r_draw = float(np.hypot(edge[0] - c[0], edge[1] - c[1]))
+        else:
+            c, r_draw = loc, r_n
+        ax.add_patch(plt.Circle(c, r_draw, color=color, zorder=zorder))
+
+
 def make_figure(case, *, heatmap=True, ds_step=0.02, save=None, ax=None,
                 skip_unstable=True):
     """Build the deterministic-skeleton figure for ``case`` in CASES ('fly', 'locust'),
@@ -779,6 +803,10 @@ def make_figure(case, *, heatmap=True, ds_step=0.02, save=None, ax=None,
     if transform is None:
         ax.set_xlim(*cfg['xlim'])
         ax.set_ylim(*cfg['ylim'])
+    else:
+        # heatmap drawn: the transform-None paths already drew the targets (untransformed);
+        # over the heatmap we draw them in the heatmap frame so they register with it.
+        _draw_targets(nm, ax, transform=transform)
 
     plot_skeleton(tree, ax, transform=transform, skip_unstable=skip_unstable)
     ax.set_aspect('equal')

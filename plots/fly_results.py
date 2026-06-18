@@ -54,7 +54,9 @@ def main():
     walks = d['walks']                      # object array of (2, n) tracks
     ref_img = d['ref_img']
     extent = tuple(d['extent'].tolist())    # (xmin, xmax, ymin, ymax)
-    n_targets = len(d['target_locs'])
+    target_locs = d['target_locs']          # model frame == extent frame (fly case)
+    target_R = float(d['target_R'])
+    n_targets = len(target_locs)
     f = lambda k: float(d[k])
     pi = np.pi
     out = os.path.join(HERE, 'fly_results_%dtarget.png' % n_targets)
@@ -81,6 +83,11 @@ def main():
         w = walks[i]
         ax.plot(w[0], w[1], color='k', alpha=TRACK_ALPHA, lw=0.5,
                 solid_capstyle='round')
+    # Targets as filled grey circles at their true radius (cf.
+    # decision_model.Targets.plot_targets_to_axis). Tracks and heatmap share the model
+    # frame, which equals ``extent`` here, so target_locs/target_R draw directly.
+    for pos in target_locs:
+        ax.add_patch(plt.Circle(pos, target_R, color='0.5', zorder=5))
     ax.set_xlim(x0, x1); ax.set_ylim(y0, y1)
     ax.set_aspect('equal')                          # true aspect, no distortion
     ax.set_xlabel('x'); ax.set_ylabel('y')
