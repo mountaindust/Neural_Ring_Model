@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 from matplotlib import colors as mcolors
 import matplotlib.patheffects as pe
 from matplotlib.patches import Wedge, Patch
-from scipy.ndimage import label
+from scipy.ndimage import label, distance_transform_edt
 from multiprocessing import Pool
 
 from parallel_config import get_n_workers
@@ -131,17 +131,65 @@ def adaptive_cells(xb, yb, C, base_x, base_y, min_sep=0.45):
     return cells, len(reps)
 
 
+def region_reps(xb, yb, C, maxc, min_sep, min_area=3):
+    """Sparse placement: a representative wheel at the DEEPEST-INTERIOR cell
+    (distance-transform argmax, grid border = boundary) of each connected
+    stable-count component k>=1, with two consolidations so a fragmented
+    count field doesn't over-produce overlapping wheels:
+
+      - min-area filter: drop components smaller than `min_area` cells, but
+        ONLY for low counts (k<3) where the fragments are boundary jitter;
+        high-count (>=3) regions are kept regardless of size — they are small
+        but the most interesting.
+      - min-separation greedy merge: process candidates richest-first
+        (highest count, then deepest) and drop any within `min_sep` of an
+        already-kept rep. In a nested cluster this keeps the richest wheel
+        (e.g. the 5-stable core) and drops the lower-count reps piled on it;
+        along a fragmented boundary it keeps a few well-spread reps.
+
+    Deterministic and symmetry-preserving for a mirror-symmetric count field.
+    Returns (cells, n_components_considered)."""
+    cand = []                                    # (count, depth, x, y)
+    n_comp = 0
+    for k in range(1, maxc + 1):
+        lab, n = label(C == k)
+        for c in range(1, n + 1):
+            mask = (lab == c)
+            if mask.sum() < min_area and k < 3:
+                continue                         # low-count boundary jitter
+            n_comp += 1
+            dt = distance_transform_edt(np.pad(mask, 1))[1:-1, 1:-1]
+            j, i = np.unravel_index(int(np.argmax(dt)), dt.shape)  # row=y,col=x
+            cand.append((k, float(dt.max()), float(xb[i]), float(yb[j])))
+
+    cand.sort(key=lambda t: (-t[0], -t[1]))      # richest, then deepest, first
+    kept = []
+    for _k, _depth, x, y in cand:
+        if all((x - kx) ** 2 + (y - ky) ** 2 >= min_sep ** 2
+               for (kx, ky) in kept):
+            kept.append((x, y))
+    return kept, n_comp
+
+
 # -----------------------------------------------------------------------------
-def main():
+def main(xlim=(0.4, 4.6), ylim=(-2.5, 2.5), bg_res=(64, 58),
+         base_x_lim=(1.0, 4.4), base_y_lim=(-2.4, 2.4), base_res=(6, 7),
+         out_name='basin_mesh.png', model_label='VM-k055',
+         validation_point=VALIDATION_POINT, placement='grid'):
     here = os.path.dirname(os.path.abspath(__file__))
     n_workers = get_n_workers()
     print(f"workers: {n_workers}")
 
-    nx_bg, ny_bg = 64, 58
-    xb = np.linspace(0.4, 4.6, nx_bg)
-    yb = np.linspace(-2.5, 2.5, ny_bg)
-    base_x = np.linspace(1.0, 4.4, 6)
-    base_y = np.linspace(-2.4, 2.4, 7)
+    nx_bg, ny_bg = bg_res
+    xb = np.linspace(xlim[0], xlim[1], nx_bg)
+    yb = np.linspace(ylim[0], ylim[1], ny_bg)
+    base_x = np.linspace(base_x_lim[0], base_x_lim[1], base_res[0])
+    base_y = np.linspace(base_y_lim[0], base_y_lim[1], base_res[1])
+
+    # wheel geometry (also sets the region-placement min separation)
+    r_out = 0.34 * min(base_x[1] - base_x[0], base_y[1] - base_y[0])
+    r_in = 0.83 * r_out              # thin annulus; arrows live inside it
+    ring_w = r_out - r_in
 
     with Pool(n_workers) as pool:
         # --- background count field (panel A) ---
@@ -151,10 +199,15 @@ def main():
         maxc = int(C.max())
         print(f"  done in {time.time()-t0:.0f}s   (max stable count = {maxc})")
 
-        # --- adaptive arrow cells ---
-        cells, n_reps = adaptive_cells(xb, yb, C, base_x, base_y)
-        print(f"wheel cells: {len(cells)} ({n_reps} region representatives "
-              f"+ base grid, merged)")
+        # --- wheel-cell placement ---
+        if placement == 'region':
+            cells, n_comp = region_reps(xb, yb, C, maxc, min_sep=2.3 * r_out)
+            print(f"wheel cells: {len(cells)} (deepest-interior + merge; "
+                  f"from {n_comp} components)")
+        else:
+            cells, n_reps = adaptive_cells(xb, yb, C, base_x, base_y)
+            print(f"wheel cells: {len(cells)} ({n_reps} region reps "
+                  f"+ base grid, merged)")
 
         # --- per-cell sweeps (parallel, imbalanced -> chunksize=1) ---
         t1 = time.time()
@@ -168,30 +221,20 @@ def main():
                       f"({r[0][0]:.2f},{r[0][1]:+.2f}) [{r[1]} stable]")
         print(f"arrow mesh computed in {time.time()-t1:.0f}s")
 
-    # --- plot ------------------------------------------------------------
+    # --- plot (single panel) --------------------------------------------
     extent = [xb[0], xb[-1], yb[0], yb[-1]]
-    Xc, Yc = np.meshgrid(xb, yb)
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=(17, 7.5),
-                                   sharex=True, sharey=True)
+    fig, ax = plt.subplots(figsize=(8.5, 9))
 
-    # Panel A: viridis stable-count colormap
+    # bifurcation diagram (# stable SC eqs) as a prominent backdrop
     cmap = plt.cm.viridis
     norm = mcolors.BoundaryNorm(np.arange(-0.5, maxc + 1.5, 1.0), cmap.N)
-    im = axL.imshow(C, origin='lower', extent=extent, cmap=cmap, norm=norm,
-                    aspect='equal')
-    axL.set_title('Panel A — number of stable SC equilibria')
-    axL.set_ylabel('y')
-    cb = fig.colorbar(im, ax=axL, ticks=range(maxc + 1), fraction=0.046,
-                      pad=0.04)
-    cb.set_label('stable count')
-
-    # Panel B: muted gray count regions + crisp boundary contours, then
-    # arrows colored AND sized by basin width (robustness).
-    # faint copy of the Panel A count field as an unobtrusive backdrop
-    axR.imshow(C, origin='lower', extent=extent, cmap=cmap, norm=norm,
-               aspect='equal', alpha=0.30)
-    axR.set_title('Panel B — basin wheels (arrow = stable direction; ring '
-                  'sector = its θ-basin; color = basin rank, size ∝ robustness)')
+    ax.imshow(C, origin='lower', extent=extent, cmap=cmap, norm=norm,
+              aspect='equal', alpha=0.55)
+    count_sm = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
+    count_sm.set_array([])
+    cb = fig.colorbar(count_sm, ax=ax, ticks=range(maxc + 1), fraction=0.046,
+                      pad=0.02)
+    cb.set_label('# stable SC equilibria (bifurcation diagram)')
 
     # categorical palette by basin RANK (largest basin -> smallest), chosen
     # for max contrast between consecutive ranks (colorblind-safe):
@@ -201,9 +244,6 @@ def main():
     def rank_color(rank):
         return PALETTE[rank % len(PALETTE)]
 
-    r_out = 0.34 * min(base_x[1] - base_x[0], base_y[1] - base_y[0])
-    r_in = 0.83 * r_out              # thin annulus; arrows live inside it
-    ring_w = r_out - r_in
     stroke = [pe.withStroke(linewidth=1.8, foreground='black')]
     max_rank = 1
     for (xy, cnt, s, arcs, widths) in results:
@@ -211,13 +251,13 @@ def main():
         # reachable directions, ranked largest -> smallest basin
         nz = [lab for lab in range(len(s)) if widths.get(lab, 0.0) > 1e-9]
         if not nz:
-            continue                 # nothing reachable; faint backdrop shows it
+            continue                 # nothing reachable; backdrop shows it
         order = sorted(nz, key=lambda l: -widths[l])
         rank_of = {lab: r for r, lab in enumerate(order)}
         max_rank = max(max_rank, len(order))
         multi = len(nz) >= 2         # >=2 reachable basins -> draw the annulus
         if multi:
-            # annulus of θ-basins, each sector colored by its basin robustness
+            # annulus of θ-basins, each sector colored by basin rank
             for (s_start, s_end, lab) in arcs:
                 span = (s_end - s_start) % (2 * np.pi)
                 if len(arcs) == 1:
@@ -227,10 +267,10 @@ def main():
                 th1 = np.degrees(s_start)
                 col = ('lightgray' if lab < 0
                        else rank_color(rank_of.get(lab, 0)))
-                axR.add_patch(Wedge((cx, cy), r_out, th1,
-                                    th1 + np.degrees(span), width=ring_w,
-                                    facecolor=col, edgecolor='0.3', lw=0.3,
-                                    zorder=5))
+                ax.add_patch(Wedge((cx, cy), r_out, th1,
+                                   th1 + np.degrees(span), width=ring_w,
+                                   facecolor=col, edgecolor='0.3', lw=0.3,
+                                   zorder=5))
             cap = r_in
         else:
             cap = r_out              # one reachable direction: lone arrow, no ring
@@ -241,40 +281,43 @@ def main():
             ang = s[lab]
             frac = widths[lab] / (2 * np.pi)
             L = cap * (0.30 + 0.70 * frac) if multi else cap
-            axR.annotate('', xy=(cx + L * np.cos(ang), cy + L * np.sin(ang)),
-                         xytext=(cx, cy), zorder=6,
-                         arrowprops=dict(arrowstyle='-|>',
-                                         color=rank_color(rank_of[lab]),
-                                         lw=1.3, shrinkA=0, shrinkB=0,
-                                         mutation_scale=5, path_effects=stroke))
+            ax.annotate('', xy=(cx + L * np.cos(ang), cy + L * np.sin(ang)),
+                        xytext=(cx, cy), zorder=6,
+                        arrowprops=dict(arrowstyle='-|>',
+                                        color=rank_color(rank_of[lab]),
+                                        lw=1.3, shrinkA=0, shrinkB=0,
+                                        mutation_scale=5, path_effects=stroke))
 
     # categorical legend: color = basin rank by size
     rank_labels = ['largest basin', '2nd largest', '3rd largest',
                    '4th largest', '5th largest']
     handles = [Patch(facecolor=rank_color(i), edgecolor='0.3',
                      label=rank_labels[i]) for i in range(max_rank)]
-    axR.legend(handles=handles, loc='lower left', fontsize=7, framealpha=0.9,
-               title='arrow / sector color', title_fontsize=7)
+    ax.legend(handles=handles, loc='lower left', fontsize=7, framealpha=0.9,
+              title='arrow / sector color', title_fontsize=7)
 
-    # validation point + targets on both panels
+    # validation point (optional) + targets
     txt_stroke = [pe.withStroke(linewidth=2.0, foreground='white')]
-    for ax in (axL, axR):
-        ax.plot(*VALIDATION_POINT, marker='D', mfc='magenta', mec='k',
-                ms=9, zorder=7)
-        ax.annotate('validated', VALIDATION_POINT, textcoords='offset points',
+    if validation_point is not None:
+        ax.plot(*validation_point, marker='D', mfc='magenta', mec='k', ms=9,
+                zorder=7)
+        ax.annotate('validated', validation_point, textcoords='offset points',
                     xytext=(8, 4), fontsize=7.5, color='magenta', zorder=7,
                     path_effects=txt_stroke)
-        ax.scatter(target_locs[:, 0], target_locs[:, 1], marker='*', s=260,
-                   color='red', edgecolor='k', zorder=6)
-        ax.set_xlabel('x')
-    axL.annotate('target', target_locs[0], textcoords='offset points',
-                 xytext=(6, 4), fontsize=7.5, color='red', zorder=7,
-                 path_effects=txt_stroke)
+    ax.scatter(target_locs[:, 0], target_locs[:, 1], marker='*', s=260,
+               color='red', edgecolor='k', zorder=6)
+    ax.annotate('target', target_locs[0], textcoords='offset points',
+                xytext=(6, 4), fontsize=7.5, color='red', zorder=7,
+                path_effects=txt_stroke)
+    ax.set_xlabel('x')
+    ax.set_ylabel('y')
 
-    fig.suptitle('Bifurcation + basin-of-attraction (VM-k055): stable count '
-                 'and per-direction robustness', fontsize=12)
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
-    out = os.path.join(here, 'basin_mesh.png')
+    ax.set_title(f'Basins of attraction over the bifurcation diagram '
+                 f'({model_label})\nbackground = # stable SC equilibria;  '
+                 f'wheel = θ-basin annulus + direction arrows  (color = basin '
+                 f'rank, size ∝ robustness)', fontsize=9.5)
+    plt.tight_layout()
+    out = os.path.join(here, out_name)
     plt.savefig(out, dpi=140)
     plt.close(fig)
     print(f"saved {out}")
