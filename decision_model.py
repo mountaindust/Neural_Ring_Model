@@ -3338,6 +3338,19 @@ class NeuralBandModel:
             uses the legacy gamma-only test and over-reports stability where
             heading coupling contributes a positive eigenvalue; intended for
             side-by-side comparison plots.
+        overlay_basins : bool
+            If True, dim the count map (``basin_bg_alpha``) and draw a
+            basin-of-attraction wheel per sampled location (heading-basin
+            annulus + direction arrows, colored by basin rank).
+        basin_placement : {'lattice', 'grid'}
+            How wheel locations are chosen when overlay_basins is True.
+            'lattice' (default): a structure-aware, symmetric irregular
+            rectilinear lattice seeded on the multistable regions (capped at
+            ``basin_nx`` x-lines and ``basin_ny`` y-lines per side of the
+            axis). 'grid': a plain regular grid, ``basin_nx`` columns by
+            ``2*basin_ny - 1`` rows, evenly spaced over the domain. In both
+            cases wheels whose disk would overlap a target (within
+            ``basin_target_margin``) are dropped.
 
         Returns
         -------
@@ -3650,42 +3663,6 @@ class NeuralBandModel:
             stability_criterion=crit)
 
     @staticmethod
-    def _basin_wheel_placement(count_field, xy_of_pixel, min_sep, min_area=3):
-        """Choose wheel locations from a stable-count raster: one
-        representative per connected count-region at its deepest-interior
-        cell (distance-transform argmax), with a low-count min-area filter
-        (drop boundary-jitter fragments) and a richest-first min-separation
-        merge (keep the highest-count wheel in a cluster, drop nearby lower
-        ones). Deterministic and mirror-symmetric for a symmetric count
-        field. Modular by design -- an alternative placement strategy can
-        replace this without touching compute or render.
-
-        count_field : 2D int array, stable count per pixel (row=y, col=x).
-        xy_of_pixel : callable (i_col, j_row) -> (x, y).
-        Returns a list of (x, y) wheel locations.
-        """
-        from scipy.ndimage import label, distance_transform_edt
-        maxc = int(count_field.max())
-        cand = []   # (count, depth, x, y)
-        for k in range(1, maxc + 1):
-            lab, n = label(count_field == k)
-            for c in range(1, n + 1):
-                mask = (lab == c)
-                if mask.sum() < min_area and k < 3:
-                    continue
-                dt = distance_transform_edt(np.pad(mask, 1))[1:-1, 1:-1]
-                j, i = np.unravel_index(int(np.argmax(dt)), dt.shape)
-                x, y = xy_of_pixel(i, j)
-                cand.append((k, float(dt.max()), x, y))
-        cand.sort(key=lambda t: (-t[0], -t[1]))   # richest, then deepest
-        kept = []
-        for _k, _depth, x, y in cand:
-            if all((x - kx) ** 2 + (y - ky) ** 2 >= min_sep ** 2
-                   for kx, ky in kept):
-                kept.append((x, y))
-        return kept
-
-    @staticmethod
     def _basin_lattice_placement(count_field, xy_of_pixel, wheel_radius,
                                  nx_max=6, ny_max=4, min_sep_factor=2.2,
                                  max_sep_factor=5.5, min_area=4):
@@ -3811,6 +3788,23 @@ class NeuralBandModel:
         return [(x, y) for x in sorted(X) for y in Y]
 
     @staticmethod
+    def _basin_grid_placement(nx, ny, xlim, ylim, wheel_radius):
+        """Regular rectangular grid of wheel locations, independent of the
+        count field: ``nx`` columns evenly spaced across xlim and ``2*ny - 1``
+        rows evenly spaced and symmetric about y=0 (one row on the axis), all
+        inset by a wheel radius so edge wheels are not clipped. A uniform
+        sampling of the domain -- the simple alternative to the structure-aware
+        lattice. Assumes dynamics symmetric about y=0.
+        """
+        x0, x1 = xlim[0] + wheel_radius, xlim[1] - wheel_radius
+        ytop = min(-ylim[0], ylim[1]) - wheel_radius
+        xs = (np.linspace(x0, x1, nx) if nx > 1
+              else np.array([0.5 * (x0 + x1)]))
+        yh = np.linspace(0.0, ytop, ny) if ny > 1 else np.array([0.0])
+        ys = sorted(set(yh.tolist()) | {-y for y in yh.tolist()})
+        return [(float(x), float(y)) for x in xs for y in ys]
+
+    @staticmethod
     def _reflect_wheel(w):
         """Mirror a wheel across the x-axis for the y<0 rows (valid under the
         x-axis symmetry assumption): negate the focal y, the stable
@@ -3904,8 +3898,10 @@ class NeuralBandModel:
                               ny_max=4, target_margin=0.15, wheel_radius=None):
         """Place basin wheels, compute their arcs (parallel via ``pool``,
         exploiting x-axis symmetry: compute y>=0 and mirror), and render onto
-        ``ax``. placement='lattice' -> symmetric rectilinear grid seeded on
-        region centroids; 'region' -> one representative per region."""
+        ``ax``. placement='lattice' -> structure-aware symmetric rectilinear
+        lattice seeded on the multistable regions; 'grid' -> a plain regular
+        nx x (2*ny-1) grid over the domain. Either way, wheels whose disk would
+        overlap a target are dropped."""
         if wheel_radius is None:
             wheel_radius = 0.03 * max(xlim[1] - xlim[0], ylim[1] - ylim[0])
         if placement == 'lattice':
@@ -3913,10 +3909,12 @@ class NeuralBandModel:
                 count_field, xy_of_pixel, wheel_radius, nx_max=nx_max,
                 ny_max=ny_max, min_sep_factor=min_sep_factor,
                 max_sep_factor=max_sep_factor, min_area=min_area)
+        elif placement == 'grid':
+            cells = self._basin_grid_placement(
+                nx_max, ny_max, xlim, ylim, wheel_radius)
         else:
-            cells = self._basin_wheel_placement(
-                count_field, xy_of_pixel,
-                min_sep=min_sep_factor * wheel_radius, min_area=min_area)
+            raise ValueError(
+                "placement must be 'lattice' or 'grid', got %r" % (placement,))
         # drop wheels whose DISK overlaps a target (center within R_target +
         # r_wheel + margin), not just centers strictly inside
         tg = self.percep_model.targets
