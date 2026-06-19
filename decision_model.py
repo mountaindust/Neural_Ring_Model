@@ -2644,7 +2644,8 @@ class NeuralBandModel:
         return final_gammas, stability
 
 
-    def sc_equilib(self, focal_loc=None, stability_criterion='reduced'):
+    def sc_equilib(self, focal_loc=None, stability_criterion='reduced',
+                   return_R=False):
         '''Find self-consistent equilibria where heading = consensus direction.
 
         A self-consistent equilibrium is a fixed point of the coupled
@@ -2685,11 +2686,18 @@ class NeuralBandModel:
             'discrim_a': legacy 2x2 gamma-only discriminant (the original
               `_discrim_A` test; the fast block alone). Retained for
               comparison plots.
+        return_R : bool
+            If True, also return the coherence R = |gamma| at each
+            equilibrium (needed for (x, R) branch diagrams). Default False
+            preserves the 2-tuple return.
 
         Returns
         -------
         angle_eqs : list of float
             allocentric heading at each self-consistent equilibrium.
+        R_eqs : list of float
+            coherence R at each equilibrium. ONLY returned if return_R=True
+            (then the return is the 3-tuple (angle_eqs, R_eqs, stability)).
         stability : list of bool
             stability of each equilibrium.
         '''
@@ -2796,6 +2804,8 @@ class NeuralBandModel:
                     final_Rs[close_idx] = R_eq
                     stability[close_idx] = True
 
+        if return_R:
+            return final_angles, final_Rs, stability
         return final_angles, stability
     
 

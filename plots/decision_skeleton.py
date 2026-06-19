@@ -39,7 +39,6 @@ import warnings
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import brentq, root
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import decision_model as model
@@ -130,73 +129,6 @@ def build_locust_model(r=0.1):
 
 
 # ----------------------------------------------------------------------------
-# Self-consistent equilibria WITH coherence R.
-#
-# NBM.sc_equilib returns (theta, stability) but discards R. This mirrors that
-# solver exactly (decision_model.py NBM.sc_equilib, ~L2640-2718) and additionally
-# returns R per equilibrium -- needed for the (x, R) panel and to disambiguate the
-# stable/unstable pair that shares theta at a saddle-node. Keep in sync with the
-# canonical solver; it reuses the model's own dgamma_dt / _self_consistent_eq /
-# stability tests, so only the bookkeeping is duplicated.
-# ----------------------------------------------------------------------------
-
-def sc_equilib_with_R(nm, focal_loc, stability_criterion='reduced'):
-    """Like ``nm.sc_equilib`` but also returns R. -> (angles, Rs, stability)."""
-    if stability_criterion == 'reduced':
-        stab_test = nm._discrim_reduced
-    elif stability_criterion == 'coupled':
-        stab_test = nm._discrim_coupled
-    elif stability_criterion == 'discrim_a':
-        stab_test = nm._discrim_A
-    else:
-        raise ValueError("stability_criterion must be 'reduced', 'coupled', or "
-                         f"'discrim_a', got {stability_criterion!r}")
-
-    focal_loc = np.asarray(focal_loc, dtype=float)
-    theta_mesh = np.linspace(-np.pi, np.pi, 100)
-    R_probe = 0.5
-
-    imag_vals = np.array([nm.dgamma_dt(gamma=R_probe + 0j, focal_angle=t,
-                                       focal_loc=focal_loc).imag for t in theta_mesh])
-    candidates = []
-    for i in range(len(imag_vals) - 1):
-        if imag_vals[i] * imag_vals[i + 1] < 0:
-            try:
-                tc = brentq(lambda t: nm.dgamma_dt(gamma=R_probe + 0j, focal_angle=t,
-                                                   focal_loc=focal_loc).imag,
-                            theta_mesh[i], theta_mesh[i + 1])
-                candidates.append(tc)
-            except ValueError:
-                pass
-    candidates += [0.0, np.pi, -np.pi]
-
-    angles, Rs, stability = [], [], []
-    for tc in candidates:
-        sol = root(nm._self_consistent_eq, [tc, R_probe],
-                   args=(focal_loc,), method='hybr', tol=1e-10)
-        if not sol.success:
-            continue
-        theta_eq = model.convert_angles(sol.x[0])
-        R_eq = sol.x[1]
-        if R_eq < 0.01 or R_eq > 1.0:
-            continue
-        if np.abs(nm.dgamma_dt(gamma=R_eq + 0j, focal_angle=theta_eq,
-                               focal_loc=focal_loc)) > 1e-4:
-            continue
-        close = False
-        for ea, eR in zip(angles, Rs):
-            if (np.abs(model.convert_angles(theta_eq - ea)) < 0.02
-                    and np.abs(R_eq - eR) < 0.01):
-                close = True
-                break
-        if not close:
-            angles.append(theta_eq)
-            Rs.append(R_eq)
-            stability.append(stab_test(R_eq + 0j, theta_eq, focal_loc))
-    return angles, Rs, stability
-
-
-# ----------------------------------------------------------------------------
 # Phase 0 diagnostic: (x, theta) + (x, R) bifurcation branch diagram.
 # ----------------------------------------------------------------------------
 
@@ -223,7 +155,7 @@ def _branch_scan(nm, y0, xs, criterion):
     per-x (theta, R, stable) and the per-x stable count."""
     th_s, th_u, R_s, R_u, x_s, x_u, n_stable = [], [], [], [], [], [], []
     for x in xs:
-        angles, Rs, stab = sc_equilib_with_R(nm, (x, y0), criterion)
+        angles, Rs, stab = nm.sc_equilib((x, y0), criterion, return_R=True)
         ns = 0
         for a, r, s in zip(angles, Rs, stab):
             if s:
@@ -298,7 +230,7 @@ def plot_branch_diagram(nm, *, y0=0.0, xlim=None, num_x=400, criterion='reduced'
                            if bif_x.size else ''))
         ax_th.grid(True, alpha=0.25)
         ax_R.grid(True, alpha=0.25)
-    axes[0, 0].legend(loc='upper right', fontsize=8, framealpha=0.9)
+    axes[0, 0].legend(loc='lower left', fontsize=8, framealpha=0.9)
     if title:
         fig.suptitle(title)
     fig.tight_layout()
@@ -355,7 +287,7 @@ def plot_diagram_both(*, y_cuts=(0.0, 0.5, 1.0), num_x=400, criterion='reduced',
             # x-label only on the bottom (locust) row -- the same 'observer x' for all
             if row == len(cases) - 1:
                 ax_th.set_xlabel('observer x')
-    axes[0, 0].legend(loc='upper right', fontsize=8, framealpha=0.9)
+    axes[0, 0].legend(loc='lower left', fontsize=8, framealpha=0.9)
     fig.suptitle('Self-consistent equilibrium branches')
     fig.tight_layout()
     if save:
@@ -461,7 +393,7 @@ def trace_skeleton(nm, start_loc=(0.0, 0.0), start_heading=0.0, *, ds=0.02,
                   and abs(model.convert_angles(start_heading)) < 1e-9)
 
     def all_dirs(loc):
-        a, R, s = sc_equilib_with_R(nm, loc, stability_criterion)
+        a, R, s = nm.sc_equilib(loc, stability_criterion, return_R=True)
         return [(model.convert_angles(t), r, bool(k)) for t, r, k in zip(a, R, s)]
 
     def in_domain(loc):
