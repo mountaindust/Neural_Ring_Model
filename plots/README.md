@@ -116,6 +116,17 @@ Composites the finished 300-dpi panels (the four `skeleton_*.png` plus the two
 python plots/combined_walker_figure.py
 ```
 
+## `combined_branch_figure.py` — combined branch diagram
+
+Reuses `decision_skeleton.plot_diagram_both` to stack the fly SC-equilibrium
+*heading* branch row over the locust one (three y-cuts as columns; the per-case
+(x, R) coherence rows are dropped), and saves it as a 300-dpi publication pair
+`branch_diagram_combined.{jpg,tif}`.
+
+```
+python plots/combined_branch_figure.py
+```
+
 ## Outputs at a glance
 
 | File | Produced by | What it is |
@@ -126,3 +137,4 @@ python plots/combined_walker_figure.py
 | `skeleton_{fly,fly2,locust,locust2}*.png` | `decision_skeleton.py` | deterministic skeletons |
 | `fly_bifurcation.{jpg,tif}` | `fly_bifurcation_plot.py` | 2-panel bifurcation + basin overlay |
 | `combined_walker_figure.{jpg,tif}` | `combined_walker_figure.py` | publication montage of the six panels |
+| `branch_diagram_combined.{jpg,tif}` | `combined_branch_figure.py` | combined fly+locust heading branch diagram |
