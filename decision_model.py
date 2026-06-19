@@ -2707,34 +2707,44 @@ class NeuralBandModel:
         theta_mesh = np.linspace(-np.pi, np.pi, 100)
         final_angles = []
         stability = []
-        R_probe = 0.5
 
-        # Collect candidate theta values from sign changes in Im
-        candidates = []
-        imag_vals = np.array([self.dgamma_dt(
-            gamma=R_probe+0j, focal_angle=t,
-            focal_loc=focal_loc).imag for t in theta_mesh])
-        for i in range(len(imag_vals)-1):
-            if imag_vals[i]*imag_vals[i+1] < 0:
-                try:
-                    theta_c = brentq(
-                        lambda t: self.dgamma_dt(
-                            gamma=R_probe+0j, focal_angle=t,
-                            focal_loc=focal_loc).imag,
-                        theta_mesh[i], theta_mesh[i+1])
-                    candidates.append(theta_c)
-                except ValueError:
-                    pass
+        # Collect candidate theta seeds from sign changes in Im(dgamma_dt),
+        # scanning at SEVERAL probe radii. A single probe (formerly R=0.5)
+        # only "sees" equilibria whose R sits near it: near a saddle-node a
+        # stable/unstable pair can sit at R~0.6 and produce NO Im sign-change
+        # at R=0.5, so its stable member was silently dropped -- undercounting
+        # the diagram and leaving a spurious no-commit ("grey") basin where the
+        # slaved flow in fact commits to that attractor. Pooling seeds over
+        # probe radii catches these; every seed is still hybr-polished,
+        # residual-verified and deduped below, so extra probes can only surface
+        # genuine equilibria, never spurious ones. Each seed carries the probe
+        # R it was found at so the polish starts near the right coherence.
+        candidates = []   # (theta_seed, R_seed)
+        for R_probe in (0.3, 0.5, 0.7):
+            imag_vals = np.array([self.dgamma_dt(
+                gamma=R_probe+0j, focal_angle=t,
+                focal_loc=focal_loc).imag for t in theta_mesh])
+            for i in range(len(imag_vals)-1):
+                if imag_vals[i]*imag_vals[i+1] < 0:
+                    try:
+                        theta_c = brentq(
+                            lambda t: self.dgamma_dt(
+                                gamma=R_probe+0j, focal_angle=t,
+                                focal_loc=focal_loc).imag,
+                            theta_mesh[i], theta_mesh[i+1])
+                        candidates.append((theta_c, R_probe))
+                    except ValueError:
+                        pass
         # Always include theta=0 and theta=+-pi as candidates since
         # Im(dgamma_dt) is often zero there by symmetry but the sign
         # change can be narrower than the mesh spacing.
         for theta_extra in [0.0, np.pi, -np.pi]:
-            candidates.append(theta_extra)
+            candidates.append((theta_extra, 0.5))
 
         # Polish each candidate with the 2D root finder
         final_Rs = []
-        for theta_c in candidates:
-            sol = root(self._self_consistent_eq, [theta_c, R_probe],
+        for theta_c, R_seed in candidates:
+            sol = root(self._self_consistent_eq, [theta_c, R_seed],
                        args=(focal_loc,), method='hybr', tol=1e-10,
                        jac=self._self_consistent_jac)
             if not sol.success:
