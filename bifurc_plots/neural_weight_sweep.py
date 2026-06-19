@@ -596,11 +596,16 @@ def build_figure(rows, out_name, pool, overflow_log, regenerate=False):
                loc='center right', bbox_to_anchor=(0.976, 0.5), frameon=False,
                fontsize=LEGEND3_FS, title_fontsize=LEGEND3_FS)
 
-    # Title reflects what the sweep varies: the neural density (the default,
-    # whenever the warp changes) or the neural weight function (when only the
-    # weight varies -- the same condition that drives the column-1 content).
-    sweep_kind = ('neural weight function' if not show_density
-                  else 'neural density')
+    # Title reflects what the sweep varies. When only the weight varies it is
+    # the neural weight function; when the warp varies it is the neural density
+    # -- and also the weighting when the weight is tied to the warp
+    # (angle_weight='neural_angle_dist'), since both then change together.
+    if not show_density:
+        sweep_kind = 'neural weight function'
+    elif WEIGHT == 'neural_angle_dist':
+        sweep_kind = 'neural density and weighting'
+    else:
+        sweep_kind = 'neural density'
     suptitle = f'Neural band bifurcation sweep: changes in {sweep_kind}'
     fig.suptitle(suptitle, fontsize=SUPTITLE_FS, y=0.995)
     # Reserve extra room on the right for the enlarged stable-count legend.
