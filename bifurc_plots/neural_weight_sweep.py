@@ -121,6 +121,10 @@ OUT_NAME = None
 CACHE_VERSION = 1
 
 DPI = 150
+# Output image formats (extensions). The auto-generated base name is shared;
+# one file is written per format. e.g. ('png',) for exploration, or
+# ('jpg', 'tif') for publication-quality output.
+OUTPUT_FORMATS = ('png',)
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_N_WORKERS = get_n_workers()
 
@@ -602,10 +606,12 @@ def build_figure(rows, out_name, pool, overflow_log, regenerate=False):
     # Reserve extra room on the right for the enlarged stable-count legend.
     fig.tight_layout(rect=[0, 0, 0.93, 0.985])
 
-    out_path = os.path.join(OUTPUT_DIR, out_name)
-    fig.savefig(out_path, dpi=DPI, bbox_inches='tight')
+    base, _ = os.path.splitext(out_name)
+    for fmt in OUTPUT_FORMATS:
+        out_path = os.path.join(OUTPUT_DIR, f"{base}.{fmt}")
+        fig.savefig(out_path, dpi=DPI, bbox_inches='tight')
+        print(f"Wrote {out_path}")
     plt.close(fig)
-    print(f"Wrote {out_path}")
 
 
 def parse_args():
