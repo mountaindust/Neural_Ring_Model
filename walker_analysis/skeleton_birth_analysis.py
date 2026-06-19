@@ -78,7 +78,7 @@ def make_model(locs, *, r=0.5, warp='lin_cutoff', weight='lin_cutoff',
 # Landmark detector on the y=0 cut (jitter-robust)
 # --------------------------------------------------------------------------- #
 def _stable_thetas(nm, x):
-    a, R, s = ds.sc_equilib_with_R(nm, (x, 0.0))
+    a, R, s = nm.sc_equilib((x, 0.0), return_R=True)
     return [(cm(t), r) for t, r, k in zip(a, R, s) if k]
 
 

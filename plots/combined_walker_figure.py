@@ -11,7 +11,7 @@ follows that panel in the reordering; a bold panel letter (A-F) is overlaid in t
 heatmap corner. Column spacing is uniform (no divider line). Output: JPG + TIFF, both
 tagged 300 dpi.
 
-Run:  python plots/combine_figure.py
+Run:  python plots/combined_walker_figure.py
 """
 import os
 
@@ -31,7 +31,7 @@ PANELS = [
     ('F', 'fly_results_3target.png','Fly 3-target random walk'),
 ]
 NCOLS = 3
-OUT_BASE = 'combined_figure'
+OUT_BASE = 'combined_walker_figure'
 
 # --- layout (pixels at native 300-dpi panel resolution) ---
 MARGIN     = 30      # outer white border

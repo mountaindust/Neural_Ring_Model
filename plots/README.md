@@ -94,6 +94,28 @@ track through its SC-unstable interlude), `--ds` (streamline step), `--num-x`
 Skeleton figures are written here in `plots/`; the analysis-only branch diagrams are
 written to `../walker_analysis/`.
 
+## `fly_bifurcation_plot.py` — two-panel bifurcation + basin overlay
+
+Two-panel publication figure: the two-target (left) and three-target (right) fly
+stable-equilibrium-count maps, each with the basin-of-attraction wheel overlay
+(`NBM.plot_bifurcation_diagram(overlay_basins=True)`). Same fly in both panels; one
+shared legend. Writes `fly_bifurcation.jpg` and `.tif` (300 dpi).
+
+```
+python plots/fly_bifurcation_plot.py
+FLYBIF_FAST=1 python plots/fly_bifurcation_plot.py   # coarse, fast layout check
+```
+
+## `combined_walker_figure.py` — publication montage
+
+Composites the finished 300-dpi panels (the four `skeleton_*.png` plus the two
+`fly_results_*.png`) into one labelled 2x3 figure (panel letters A-F + titles). Run it
+*after* those panel PNGs exist. Writes `combined_walker_figure.jpg` and `.tif`.
+
+```
+python plots/combined_walker_figure.py
+```
+
 ## Outputs at a glance
 
 | File | Produced by | What it is |
@@ -102,3 +124,5 @@ written to `../walker_analysis/`.
 | `{two,three}_target_fly_refine.npz` | refine scripts | tracks + heatmap + params (hand-off) |
 | `{two,three}_target_fly_refine.png` | refine scripts | 4-panel fit diagnostic |
 | `skeleton_{fly,fly2,locust,locust2}*.png` | `decision_skeleton.py` | deterministic skeletons |
+| `fly_bifurcation.{jpg,tif}` | `fly_bifurcation_plot.py` | 2-panel bifurcation + basin overlay |
+| `combined_walker_figure.{jpg,tif}` | `combined_walker_figure.py` | publication montage of the six panels |
