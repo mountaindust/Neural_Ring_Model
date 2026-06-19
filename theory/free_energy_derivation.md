@@ -2,15 +2,21 @@
 
 **Goal.** Derive a Lyapunov function F̂(γ; θ, focal_loc) for the
 deterministic NBM γ-dynamics, in a form usable for (a) computing
-γ-basin barrier heights ΔF_γ, and (b) calibrating γ-Langevin noise
-amplitude in Step 3.
+γ-basin barrier heights ΔF_γ, and (b) calibrating the γ-Langevin noise
+amplitude.
 
 **Independence note.** This derivation uses the user's Hamiltonian
 (Eq. `eq:H_orig` in the writeup shared in session) and the Glauber
-route to the γ-ODE (which matches `decision_model.py:2225`). It does
-**not** refer to any free-energy expression in
-`Hamiltonian ideas.tex` or other prior notes. Step 2 will validate the
-result numerically.
+route to the γ-ODE (which matches `decision_model.py`'s `dgamma_dt`). It
+does **not** refer to any free-energy expression in
+`Hamiltonian ideas.tex` or other prior notes.
+
+**Status — validated.** Every numerical check in §9 passed: the
+analytical gradient matches finite differences (~1e-8) and equals
+dγ/dt; ∇F̂≈0 at γ-equilibria; the Hessian matches the stability
+criteria; and `2k·F̂` equals the mean-field free energy per spin. The
+barrier height ΔF_γ and the noise calibration `D=T/(2kN)` built on this
+are summarized in [basins_of_attraction.md](basins_of_attraction.md).
 
 **Convention pinned in planning session:** F̂ is a real function on
 (γ_re, γ_im) ∈ ℝ², defined such that the deterministic γ-dynamics is
@@ -22,7 +28,7 @@ $$\dot γ_x = -\partial_{γ_x} F̂(γ), \qquad \dot γ_y = -\partial_{γ_y} F̂(
 
 - `k` = number of visible targets (`neur_angles.size` in the code).
 - `N` = total number of spins. Drops out in the large-N limit but
-  resurfaces in Step 3 as the γ-noise amplitude.
+  resurfaces as the γ-noise amplitude `D=T/(2kN)` (§7).
 - `ρⱼ` = relative group size, normalized by `Σⱼ ρⱼ = 1` (matches
   `PerceptionModel._get_target_signals`'s `rho`).
 - `θ̂ⱼ` = neural angle of target j (egocentric angle through the
@@ -146,7 +152,7 @@ the writeup: at the constrained minimum and large N, the
 energy-per-spin part of `2k · F̂` is `k|γ|² = k R²`, matching `-H/N` =
 `k R²` from the writeup's eqn after the line "as N gets large".
 
-## 6. Gradient and Hessian (for use in Steps 2, 5, 6)
+## 6. Gradient and Hessian (used for ΔF_γ and the stability checks)
 
 Gradient:
 
@@ -176,9 +182,9 @@ direction is positive. The eigenvalue along γ̂* is always positive at
 self-consistent equilibria for any reasonable rule. Consistency
 check. ✓
 
-## 7. Effective noise temperature for γ-Langevin (preview of Step 3)
+## 7. Effective noise temperature for γ-Langevin
 
-For Step 3 we will add Gaussian noise to `dγ/dt` so it becomes:
+Adding Gaussian noise to `dγ/dt` gives:
 
 $$dγ = -\nabla F̂(γ)\, dt + \sqrt{2 D}\, dW$$
 
@@ -197,16 +203,16 @@ So:
 
 $$\boxed{\;D_\gamma = \frac{T}{2 k N}\;}$$
 
-`N` is the effective spin count. For Step 3 we will take it as a
-tunable parameter; in the `N → ∞` limit, `D → 0` and γ-dynamics is
-deterministic (recovering the mean-field model). For Monte Carlo
-vetting we pick a moderate `N` so that escape events occur on a
-tractable timescale.
+`N` is the effective spin count, a tunable parameter; in the `N → ∞`
+limit, `D → 0` and γ-dynamics is deterministic (recovering the
+mean-field model). For Monte Carlo vetting a moderate `N` was picked so
+that escape events occur on a tractable timescale.
 
 The derivation of `D = T/(2kN)` from the binomial fluctuations is
-standard mean-field stat mech; I'll write it out properly in Step 3
-where it's load-bearing. For now it's a stated result to be verified
-numerically (Step 3's stationary-distribution test).
+standard mean-field stat mech (van Kampen system-size expansion; see
+[theory_background.md](theory_background.md) §IV.4). It was confirmed
+numerically by the stationary-distribution and 1/N-scaling tests
+(empirical γ-variance scales as 1/N to ~2%).
 
 ## 8. What stays implicit in F̂
 
@@ -227,18 +233,19 @@ In code, `F̂(γ; θ, focal_loc)` will be computed by calling
 get `(neural_angles, rho)`, then evaluating the closed-form expression
 above. No new perception code needed.
 
-## 9. Summary — what Step 2 will verify
+## 9. Summary — numerical checks (all passed)
 
 1. `np.gradient(F̂)` (finite-difference) matches the analytical
-   gradient in section 6 to ~1e-8 at random (γ, θ, focal_loc) points.
+   gradient in section 6 to ~1e-8 at random (γ, θ, focal_loc) points,
+   and equals `dγ/dt`.
 2. At γ-equilibria from `gamma_equilib(focal_angle=θ)`, `∇F̂(γ*) ≈ 0`
    to ~1e-6.
 3. Hessian eigenvalues at γ-equilibria match the stability labels
-   from `_discrim_A` (and from `_discrim_coupled` after we project
+   from `_discrim_A` (and from `_discrim_coupled` after projecting
    out the θ-direction).
 4. The identity `2k·F̂(γ) = (F_mf per spin at constrained minimum) +
-   const` from section 5 holds numerically: sample {n_j(γ)} from
-   `n_j*(γ)`, compute mean-field F directly and compare.
+   const` from section 5 holds numerically.
 
-Once these pass, F̂ is trusted for use in Step 6 (ΔF_γ evaluation) and
-Step 3 (calibrating γ-Langevin noise via the `D_γ = T/(2kN)` relation).
+With these passed, F̂ is trusted for ΔF_γ evaluation and for calibrating
+γ-Langevin noise via the `D_γ = T/(2kN)` relation — both summarized in
+[basins_of_attraction.md](basins_of_attraction.md).

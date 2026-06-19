@@ -10,7 +10,7 @@ gradient-flow theory, or Kramers escape-rate analysis.
 
 The aim is not to be encyclopedic — it's to give you the tools to
 follow the derivation in
-[basin_estimation/free_energy_derivation.md](basin_estimation/free_energy_derivation.md)
+[free_energy_derivation.md](free_energy_derivation.md)
 step by step, understand why each step is justified, and be able to
 recognize the same patterns when they appear in other models. Each
 section ends with concrete pointers for going deeper.
@@ -43,8 +43,10 @@ it to noise? That requires understanding:
    formula*.
 
 These three threads — Lyapunov, free energy, Kramers — are what this
-document covers. The full derivation lives in the basin_estimation/
-folder; this file is the "why" behind the math there.
+document covers. The full derivation lives in
+[free_energy_derivation.md](free_energy_derivation.md) (same folder);
+this file is the "why" behind the math there, and the findings built on
+it are catalogued in [basins_of_attraction.md](basins_of_attraction.md).
 
 ---
 
@@ -638,19 +640,19 @@ conversation.
 
 ## File pointers for the future-session context load
 
-- This file: `theory_background.md`
+- This file: `theory/theory_background.md`
 - Project guide (architecture, conventions, gotchas): `CLAUDE.md`
-- Basin-of-attraction vetting findings and results:
-  `basin_estimation/findings.md`
+- Basin findings catalogue (results, boundary kinds, robustness):
+  [basins_of_attraction.md](basins_of_attraction.md)
 - F̂ derivation (the one this file supports):
-  `basin_estimation/free_energy_derivation.md`
-- Vetting plan: `basin_estimation/README.md`
-- The user's writeup of model derivation: not in repo yet — was the
-  basis for `basin_estimation/free_energy_derivation.md`.
-- Code: `decision_model.py` (NeuralBandModel class around lines
-  2135–3300, especially `dgamma_dt` at 2182, `sc_equilib` at 2354,
-  `_discrim_coupled` at 2582).
+  [free_energy_derivation.md](free_energy_derivation.md)
+- The user's writeup of model derivation: not in repo — was the basis
+  for `free_energy_derivation.md`. (The original step-by-step vetting
+  log lived in `basin_estimation/`, retired 2026-06; recover from git
+  history if needed.)
+- Code: `decision_model.py` (NeuralBandModel class, especially
+  `dgamma_dt` ~L2417, `sc_equilib` ~L2647, `_discrim_coupled` ~L2953).
 
-A fresh session can load `CLAUDE.md`, `theory_background.md`, and
-`basin_estimation/findings.md` to recover full context with a single
-read of three files.
+A fresh session can load `CLAUDE.md`, `theory/theory_background.md`, and
+[basins_of_attraction.md](basins_of_attraction.md) to recover full
+context with a single read of three files.
