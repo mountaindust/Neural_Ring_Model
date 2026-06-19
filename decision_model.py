@@ -3276,7 +3276,10 @@ class NeuralBandModel:
                                  stability_criterion='reduced',
                                  overlay_basins=False, basin_R_seed=0.15,
                                  basin_n_coarse=64, basin_n_bisect=12,
-                                 basin_min_sep_factor=2.3, basin_min_area=3,
+                                 basin_placement='lattice', basin_nx=6,
+                                 basin_ny=4, basin_min_sep_factor=2.2,
+                                 basin_max_sep_factor=5.5, basin_min_area=4,
+                                 basin_target_margin=0.15,
                                  basin_wheel_radius=None, basin_bg_alpha=0.9):
         '''Plot a 2D colormap showing the number of stable self-consistent
         equilibria as a function of observer (x,y) location.
@@ -3521,8 +3524,12 @@ class NeuralBandModel:
                 xlim, ylim, pool=pool,
                 stability_criterion=stability_criterion,
                 R_seed=basin_R_seed, n_coarse=basin_n_coarse,
-                n_bisect=basin_n_bisect, min_sep_factor=basin_min_sep_factor,
-                min_area=basin_min_area, wheel_radius=basin_wheel_radius)
+                n_bisect=basin_n_bisect, placement=basin_placement,
+                min_sep_factor=basin_min_sep_factor,
+                max_sep_factor=basin_max_sep_factor, min_area=basin_min_area,
+                nx_max=basin_nx, ny_max=basin_ny,
+                target_margin=basin_target_margin,
+                wheel_radius=basin_wheel_radius)
 
         if local_plot:
             ax.legend(title='# stable\nequilibria', loc='center left',
@@ -3679,6 +3686,141 @@ class NeuralBandModel:
         return kept
 
     @staticmethod
+    def _basin_lattice_placement(count_field, xy_of_pixel, wheel_radius,
+                                 nx_max=6, ny_max=4, min_sep_factor=2.2,
+                                 max_sep_factor=5.5, min_area=4):
+        """Symmetric, irregular rectilinear lattice of wheel locations.
+
+        ``nx_max`` / ``ny_max`` are **hard caps** on the line count:
+        ``nx_max`` vertical (x) lines, and ``ny_max`` horizontal (y) lines on
+        each side of (and including) the x-axis -- so up to ``2*ny_max - 1``
+        horizontal lines and ``nx_max * (2*ny_max - 1)`` cells overall.
+
+        For each axis ~0.6*cap lines are seeded from significant regions --
+        labeled per count level and represented by the centroid of each
+        component's y>=0 half (so symmetric crescent arms, not the on-axis
+        full centroid, drive the y-lines), largest area first, no two within
+        min_sep; the remaining budget is spent filling the widest gaps
+        (> max_sep) largest-first, placing each fill line at the within-gap
+        spot whose WORST-placed lattice point stays farthest from a
+        count-region boundary (maximin -- boundaries are near-bifurcation and
+        give flaky wheels) -- so the big 1-stable expanse still gets covered
+        without over-populating. Returns the product X x Y as (x, y) cells.
+        Assumes dynamics symmetric about y=0.
+        """
+        from scipy.ndimage import label, distance_transform_edt
+        nrows, ncols = count_field.shape
+        xs = np.array([xy_of_pixel(i, 0)[0] for i in range(ncols)])
+        ys = np.array([xy_of_pixel(0, j)[1] for j in range(nrows)])
+        min_sep = min_sep_factor * wheel_radius
+        max_sep = max_sep_factor * wheel_radius
+
+        # boundary-distance field (data units): large = deep in a region
+        bnd = np.zeros(count_field.shape, dtype=bool)
+        dv = count_field[:-1, :] != count_field[1:, :]
+        bnd[:-1, :] |= dv
+        bnd[1:, :] |= dv
+        dh = count_field[:, :-1] != count_field[:, 1:]
+        bnd[:, :-1] |= dh
+        bnd[:, 1:] |= dh
+        px = 0.5 * (abs(xs[1] - xs[0]) + abs(ys[1] - ys[0]))
+        Dmap = distance_transform_edt(~bnd) * px
+
+        def col(x):
+            return int(np.clip(np.argmin(np.abs(xs - x)), 0, ncols - 1))
+
+        def row(y):
+            return int(np.clip(np.argmin(np.abs(ys - y)), 0, nrows - 1))
+
+        # Seed lines from significant regions, labeling each count level
+        # (2, 3, 4, ...) separately so a higher-count pocket nested inside a
+        # lower-count region still drives its own line (otherwise everything
+        # count>=2 is one connected blob and only its centroid seeds a line).
+        # Represent each component by the centroid of its y>=0 HALF, not its
+        # full centroid: the multistable regions are ~symmetric about y=0, so a
+        # full centroid lands on the axis and never seeds a y-line up on a
+        # crescent arm -- the y>=0-half centroid gives the arm's |y| instead,
+        # so the lattice samples those arms (where the interesting pockets are).
+        ymask = (ys >= 0)[:, None]
+        comps = []
+        for k in sorted(set(count_field[count_field >= 2].tolist())):
+            lab, n = label(count_field == k)
+            for c in range(1, n + 1):
+                m = (lab == c)
+                a = int(m.sum())
+                if a < min_area:
+                    continue
+                mh = m & ymask
+                if not mh.any():
+                    continue
+                js, is_ = np.where(mh)
+                comps.append((a, float(xs[int(round(is_.mean()))]),
+                              abs(float(ys[int(round(js.mean()))]))))
+        comps.sort(key=lambda t: -t[0])
+
+        # reserve ~0.6 of each cap for centroid seeds; the rest is fill budget
+        seed_nx = max(1, int(round(0.6 * nx_max)))
+        seed_ny = max(1, int(round(0.6 * ny_max)))
+        X = []
+        for _a, cx, _cy in comps:
+            if len(X) >= seed_nx:
+                break
+            if all(abs(cx - xx) >= min_sep for xx in X):
+                X.append(cx)
+        Yh = [0.0]
+        for _a, _cx, cy in comps:
+            if len(Yh) >= seed_ny:
+                break
+            ay = abs(cy)
+            if all(abs(ay - yy) >= min_sep for yy in Yh):
+                Yh.append(ay)
+
+        def fill(lines, lo, hi, score, cap):
+            lines = sorted(lines)
+            while len(lines) < cap:
+                edges = [lo] + lines + [hi]
+                big = [(edges[k + 1] - edges[k], edges[k], edges[k + 1])
+                       for k in range(len(edges) - 1)]
+                big = [g for g in big if g[0] > max_sep + 1e-9]
+                if not big:
+                    break
+                _g, a, b = max(big)
+                center = 0.5 * (a + b)
+                half = 0.5 * min(_g, max_sep)
+                lo_c = max(a + min_sep, center - half)
+                hi_c = min(b - min_sep, center + half)
+                if hi_c <= lo_c:
+                    pos = center
+                else:
+                    cc = np.linspace(lo_c, hi_c, 25)
+                    pos = float(cc[int(np.argmax([score(v) for v in cc]))])
+                lines = sorted(lines + [pos])
+            return lines
+
+        # score a candidate line by the MIN boundary-distance over the points
+        # where it crosses the other axis' lines (maximin): keep the
+        # WORST-placed lattice point as far from a region edge as possible.
+        # (Median let deep large regions dominate and pushed lines toward the
+        # edges of the thin crescent arms.)
+        fullY = sorted(set(Yh) | {-y for y in Yh})
+        X = fill(X, float(xs.min()), float(xs.max()),
+                 lambda x: min(Dmap[row(y), col(x)] for y in fullY), nx_max)
+        Yh = fill(Yh, 0.0, float(ys.max()),
+                  lambda y: min(Dmap[row(y), col(x)] for x in X), ny_max)
+        Y = sorted(set(Yh) | {-y for y in Yh})
+        return [(x, y) for x in sorted(X) for y in Y]
+
+    @staticmethod
+    def _reflect_wheel(w):
+        """Mirror a wheel across the x-axis for the y<0 rows (valid under the
+        x-axis symmetry assumption): negate the focal y, the stable
+        directions, and each arc's heading bounds; labels/widths unchanged."""
+        return {'focal_loc': (w['focal_loc'][0], -w['focal_loc'][1]),
+                'stable': [-s for s in w['stable']],
+                'arcs': [(-b, -a, lab) for (a, b, lab) in w['arcs']],
+                'widths': dict(w['widths'])}
+
+    @staticmethod
     def _render_basin_wheels(ax, wheels, r_out):
         """Draw basin wheels on an axis. Contained -- hand it the axis and the
         fully-computed wheel data and it does only matplotlib.
@@ -3757,27 +3899,47 @@ class NeuralBandModel:
     def _overlay_basin_wheels(self, ax, count_field, xy_of_pixel, xlim, ylim,
                               pool=None, stability_criterion='reduced',
                               R_seed=0.15, n_coarse=64, n_bisect=12,
-                              min_sep_factor=2.3, min_area=3,
-                              wheel_radius=None):
-        """Place wheels on the count raster, compute their basin arcs
-        (optionally in parallel via ``pool``), and render onto ``ax``."""
+                              placement='lattice', min_sep_factor=2.2,
+                              max_sep_factor=5.5, min_area=4, nx_max=6,
+                              ny_max=4, target_margin=0.15, wheel_radius=None):
+        """Place basin wheels, compute their arcs (parallel via ``pool``,
+        exploiting x-axis symmetry: compute y>=0 and mirror), and render onto
+        ``ax``. placement='lattice' -> symmetric rectilinear grid seeded on
+        region centroids; 'region' -> one representative per region."""
         if wheel_radius is None:
             wheel_radius = 0.03 * max(xlim[1] - xlim[0], ylim[1] - ylim[0])
-        cells = self._basin_wheel_placement(
-            count_field, xy_of_pixel, min_sep=min_sep_factor * wheel_radius,
-            min_area=min_area)
-        # drop any wheel whose location lands on a target (the observer-at-a-
-        # target case is degenerate and the target disk would cover it anyway)
+        if placement == 'lattice':
+            cells = self._basin_lattice_placement(
+                count_field, xy_of_pixel, wheel_radius, nx_max=nx_max,
+                ny_max=ny_max, min_sep_factor=min_sep_factor,
+                max_sep_factor=max_sep_factor, min_area=min_area)
+        else:
+            cells = self._basin_wheel_placement(
+                count_field, xy_of_pixel,
+                min_sep=min_sep_factor * wheel_radius, min_area=min_area)
+        # drop wheels whose DISK overlaps a target (center within R_target +
+        # r_wheel + margin), not just centers strictly inside
         tg = self.percep_model.targets
         cells = [c for c in cells
-                 if not tg.check_target_overlap(
-                     np.asarray(c, dtype=float)).any()]
+                 if (tg.get_dist_to_targets(np.asarray(c, dtype=float))
+                     >= wheel_radius + target_margin).all()]
+        # x-axis symmetry: compute wheels for y >= 0, mirror them to y < 0
+        tol = 1e-9
+        upper = [c for c in cells if c[1] >= -tol]
         args = [(tuple(c), R_seed, n_coarse, n_bisect, stability_criterion)
-                for c in cells]
+                for c in upper]
         if pool is None:
-            wheels = [self._basin_arcs_worker(a) for a in args]
+            up = [self._basin_arcs_worker(a) for a in args]
         else:
-            wheels = pool.map(self._basin_arcs_worker, args)
+            up = pool.map(self._basin_arcs_worker, args)
+        by_xy = {(round(w['focal_loc'][0], 6), round(w['focal_loc'][1], 6)): w
+                 for w in up}
+        wheels = list(up)
+        for c in cells:
+            if c[1] < -tol:
+                src = by_xy.get((round(c[0], 6), round(-c[1], 6)))
+                if src is not None:
+                    wheels.append(self._reflect_wheel(src))
         self._render_basin_wheels(ax, wheels, wheel_radius)
         # draw the targets fully opaque, on top of the wheels
         tg.plot_targets_to_axis(ax, zorder=7)
