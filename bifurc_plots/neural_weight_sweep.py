@@ -614,7 +614,10 @@ def build_figure(rows, out_name, pool, overflow_log, regenerate=False):
     base, _ = os.path.splitext(out_name)
     for fmt in OUTPUT_FORMATS:
         out_path = os.path.join(OUTPUT_DIR, f"{base}.{fmt}")
-        fig.savefig(out_path, dpi=DPI, bbox_inches='tight')
+        save_kwargs = dict(dpi=DPI, bbox_inches='tight')
+        if fmt in ('tif', 'tiff'):
+            save_kwargs['pil_kwargs'] = {'compression': 'tiff_lzw'}
+        fig.savefig(out_path, **save_kwargs)
         print(f"Wrote {out_path}")
     plt.close(fig)
 

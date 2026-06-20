@@ -119,7 +119,7 @@ def main():
                markerscale=1.8, labelspacing=0.5, handletextpad=0.6)
 
     fig.savefig(OUT_JPG, dpi=300)
-    fig.savefig(OUT_TIF, dpi=300)
+    fig.savefig(OUT_TIF, dpi=300, pil_kwargs={'compression': 'tiff_lzw'})
     plt.close(fig)
     print('wrote', OUT_JPG)
     print('wrote', OUT_TIF)
