@@ -31,8 +31,12 @@ Each row is an Nx3 panel matrix:
     col 2 -- PerceptionModel.plot_blocked_signals (target-geometry panel)
     col 3 -- NeuralBandModel.plot_bifurcation_diagram (# stable equilibria)
 
-These plots are intentionally NOT publication-quality; they are sized for fast
-iteration on a many-core machine.
+PUBLICATION COPY (lives in plots/). This is the higher-resolution sibling of
+``bifurc_plots/neural_weight_sweep.py``: identical code, but NUM_X=NUM_Y=49,
+REFINEMENT_LEVELS=3, DPI=300, PNG output. Because it lives in plots/,
+OUTPUT_DIR *is* plots/, so ``--out <name>`` writes the figure AND its cache
+straight into plots/ with no ``../`` path footgun. Keep the bifurc_plots/
+version for fast, low-res exploration.
 
 Caching: the rasterized bifurcation ``img`` for every row is saved to
 ``_cache_<out_name>.npz`` next to the figure, alongside a JSON fingerprint of
@@ -58,6 +62,8 @@ sys.path.insert(0, os.path.dirname(
     os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')            # headless publication rendering
 import matplotlib.pyplot as plt
 from matplotlib.colors import BoundaryNorm
 from multiprocessing import Pool
@@ -101,12 +107,12 @@ WEIGHT = None
 A_WEIGHT = None
 B_WEIGHT = None
 
-# ---- bifurcation diagram settings (exploration-quality) ----
+# ---- bifurcation diagram settings (publication-quality) ----
 XLIM = (0.0, 6.0)
 YLIM = (-3.5, 3.5)
-NUM_X = 29
-NUM_Y = 29
-REFINEMENT_LEVELS = 2
+NUM_X = 49
+NUM_Y = 49
+REFINEMENT_LEVELS = 3
 MAX_COUNT = 3
 STABILITY_CRITERION = 'reduced'   # 'reduced' (default) | 'coupled' | 'discrim_a'
 
@@ -120,11 +126,10 @@ OUT_NAME = None
 # two predecessor scripts never match and are simply ignored).
 CACHE_VERSION = 1
 
-DPI = 150
+DPI = 300
 # Output image formats (extensions). The auto-generated base name is shared;
-# one file is written per format. ('png',) at 150 dpi for fast exploration;
-# use plots/neural_weight_sweep.py (300 dpi, 49x49 grid + 3 refinement levels)
-# for publication-quality output.
+# one file is written per format. ('png',) at 300 dpi is the current
+# publication output; drop DPI to 150 for fast exploration.
 OUTPUT_FORMATS = ('png',)
 OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_N_WORKERS = get_n_workers()
@@ -374,6 +379,7 @@ def try_load_cache(out_name, fingerprint):
 
 def save_cache(out_name, fingerprint, imgs, overflow_flags):
     path = cache_path_for(out_name)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     np.savez(path,
              fingerprint_json=np.array(json.dumps(fingerprint,
                                                   sort_keys=True)),
