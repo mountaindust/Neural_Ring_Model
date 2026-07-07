@@ -13,8 +13,10 @@ does **not** refer to any free-energy expression in
 
 **Status — validated.** Every numerical check in §9 passed: the
 analytical gradient matches finite differences (~1e-8) and equals
-dγ/dt; ∇F̂≈0 at γ-equilibria; the Hessian matches the stability
-criteria; and `2k·F̂` equals the mean-field free energy per spin. The
+dγ/dt; ∇F̂≈0 at γ-equilibria; the Hessian matches the full-block
+stability criteria (`_discrim_reduced`/`_discrim_coupled` — but see
+§6.1 for why the scalar `A < 1` alone is necessary-not-sufficient); and
+`2k·F̂` equals the mean-field free energy per spin. The
 barrier height ΔF_γ and the noise calibration `D=T/(2kN)` built on this
 are summarized in [basins_of_attraction.md](basins_of_attraction.md).
 
@@ -176,11 +178,97 @@ using `σ(u)(1-σ(u)) = ¼ sech²(u/2)` and `u/2 = k γ⃗·v̂ⱼ/T`,
 $$(H_{F̂})_{nn} = 1 - \frac{2k}{T}\sum_j ρⱼ \cdot \tfrac{1}{4}\operatorname{sech}^2(k γ⃗·v̂ⱼ/T) \cdot (v̂ⱼ·n̂^*)^2
               = 1 - A.$$
 
-So the writeup's `A < 1` stability criterion is exactly the statement
-that the Hessian eigenvalue along the n̂* (perpendicular to γ*)
-direction is positive. The eigenvalue along γ̂* is always positive at
-self-consistent equilibria for any reasonable rule. Consistency
-check. ✓
+So the writeup's `A < 1` criterion is exactly the statement that the
+Hessian's **tangential diagonal entry** `(H_{F̂})_{nn} = 1 − A` — the
+curvature along n̂* (perpendicular to γ*) — is positive. But
+`(H_{F̂})_{nn}` is a *directional curvature*, not an eigenvalue, unless
+the R–Θ off-diagonal `(H_{F̂})_{γ̂ n̂}` vanishes. **`A < 1` is therefore
+necessary but not sufficient for γ-stability.** The earlier version of
+this note claimed sufficiency ("the eigenvalue along γ̂* is always
+positive at self-consistent equilibria for any reasonable rule") — that
+is **false off the mirror-symmetry axis and at low-R disordered
+states**, where the missing radial and off-diagonal conditions bite.
+See the correction in §6.1.
+
+## 6.1 Correction (2026-07-07): `A < 1` is necessary but not sufficient
+
+**What was wrong.** The §6 consistency check equated the scalar `A < 1`
+with full γ-stability. It is only one of the *two* independent
+conditions a symmetric 2×2 Hessian must satisfy to be positive definite.
+`A < 1` is necessary but not sufficient; a genuine γ-saddle can satisfy
+`A < 1`. Verified against the numeric fast block below.
+
+**The Hessian is the fast γ-block.** At a self-consistent equilibrium
+γ = R + 0j (so Θ̂ = arg γ = 0), the x-axis is radial (the R direction)
+and the y-axis is tangential (the arg γ / n̂* direction). Writing
+`w_k := (k/2T)·ρ_k·sech²(k R cos θ̂_k / T) ≥ 0`, the Cartesian Hessian is
+
+$$H_{F̂}(R{+}0j) = \begin{bmatrix} 1 - \sum_k w_k \cos^2 θ̂_k & -\sum_k w_k \cos θ̂_k \sin θ̂_k \\[2pt] -\sum_k w_k \cos θ̂_k \sin θ̂_k & 1 - \sum_k w_k \sin^2 θ̂_k \end{bmatrix} \equiv \begin{bmatrix} H_{xx} & H_{xy} \\ H_{xy} & H_{yy} \end{bmatrix}.$$
+
+`H_yy = 1 − A` (the tangential curvature, `_discrim_A`); `H_xx = 1 − g′(R)`
+is the radial curvature (`g` = the self-consistency map `g(R) = Σ_k ρ_k
+cos θ̂_k σ(u_k)`); `H_xy` is the R–Θ coupling. Because dγ/dt = −∇F̂ is
+gradient flow, `H_{F̂}` equals **−(the 2×2 fast block A** in
+[`_coupled_jacobian`](../decision_model.py)**)**: numerically confirmed
+`max|H_{F̂} − (−A_block)| = 2.5e-9` over 3777 SC equilibria. So this is
+literally the fast block, and "γ-stable" ⇔ `A_block` Hurwitz ⇔
+`H_{F̂} ≻ 0`.
+
+**The positive-definiteness criterion.** For a symmetric 2×2, complete
+the square around the `H_yy` pivot:
+
+$$q(x,y) = x^\top H_{F̂}\, x = H_{yy}\Bigl(y + \tfrac{H_{xy}}{H_{yy}}x\Bigr)^2 + \frac{\det H_{F̂}}{H_{yy}}\,x^2.$$
+
+A sum of two squares is positive in every nonzero direction **iff both
+coefficients are positive**, giving
+
+$$H_{F̂} \succ 0 \iff H_{yy} > 0 \ \text{ and } \ \det H_{F̂} > 0 \iff (A < 1) \ \text{ and } \ \det H_{F̂} > 0.$$
+
+`_discrim_A` checks only the first factor. `det H_{F̂} > 0` is the
+missing condition; given `H_yy > 0` it subsumes both the radial entry
+(`det > 0 ⇒ H_xx H_yy > H_xy² ≥ 0 ⇒ H_xx > 0`) and the off-diagonal.
+Necessity of `A < 1` is exact: `H_{F̂} ≻ 0 ⇒` all principal minors > 0
+`⇒ H_yy > 0`; empirically the converse over-count `H_{F̂} ≻ 0` while
+`A ≥ 1` **never** occurred (0 / 5582).
+
+**Why the original spot-check (§9.3) passed anyway.** The off-diagonal
+`H_xy = −Σ_k w_k cos θ̂_k sin θ̂_k` vanishes iff the visible targets are
+mirror-symmetric about the consensus direction (each `+θ̂` paired with
+`−θ̂` at equal ρ makes the `cos·sin` sum odd → 0). On such **on-axis**
+equilibria the eigenvectors are exactly radial/tangential, `H_yy` *is*
+an eigenvalue, and `A < 1` (plus a stable radial mode) does certify
+stability. The §9.3 check sampled such symmetric configs, so it matched.
+The equivalence breaks off-axis, where `H_xy ≠ 0` tilts the eigenvectors.
+
+**Two failure modes** (both invisible to `A < 1`), from cutoff / power /
+vonmises sweeps — 148 / 5582 SC equilibria had `A < 1` while `H_{F̂}`
+was indefinite:
+
+1. *Low-R radial fold* (R ≲ 0.1): the near-disordered state has
+   `H_xx < 0` (classic mean-field pitchfork — the R≈0 blob grows into a
+   consensus). Pure radial; orthogonal to `A`. Sits just above the
+   `R < 0.01` filter.
+2. *Committed-R determinant flip* (R ≈ 0.31–0.48): **both** diagonals
+   positive but `det H_{F̂} < 0` — a genuine γ-saddle whose unstable
+   mode is a tilted R–Θ blend. Witness (power warp c=0.5, T=0.5,
+   focal_loc=(0.30, 0.71), θ=−0.607, R=0.338):
+   `H_xx=+0.730, H_yy=+0.009 (A=0.991<1), H_xy=+0.321, det=−0.097`,
+   eigenvalues `{−0.114, +0.853}`, unstable eigenvector 69° off the
+   radial axis. Here `_discrim_A = True` (wrong) but
+   `_discrim_reduced = False` (right).
+
+**Implications for the code.**
+- `_discrim_reduced` (default) and `_discrim_coupled` use the **full**
+  2×2 block (`all(eig(A_block)) < 0`), i.e. the complete `H_{F̂} ≻ 0`
+  test — both diagonal conditions *and* the determinant. They are
+  unaffected: they correctly reject all 148 over-counts.
+- `_discrim_A` / `_discrim_A_nu` (the `'discrim_a'` comparison
+  criterion) are **incomplete on the fast layer**: they test only
+  `H_yy > 0`, over-counting stable equilibria on the two modes above.
+  This is *independent* of the documented slow-mode over-count (the
+  `λ_slow > 0` heading-tracking instability, e.g. 3-vs-5 at (1.5,0)).
+  `'discrim_a'` is thus doubly incomplete. The minimal complete
+  fast-block test is `A < 1` **and** `det H_{F̂} > 0`.
 
 ## 7. Effective noise temperature for γ-Langevin
 
@@ -240,9 +328,12 @@ above. No new perception code needed.
    and equals `dγ/dt`.
 2. At γ-equilibria from `gamma_equilib(focal_angle=θ)`, `∇F̂(γ*) ≈ 0`
    to ~1e-6.
-3. Hessian eigenvalues at γ-equilibria match the stability labels
-   from `_discrim_A` (and from `_discrim_coupled` after projecting
-   out the θ-direction).
+3. Hessian eigenvalues at γ-equilibria match the *full 2×2*
+   positive-definiteness label (and `_discrim_coupled` after projecting
+   out the θ-direction). **Caveat (see §6.1):** they match `_discrim_A`'s
+   `A < 1` scalar only where the R–Θ off-diagonal is ≈0 (mirror-symmetric
+   / on-axis configs, which this spot-check happened to sample); `A < 1`
+   is necessary but not sufficient in general.
 4. The identity `2k·F̂(γ) = (F_mf per spin at constrained minimum) +
    const` from section 5 holds numerically.
 

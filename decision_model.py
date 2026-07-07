@@ -3036,10 +3036,18 @@ class NeuralBandModel:
 
 
     def _discrim_A(self, gamma_star, focal_angle, focal_loc):
-        '''Determines stability of equilibria based on perturbation analysis.
-        Assumes that the focal_angle is the angle of gamma_star and calculates
-        the A value of the linear coefficient. If A < 1, the equilibrium is stable,
-        if A > 1, the equilibrium is unstable.
+        '''Determines gamma-stability from the analytic 2x2 fast block (the
+        free-energy Hessian H_Fhat) at a self-consistent equilibrium.
+
+        gamma is stable iff H_Fhat is positive definite, which for a symmetric
+        2x2 means BOTH the transverse curvature is positive (the classic
+        A < 1 condition) AND det H_Fhat > 0. A < 1 alone is necessary but NOT
+        sufficient: it is only the tangential diagonal entry and misses radial
+        folds (H_rr < 0) and off-diagonal (R-Theta) saddles (det < 0). This is
+        the complete fast-block test -- identical to the A-Hurwitz gate of
+        _discrim_reduced for the cosine kernel -- but WITHOUT the slow
+        heading-tracking (Schur) mode; use 'reduced' for that. See
+        theory/free_energy_derivation.md sec 6.1.
 
         This is based on a cosine kernel.
 
@@ -3063,10 +3071,25 @@ class NeuralBandModel:
         neur_angles, rho = self.percep_model.get_neural_signals(focal_angle, focal_loc)
         k = rho.size
         with np.errstate(over='ignore'):
-            summands = ((rho/np.cosh(k*R*np.cos(Theta-neur_angles)/self.T)**2)
-                        *np.sin(Theta-neur_angles)**2)
-            A = k*summands.sum()/(2*self.T)
-        return A < 1
+            # w_j = (k/2T) rho_j sech^2(k R cos(Theta - theta_j)/T) >= 0 is the
+            # per-target weight in the Cartesian free-energy Hessian
+            # H_Fhat = I - sum_j w_j vhat_j vhat_j^T (gradient flow: fast
+            # block A_block = -H_Fhat). Work in the frame rotated to gamma so
+            # x = radial (R), y = tangential (arg gamma); det is rotation-
+            # invariant. cc/ss are cos/sin of the target angle relative to
+            # the consensus.
+            w = (k/(2*self.T)*rho
+                 / np.cosh(k*R*np.cos(Theta-neur_angles)/self.T)**2)
+            cc = np.cos(Theta - neur_angles)
+            ss = np.sin(Theta - neur_angles)
+            A = np.sum(w*ss**2)            # transverse: 1 - H_tt (the old scalar)
+            H_rr = 1 - np.sum(w*cc**2)     # radial curvature
+            H_rt = -np.sum(w*cc*ss)        # R-Theta coupling
+            detH = H_rr*(1 - A) - H_rt**2  # det H_Fhat
+        # Full gamma-stability = H_Fhat positive definite = transverse
+        # curvature positive (A < 1) AND det > 0. Strict (matches the
+        # A-Hurwitz gate of _discrim_reduced).
+        return bool((A < 1) and (detH > 0))
 
 
     def _process_point(self, args):
@@ -4798,13 +4821,22 @@ class IsingExtModel:
         return bool(np.linalg.det(J) < 0.0)
 
 
-    def _discrim_A_nu(self, gamma_star, focal_loc):
-        '''Determines stability of equilibria based on perturbation analysis.
-        Assumes that the focal_angle is the angle of gamma_star and calculates
-        the A value of the linear coefficient. If A < 1, the equilibrium is stable,
-        if A > 1, the equilibrium is unstable.
+    def _discrim_A_nu(self, gamma_star, focal_loc, h=1e-6, tol=1e-8):
+        '''Determines gamma-stability from the full 2x2 fast block of the
+        coupled Jacobian at a self-consistent equilibrium (nu-warped cosine
+        kernel).
 
-        This is based on a cosine kernel with nu exponent.
+        Stable iff the fast gamma block A = d(dgamma)/dgamma is Hurwitz (all
+        eigenvalues have real part < -tol) -- equivalently the free-energy
+        Hessian is positive definite: both the transverse curvature (the old
+        A < 1 scalar) AND det > 0.
+
+        The block is taken NUMERICALLY from _coupled_jacobian (the nu warp
+        enters through dgamma_dt) rather than the old analytic transverse-only
+        A < 1 scalar, which was necessary but not sufficient -- it missed
+        radial folds and off-diagonal (R-Theta) saddles. This is the fast-block
+        gate of _discrim_reduced without the slow Schur mode; use 'reduced' for
+        that. See theory/free_energy_derivation.md sec 6.1.
 
         Parameters
         ----------
@@ -4817,25 +4849,10 @@ class IsingExtModel:
         -------
         True if stable, False if unstable
         '''
-
-        Theta = np.angle(gamma_star)
-        R = np.abs(gamma_star)
-        neur_angles, rho = self.percep_model.get_neural_signals(Theta, focal_loc)
-        k = rho.size
-        with np.errstate(over='ignore'):
-            # When nu < 1, |x/pi|^(nu-1) diverges at x=0 but the full
-            # summand has a removable singularity (limit is 0).  Mask those
-            # entries to avoid divide-by-zero and 0*inf = NaN.
-            nonzero = neur_angles != 0
-            na = neur_angles[nonzero]
-            summands = np.zeros_like(neur_angles)
-            summands[nonzero] = (
-                (rho[nonzero]/np.cosh(k*R*self.cosine(na)/self.T)**2)
-                *np.sin(na)*self.nu*
-                np.sin(np.pi*np.sign(na)*np.abs(na/np.pi)**self.nu)*
-                np.abs(na/np.pi)**(self.nu-1))
-            A = k*summands.sum()/(2*self.T)
-        return A < 1
+        J = self._coupled_jacobian(gamma_star, np.angle(gamma_star),
+                                   focal_loc, h)
+        A = J[:2, :2]
+        return bool(np.all(np.real(np.linalg.eigvals(A)) < -tol))
 
 
     def _count_stable_at(self, args):

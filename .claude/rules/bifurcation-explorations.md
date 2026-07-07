@@ -21,7 +21,7 @@ Mesh sweeps and bifurcation refinement use `multiprocessing` extensively (see [P
 
 With `c=0.5` power warping, a transition band between 1-stable and 2-stable regions has **0 stable equilibria**. This is a **genuine pitchfork-like bifurcation**, not a numerical artifact:
 
-- `_discrim_A` formula verified correct for `ν=1` cosine kernel across 1,084 equilibria (0 mismatches vs numerical Jacobian) in all configs (delta/circle × warped/unwarped).
+- `_discrim_A` (old transverse `A<1` form) reported 0 stability-label mismatches vs the numerical Jacobian across 1,084 `ν=1` cosine-kernel equilibria (delta/circle × warped/unwarped) — but that sample did not hit the off-axis / low-R cases where `A<1` is necessary-not-sufficient. On a broader sweep the transverse-only test over-counts (148/5582 equilibria: radial folds + off-diagonal saddles); `_discrim_A` was completed to the full fast block (`A<1` **and** `det>0`) in 2026-07. See [free_energy_derivation.md](../../theory/free_energy_derivation.md) §6.1.
 - Full coupled 3×3 Jacobian also shows instability — heading coupling doesn't rescue stability.
 - The bifurcation occurs because power warping stretches physical angles to wider neural angles (~112–138° separation), destabilizing the transverse perturbation mode.
 
