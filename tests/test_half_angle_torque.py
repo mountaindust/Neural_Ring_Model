@@ -124,6 +124,48 @@ def test_iem_torque_2pi_invariance():
 
 
 # ---------------------------------------------------------------------------
+# convert_angles is odd at the +-pi branch cut
+# ---------------------------------------------------------------------------
+def test_convert_angles_is_odd_including_the_cut():
+    """The wrap must satisfy ca(-x) == -ca(x) everywhere, INCLUDING +-pi.
+
+    A plain floor-wrap gives the half-open [-pi, pi) and collapses both +pi and
+    -pi to -pi, which hardcodes the left/right fork direction at the
+    facing-away branch cut and breaks mirror equivariance at that point.
+    """
+    assert dm.convert_angles(np.pi) == pytest.approx(np.pi)
+    assert dm.convert_angles(-np.pi) == pytest.approx(-np.pi)
+    # and after a full turn, the sign of the input still selects the endpoint
+    assert dm.convert_angles(3*np.pi) == pytest.approx(np.pi)
+    assert dm.convert_angles(-3*np.pi) == pytest.approx(-np.pi)
+    for x in [0.0, 0.5, 2.0, np.pi, 2*np.pi, 3*np.pi, 4.0, 100.0]:
+        assert dm.convert_angles(-x) == pytest.approx(-dm.convert_angles(x))
+    # array form agrees with the scalar form and stays in the closed range
+    arr = np.array([np.pi, -np.pi, 3*np.pi, -3*np.pi, 4.0, -4.0])
+    assert np.allclose(dm.convert_angles(arr),
+                       [dm.convert_angles(float(x)) for x in arr])
+    wide = dm.convert_angles(np.linspace(-20.0, 20.0, 4001))
+    assert np.all(np.abs(wide) <= np.pi + 1e-15)
+    # idempotent: wrapping an already-wrapped value is a no-op
+    assert np.array_equal(dm.convert_angles(wide), wide)
+
+
+def test_fork_direction_follows_the_sign_of_the_unwrapped_argument():
+    """At exactly facing-away the torque is a left/right fork; its direction
+    must be inherited from the sign of the raw egocentric argument, not fixed.
+    """
+    K, R = 2.0, 0.6
+    iem = _identity_iem(K=K)
+    # two mirror-image states, both with |ego| == pi exactly
+    t_plus = iem.dtheta_dt(theta=-np.pi/2, gamma=R*np.exp(1j*(np.pi/2)))
+    t_minus = iem.dtheta_dt(theta=np.pi/2, gamma=R*np.exp(1j*(-np.pi/2)))
+    assert t_plus == pytest.approx(K*R)
+    assert t_minus == pytest.approx(-K*R)
+    # mirror states must turn opposite ways (they both turned right before)
+    assert t_plus == pytest.approx(-t_minus)
+
+
+# ---------------------------------------------------------------------------
 # Bifurcation invariance: K-doubling cancels the 1/2 at SC equilibria
 # ---------------------------------------------------------------------------
 def _coupled_jac(nbm, gamma_star, theta, half_angle, h=1e-6):
