@@ -12,8 +12,7 @@ count map with a symmetric lattice of basin wheels (heading-basin annulus +
 direction arrows). The two model builders are imported (single source of truth):
 ``walker_analysis/three_target_fly.py`` and ``plots/two_target_fly_refine.py``.
 
-Writes ``fly_bifurcation.jpg`` and ``fly_bifurcation.tif`` (both 300 dpi) next
-to this script.
+Writes ``fly_bifurcation.png`` (300 dpi) next to this script.
 
 Run (from the plots/ directory):  python fly_bifurcation_plot.py
   FLYBIF_FAST=1 python fly_bifurcation_plot.py   # quick low-res layout check
@@ -38,8 +37,7 @@ from parallel_config import get_n_workers              # noqa: E402
 from three_target_fly import build_model as build_three  # noqa: E402
 from two_target_fly_refine import build_model as build_two  # noqa: E402
 
-OUT_JPG = os.path.join(HERE, 'fly_bifurcation.jpg')
-OUT_TIF = os.path.join(HERE, 'fly_bifurcation.tif')
+OUT_PNG = os.path.join(HERE, 'fly_bifurcation.png')
 
 # Shared frame so the panels align and one legend serves both.
 XLIM, YLIM = (0.0, 5.4), (-3.7, 3.7)
@@ -118,11 +116,9 @@ def main():
                loc='outside right', fontsize=13, title_fontsize=14,
                markerscale=1.8, labelspacing=0.5, handletextpad=0.6)
 
-    fig.savefig(OUT_JPG, dpi=300)
-    fig.savefig(OUT_TIF, dpi=300, pil_kwargs={'compression': 'tiff_lzw'})
+    fig.savefig(OUT_PNG, dpi=300)
     plt.close(fig)
-    print('wrote', OUT_JPG)
-    print('wrote', OUT_TIF)
+    print('wrote', OUT_PNG)
 
 
 if __name__ == '__main__':

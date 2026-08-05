@@ -68,9 +68,10 @@ CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
 OUT_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'stability_comparison')
 DPI = 300
-# Publication output: raster pair (jpg + tif) plus a vector pdf (the only
-# raster content the pdf embeds is the small bifurcation insets, at DPI).
-OUTPUT_FORMATS = ('jpg', 'tif', 'pdf')
+# Publication output: a single high-quality png at 300 dpi, matching the other
+# figures in this directory. (Previously a jpg + tif raster pair plus a vector
+# pdf; consolidated to one lossless raster.)
+OUTPUT_FORMATS = ('png',)
 
 
 # ----------------------------- helpers -----------------------------
@@ -326,12 +327,7 @@ def main():
         r'without weighting', fontsize=SUPTITLE_FS)
     for fmt in OUTPUT_FORMATS:
         out = f'{OUT_BASE}.{fmt}'
-        kw = dict(dpi=DPI, bbox_inches='tight')
-        if fmt == 'tif':
-            kw['pil_kwargs'] = {'compression': 'tiff_lzw'}
-        elif fmt == 'jpg':
-            kw['pil_kwargs'] = {'quality': 95}
-        fig.savefig(out, **kw)
+        fig.savefig(out, dpi=DPI, bbox_inches='tight')
         print(f'wrote {out}')
     plt.close(fig)
 

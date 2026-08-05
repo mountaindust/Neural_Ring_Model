@@ -8,7 +8,7 @@ pasted, so the result is no worse than 300 dpi) into a 2x3 grid:
 
 Each panel's baked-in title is cropped off and replaced with the short title that
 follows that panel in the reordering; a bold panel letter (A-F) is overlaid in the
-heatmap corner. Column spacing is uniform (no divider line). Output: JPG + TIFF, both
+heatmap corner. Column spacing is uniform (no divider line). Output: a single PNG
 tagged 300 dpi.
 
 Run:  python plots/combined_walker_figure.py
@@ -136,14 +136,11 @@ def main():
                       font=LETTER_FONT, fill='white', anchor='la',
                       stroke_width=4, stroke_fill='black')
 
-    jpg = os.path.join(HERE, OUT_BASE + '.jpg')
-    tif = os.path.join(HERE, OUT_BASE + '.tif')
-    canvas.save(jpg, quality=95, dpi=(300, 300))
-    canvas.save(tif, compression='tiff_lzw', dpi=(300, 300))
+    png = os.path.join(HERE, OUT_BASE + '.png')
+    canvas.save(png, dpi=(300, 300))
     print('canvas %d x %d px (%.2f x %.2f in @ 300 dpi)'
           % (canvas_w, canvas_h, canvas_w / 300.0, canvas_h / 300.0))
-    print('wrote', jpg)
-    print('wrote', tif)
+    print('wrote', png)
 
 
 if __name__ == '__main__':

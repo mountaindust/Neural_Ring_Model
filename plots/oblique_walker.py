@@ -71,10 +71,11 @@ if QUALITY == 'low':
 else:
     NUM_X, NUM_Y, REFINEMENT_LEVELS, DPI = 49, 49, 3, 300
 
-# Production output: a raster pair (jpg + LZW-compressed tif) at 300 dpi, the
-# standard used by the other publication figures in this directory.
+# Production output: a single high-quality png at 300 dpi, the standard used by
+# the other publication figures in this directory (the old jpg + LZW-tif pair
+# was retired -- one lossless raster instead of a lossy copy plus a bulky one).
 OUT_BASE = os.path.join(HERE, 'oblique_walker')
-OUTPUT_FORMATS = ('jpg', 'tif')
+OUTPUT_FORMATS = ('png',)
 
 # ---- walker ensemble (rows 2 & 3) ----
 # Same perception parameterization as column 3 (lin_cutoff warp a=pi/8,b=pi,
@@ -297,12 +298,7 @@ def main():
     fig.subplots_adjust(left=0.06, right=0.90, top=0.91, bottom=0.07)
     for fmt in OUTPUT_FORMATS:
         out = f'{OUT_BASE}.{fmt}'
-        kw = dict(dpi=DPI, bbox_inches='tight')
-        if fmt == 'tif':
-            kw['pil_kwargs'] = {'compression': 'tiff_lzw'}
-        elif fmt == 'jpg':
-            kw['pil_kwargs'] = {'quality': 95}
-        fig.savefig(out, **kw)
+        fig.savefig(out, dpi=DPI, bbox_inches='tight')
         print('wrote', out)
     plt.close(fig)
 
