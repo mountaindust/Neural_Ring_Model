@@ -118,7 +118,11 @@ OUT_NAME = None
 # fingerprint fields below don't already capture. 1 = first merged-script
 # version (fresh fingerprint schema + filenames; old per-figure caches from the
 # two predecessor scripts never match and are simply ignored).
-CACHE_VERSION = 1
+# 2 = the _get_target_signals wrapping-extent fix in decision_model.py: the
+# closest target's angular extent is now unwrapped before the neural weight is
+# integrated, so a target straddling the rear branch cut is no longer dropped
+# from perception. Changes stable counts near the targets under uniform weight.
+CACHE_VERSION = 2
 
 DPI = 150
 # Output image formats (extensions). The auto-generated base name is shared;
