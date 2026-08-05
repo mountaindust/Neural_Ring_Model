@@ -17,22 +17,24 @@ from matplotlib.colors import BoundaryNorm
 
 
 def convert_angles(theta):
-    '''Given a scalar or array of angles, convert to angles in
-    [-np.pi,np.pi]
+    '''Given a scalar or array of angles, convert to angles in the closed
+    interval [-np.pi, np.pi].
 
-    The wrap is **odd**: convert_angles(-x) == -convert_angles(x) for every x,
-    including the +-pi endpoints. A plain floor-wrap lands on the half-open
-    [-pi, pi) and collapses both +pi and -pi to -pi. That silently picks a side
-    at the facing-away branch cut (where dtheta/dt jumps +K*R <-> -K*R) and
-    breaks mirror (theta -> -theta) equivariance at exactly that point. Keeping
-    the endpoint's sign makes the range the closed [-pi, pi] -- +-pi are two
-    representations of the same direction -- so the left/right fork is resolved
-    by the sign of the unwrapped argument rather than by a hardcoded bias. This
-    matches np.angle, which already preserves the branch through the sign of
-    the imaginary part (including IEEE signed zero).
+    The map is odd: convert_angles(-x) == -convert_angles(x) for every x. At
+    the endpoints this means +pi and -pi are both fixed points, so the interval
+    is closed rather than half-open: they are two representations of the same
+    (facing-away) direction, and which one is returned is inherited from the
+    sign of the argument.
+
+    That sign is meaningful. Facing-away is the branch cut of the heading
+    torque, where dtheta/dt jumps between +K*R and -K*R; carrying the argument's
+    sign through lets the caller's approach direction select the branch, and
+    makes the map commute with the mirror theta -> -theta. It is the same
+    convention as np.angle, which selects the branch by the sign of the
+    imaginary part (including IEEE signed zero).
     '''
     wrapped = theta - (theta+np.pi)//(2*np.pi)*2*np.pi
-    # The floor-wrap sends +pi to -pi; restore it for positive inputs.
+    # The floor division lands the +pi endpoint on -pi; take the sign from theta.
     flip = (wrapped == -np.pi) & (theta > 0)
     if np.ndim(wrapped) == 0:
         return np.pi if flip else wrapped

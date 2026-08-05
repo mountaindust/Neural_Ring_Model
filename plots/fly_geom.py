@@ -82,11 +82,11 @@ def main():
     neur_model = model.NeuralBandModel(percep_model, T=0.2, K=4.5)
 
     # RIGHT panel: 9-target case. Already a square (12 x 12) window, so it
-    # matches the left panel's size. num_x/num_y and refinement_levels are
-    # reduced from 19/19/2 -> 15/15/1: the 9-target sc_equilib solve is the
-    # expensive part, so this is the main speed lever. Bump these back up
-    # (e.g. 19/refinement_levels=2) for a finer boundary once the layout looks
-    # right.
+    # matches the left panel's size. Runs at the same publication resolution as
+    # the left panel (57/57, refinement_levels=3). The 9-target sc_equilib solve
+    # is by far the expensive part of this figure, so num_x/num_y and
+    # refinement_levels are the main speed lever -- drop them (e.g. 15/15/1) for
+    # fast layout iteration, and restore them before generating the real figure.
     ax = fig.add_subplot(1, 2, 2)
     with Pool(get_n_workers()) as pool:
         neur_model.plot_bifurcation_diagram(xlim=(-6, 6), num_x=57, ylim=(-6, 6),
@@ -106,7 +106,7 @@ def main():
     # legend. Both axes are square, so they render at the same size.
     fig.subplots_adjust(left=0.06, right=0.86, top=0.92, bottom=0.1, wspace=0.2)
 
-    fig.savefig(os.path.join(HERE, 'fly_geom_refined.png'), dpi=300, bbox_inches='tight')
+    fig.savefig(os.path.join(HERE, 'fly_geom.png'), dpi=300, bbox_inches='tight')
     # plt.show()
 
 if __name__ == '__main__':
