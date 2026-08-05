@@ -97,8 +97,20 @@ TICK_FS = 11
 SUPTITLE_FS = 17
 PANEL_FS = 17
 
-# module-global model so forked pool workers can evaluate the slice cheaply
+# module-global model so pool workers can evaluate the slice cheaply
 _M = None
+
+
+def _init_worker():
+    """Build the module-global model inside each pool worker.
+
+    Under the 'fork' start method a worker inherits the parent's _M for free,
+    but under 'spawn' (the Windows/macOS default) the module is re-imported and
+    _M would stay None, so _slice_eqs raised AttributeError. An explicit
+    initializer is correct under both start methods.
+    """
+    global _M
+    _M = build_model()
 
 
 def build_model(weight=ANGLE_WEIGHT):
@@ -248,7 +260,7 @@ def panel_letter(ax, letter):
 
 def main():
     global _M
-    _M = build_model()      # forked pool workers inherit this for _slice_eqs
+    _M = build_model()      # the parent's copy, used directly by render_raster
 
     fig = plt.figure(figsize=(17.5, 6.4))
     gs = fig.add_gridspec(1, 2, width_ratios=[1.0, 1.32], wspace=0.12)
@@ -258,7 +270,7 @@ def main():
     # rather than floating centered in its (wider) cell.
     ax_b.set_anchor('W')
 
-    with Pool(get_n_workers()) as pool:
+    with Pool(get_n_workers(), initializer=_init_worker) as pool:
         render_slice(ax_a, pool)
         render_raster(ax_b, _M, pool)
 
