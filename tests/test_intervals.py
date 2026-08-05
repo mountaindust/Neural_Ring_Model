@@ -433,6 +433,104 @@ check_scalar("cutoff vs mesh: two intervals",
 
 
 # ========================================================
+print("\n=== _get_target_signals: extents that straddle the rear cut ===")
+# ========================================================
+# Regression: get_percep_angles encodes an extent straddling +-pi as a
+# WRAPPING pair (lo > hi). _subtract_intervals_circle unwraps its inputs, so
+# any target with a closer blocker was already handled -- but the CLOSEST
+# target never enters that loop. A raw wrapping pair reaching
+# _integrate_neural_weight yields a NEGATIVE arc length, which the G > 0
+# visibility filter then silently discards, dropping the nearest target for
+# the entire angular window in which it straddles the cut.
+
+def check_bool(name, result, expected=True):
+    global passed, failed
+    if bool(result) != bool(expected):
+        print(f"FAIL {name}: got {result!r}, expected {expected!r}")
+        failed += 1
+    else:
+        passed += 1
+        print(f"  ok {name}")
+
+
+# A lone circle target directly behind: extent wraps for |heading| < half.
+_r, _d = 0.3, 3.0
+_half = np.arcsin(_r / _d)
+tg_behind = Targets(locs=np.array([[-_d, 0.0]]), geom_name='circle', r=_r)
+pm_behind = PM(tg_behind, focal_loc=np.array([0.0, 0.0]), focal_angle=0.0,
+               neural_angle_dist=None, angle_weight=None)
+
+# the extent really does wrap at heading 0 (guards the premise of the test)
+_arc = tg_behind.get_percep_angles(np.array([0.0, 0.0]), 0.0)[0]
+check_bool("premise: behind target's extent wraps (lo > hi)", _arc[0] > _arc[1])
+
+for _h in [0.0, 0.5 * _half, -0.5 * _half, 0.99 * _half, -0.99 * _half]:
+    _a, _rho = pm_behind.get_neural_signals(_h, np.array([0.0, 0.0]))
+    check_bool(f"closest wrapping target stays visible at heading {_h:+.4f}",
+               len(_a) == 1)
+
+# ...and its rho is the whole (only) target's weight
+_a0, _rho0 = pm_behind.get_neural_signals(0.0, np.array([0.0, 0.0]))
+check_scalar("wrapping target carries all the weight", float(_rho0.sum()), 1.0)
+
+# Uniform weight => G is arc length; must equal the true angular extent.
+check_scalar("wrapping extent integrates to its true arc length",
+             pm_behind._integrate_neural_weight(unwrap((_arc[0], _arc[1]))),
+             2 * _half)
+check_scalar("un-unwrapped wrapping extent would be negative (the old bug)",
+             pm_behind._integrate_neural_weight([(_arc[0], _arc[1])]),
+             _arc[1] - _arc[0])
+check_bool("...and that raw value is indeed negative",
+           pm_behind._integrate_neural_weight([(_arc[0], _arc[1])]) < 0)
+
+# Visibility must be continuous across the cut: sweep in and out of the window.
+_counts = [len(pm_behind.get_neural_signals(h, np.array([0.0, 0.0]))[0])
+           for h in np.linspace(-3 * _half, 3 * _half, 41)]
+check_bool("visibility continuous across the rear cut", set(_counts) == {1})
+
+# Same for a capsule (shares the extended-target code path).
+tg_cap = Targets(locs=np.array([[-_d, 0.0]]), geom_name='capsule',
+                 l=1.0, w=0.4, theta=np.pi / 2)
+pm_cap = PM(tg_cap, focal_loc=np.array([0.0, 0.0]), focal_angle=0.0,
+            neural_angle_dist=None, angle_weight=None)
+check_bool("capsule straddling the rear cut stays visible",
+           len(pm_cap.get_neural_signals(0.0, np.array([0.0, 0.0]))[0]) == 1)
+
+# Non-uniform weights exercise the F(hi) - F(lo) branch of the integrator.
+# vonmises has full support on [-pi, pi], so a rear target must stay visible.
+pm_behind_vm = PM(tg_behind, focal_loc=np.array([0.0, 0.0]), focal_angle=0.0,
+                  neural_angle_dist=None, angle_weight='vonmises')
+check_bool("wrapping target visible under vonmises weight (full support)",
+           len(pm_behind_vm.get_neural_signals(0.0, np.array([0.0, 0.0]))[0]) == 1)
+# the weighted integral of the wrapping extent must equal the two-piece sum
+_pieces = unwrap((_arc[0], _arc[1]))
+check_scalar("weighted wrapping extent == sum over unwrapped pieces",
+             pm_behind_vm._integrate_neural_weight(_pieces),
+             sum(pm_behind_vm._integrate_neural_weight([p]) for p in _pieces))
+check_bool("...and it is positive",
+           pm_behind_vm._integrate_neural_weight(_pieces) > 0)
+
+# By contrast, a cutoff weight with support b = 4*pi/5 < pi genuinely excludes
+# the rear, so a directly-behind target is correctly INVISIBLE. That is the
+# documented blind-spot behaviour, NOT the wrapping bug -- pin it so the two
+# are never conflated.
+pm_behind_cut = PM(tg_behind, focal_loc=np.array([0.0, 0.0]), focal_angle=0.0,
+                   neural_angle_dist=None, angle_weight='cutoff')
+check_bool("premise: cutoff weight support ends before the rear",
+           pm_behind_cut.weight_params['b'] < pi)
+check_bool("rear target correctly invisible under a rear-excluding weight",
+           len(pm_behind_cut.get_neural_signals(0.0, np.array([0.0, 0.0]))[0]) == 0)
+
+# Blocking still works when the closest target wraps: put a farther target
+# directly behind it, fully occluded by the near one.
+tg_pair = Targets(locs=np.array([[-_d, 0.0], [-2 * _d, 0.0]]),
+                  geom_name='circle', r=_r)
+pm_pair = PM(tg_pair, focal_loc=np.array([0.0, 0.0]), focal_angle=0.0,
+             neural_angle_dist=None, angle_weight=None)
+_ap, _rp = pm_pair.get_neural_signals(0.0, np.array([0.0, 0.0]))
+check_bool("near wrapping target visible, far one still occluded", len(_ap) == 1)
+
+# ========================================================
 print(f"\n=== RESULTS: {passed} passed, {failed} failed ===")
 # ========================================================
 

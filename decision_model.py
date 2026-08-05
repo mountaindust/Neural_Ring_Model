@@ -2100,7 +2100,18 @@ class PerceptionModel:
                                 for n in range(num_targets)]
             visible_intervals = []  # list of lists of (lo, hi) tuples
             for n in range(num_targets):
-                intervals = [original_extents[n]]
+                # Unwrap up front: get_percep_angles encodes an extent that
+                # straddles +-pi as a wrapping pair (lo > hi), but both
+                # _integrate_neural_weight and the mesh_signal masking below
+                # require non-wrapping pieces. _subtract_intervals_circle
+                # unwraps its inputs, so targets with a closer blocker were
+                # already safe -- but the CLOSEST target (n == 0) never enters
+                # that loop, and a raw wrapping pair reaching the integrator
+                # yields a negative arc length, which the G > 0 visibility
+                # filter then silently discards. That dropped the nearest
+                # target for the whole angular window in which it straddles
+                # the rear branch cut.
+                intervals = self._unwrap_interval(original_extents[n])
                 for closer in range(n):
                     intervals = self._subtract_intervals_circle(
                         intervals, original_extents[closer])
