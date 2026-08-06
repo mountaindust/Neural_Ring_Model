@@ -106,6 +106,30 @@ python plots/fly_bifurcation_plot.py
 FLYBIF_FAST=1 python plots/fly_bifurcation_plot.py   # coarse, fast layout check
 ```
 
+## `fly_geom.py` — fly-geometry figures (3-target pair + 9-target ring)
+
+Two independent 300-dpi figures from the same foveal parameterization
+(`lin_cutoff` warp `a=0.25π, b=0.9π`, weight tied to the warp, `T=0.2`, `K=4.5`):
+
+- **`fly_geom_3target_branch.png`** — the 3-target fly, two panels. *Left*: the
+  stable-equilibrium-count map over (x, y) with 50 walker tracks overlaid.
+  *Right*: the SC-equilibrium **branch** diagram along the y=0 cut (every
+  equilibrium heading vs observer x, stable filled / unstable open, bifurcation
+  x-locations dashed). Both panels come from the same model, so the right panel
+  is a literal cut through the left one. The branch scan reuses
+  `decision_skeleton._branch_scan` / `_cluster`.
+- **`fly_geom_9target.png`** — the 9-target ring case on its own.
+
+Note the branch panel here is **not** the same fly as the top-left panel of
+`branch_diagram_combined.png`: that one is drawn with the locked empirical fit
+(`decision_skeleton.FLY`), this one with the foveal parameters above.
+
+```
+python plots/fly_geom.py                  # both figures
+python plots/fly_geom.py 9target          # just one (the 9-target solve is slow)
+FLYGEOM_FAST=1 python plots/fly_geom.py   # coarse, fast layout check
+```
+
 ## `combined_walker_figure.py` — publication montage
 
 Composites the finished 300-dpi panels (the four `skeleton_*.png` plus the two
@@ -136,5 +160,7 @@ python plots/combined_branch_figure.py
 | `{two,three}_target_fly_refine.png` | refine scripts | 4-panel fit diagnostic |
 | `skeleton_{fly,fly2,locust,locust2}*.png` | `decision_skeleton.py` | deterministic skeletons |
 | `fly_bifurcation.{jpg,tif}` | `fly_bifurcation_plot.py` | 2-panel bifurcation + basin overlay |
+| `fly_geom_3target_branch.png` | `fly_geom.py` | 3-target count map + walkers, beside the y=0 branch diagram |
+| `fly_geom_9target.png` | `fly_geom.py` | 9-target ring count map |
 | `combined_walker_figure.{jpg,tif}` | `combined_walker_figure.py` | publication montage of the six panels |
 | `branch_diagram_combined.{jpg,tif}` | `combined_branch_figure.py` | combined fly+locust heading branch diagram |
