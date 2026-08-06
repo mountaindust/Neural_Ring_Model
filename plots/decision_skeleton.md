@@ -27,7 +27,7 @@ field is read straight from
 - [skeleton_fly.png](skeleton_fly.png), [skeleton_locust.png](skeleton_locust.png) —
   the skeleton over the empirical GODM heatmaps. The black tracks land on the bright
   heatmap ridges in both species.
-- [branch_diagram_fly.png](../walker_analysis/branch_diagram_fly.png),
+- [branch_diagram_fly2.png](../walker_analysis/branch_diagram_fly2.png),
   [branch_diagram_locust.png](../walker_analysis/branch_diagram_locust.png) — the (x, θ) + (x, R)
   bifurcation **branch diagram** (equilibrium *directions* and coherence vs observer
   position, not just stable counts).

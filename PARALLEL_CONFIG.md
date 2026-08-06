@@ -55,14 +55,27 @@ without editing files, set `NR_N_WORKERS` in the shell.
 | File | Symbol / call |
 | --- | --- |
 | [bifurc_plots/neural_weight_sweep.py](bifurc_plots/neural_weight_sweep.py) | `DEFAULT_N_WORKERS = get_n_workers()` (also `--workers` CLI override) |
-| [bifurc_plots/neural_weight_sweep_angle_only.py](bifurc_plots/neural_weight_sweep_angle_only.py) | `DEFAULT_N_WORKERS = get_n_workers()` (also `--workers` CLI override) |
 | [bifurc_plots/arc_skeleton_and_island_dynamics.py](bifurc_plots/arc_skeleton_and_island_dynamics.py) | `N_WORKERS = get_n_workers()` |
 | [bifurc_plots/bifurcation_compare_discrim_vs_coupled.py](bifurc_plots/bifurcation_compare_discrim_vs_coupled.py) | `N_WORKERS = get_n_workers()` |
+| [plots/neural_weight_sweep.py](plots/neural_weight_sweep.py) | `DEFAULT_N_WORKERS = get_n_workers()` (also `--workers` CLI override) |
+| [plots/fly_bifurcation_plot.py](plots/fly_bifurcation_plot.py) | `with Pool(get_n_workers()) as pool:` |
+| [plots/fly_geom.py](plots/fly_geom.py) | `with Pool(get_n_workers()) as pool:` |
+| [plots/horn_decision_figure.py](plots/horn_decision_figure.py) | `with Pool(get_n_workers(), initializer=_init_worker) as pool:` |
+| [plots/oblique_walker.py](plots/oblique_walker.py) | `with Pool(get_n_workers()) as pool:` |
+| [plots/oblique_walker_uniform_check.py](plots/oblique_walker_uniform_check.py) | `with ow.Pool(ow.get_n_workers()) as pool:` |
+| [plots/three_target_fly_refine.py](plots/three_target_fly_refine.py) | `n_workers = get_n_workers()` |
+| [plots/two_target_fly_refine.py](plots/two_target_fly_refine.py) | `n_workers = get_n_workers()` |
+| [reduced_criterion/compare_reduced_vs_coupled.py](reduced_criterion/compare_reduced_vs_coupled.py) | `with Pool(get_n_workers()) as pool:` |
+| [reduced_criterion/cycle_birth_death.py](reduced_criterion/cycle_birth_death.py) | `with Pool(get_n_workers()) as pool:` |
+| [reduced_criterion/island_anatomy.py](reduced_criterion/island_anatomy.py) | `with Pool(get_n_workers()) as pool:` |
+| [reduced_criterion/reduced_vs_full_dynamics.py](reduced_criterion/reduced_vs_full_dynamics.py) | `with Pool(get_n_workers()) as pool:` |
+| [weighting_analysis/ears_figure.py](weighting_analysis/ears_figure.py) | `N_WORKERS = get_n_workers()` |
+| [weighting_analysis/outward_bias.py](weighting_analysis/outward_bias.py) | `N_WORKERS = get_n_workers()` |
 | [tests/test_broad_validation.py](tests/test_broad_validation.py) | `with Pool(get_n_workers()) as pool:` |
-| [VM_bifurcations/diagnostic_arc_skeleton.py](VM_bifurcations/diagnostic_arc_skeleton.py) | `with Pool(get_n_workers()) as pool:` |
-| [VM_bifurcations/diagnostic_arc_bifurcation.py](VM_bifurcations/diagnostic_arc_bifurcation.py) | `with Pool(get_n_workers()) as pool:` |
-| [VM_bifurcations/diagnostic_island_final.py](VM_bifurcations/diagnostic_island_final.py) | `with Pool(get_n_workers()) as pool:` |
-| [VM_bifurcations/diagnostic_recount_grid.py](VM_bifurcations/diagnostic_recount_grid.py) | `with Pool(get_n_workers()) as pool:` |
+| [VM_bifurcation_old_dtheta/diagnostic_arc_skeleton.py](VM_bifurcation_old_dtheta/diagnostic_arc_skeleton.py) | `with Pool(get_n_workers()) as pool:` |
+| [VM_bifurcation_old_dtheta/diagnostic_arc_bifurcation.py](VM_bifurcation_old_dtheta/diagnostic_arc_bifurcation.py) | `with Pool(get_n_workers()) as pool:` |
+| [VM_bifurcation_old_dtheta/diagnostic_island_final.py](VM_bifurcation_old_dtheta/diagnostic_island_final.py) | `with Pool(get_n_workers()) as pool:` |
+| [VM_bifurcation_old_dtheta/diagnostic_recount_grid.py](VM_bifurcation_old_dtheta/diagnostic_recount_grid.py) | `with Pool(get_n_workers()) as pool:` |
 
 Note: [decision_model.py](decision_model.py) does **not** create its own
 pool; several of its methods accept a `pool=` keyword argument and the

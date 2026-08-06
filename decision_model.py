@@ -961,8 +961,8 @@ class PerceptionModel:
     def _make_integral_spline(name, params):
         """Build (forward, inverse) CubicSplines for the CDF-like integral map
         of a density family, or (None, None) for families with no spline
-        (symmetric_beta is evaluated analytically; direct_power / None have no
-        integral map).
+        (lin_cutoff and symmetric_beta are evaluated analytically;
+        direct_power / None have no integral map).
 
         Used by both roles: the warp uses both returned splines; the weight
         uses only the forward spline (as an antiderivative for the rho

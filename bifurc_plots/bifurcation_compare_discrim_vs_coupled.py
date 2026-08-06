@@ -1,5 +1,5 @@
 """
-Exploratory version of VM_bifurcations/diagnostic_recount_compare.png.
+Exploratory version of VM_bifurcation_old_dtheta/diagnostic_recount_compare.png.
 Companion check that quantifies how much the legacy gamma-only `_discrim_A`
 stability test overcounts vs. the full 3x3 coupled Jacobian.
 

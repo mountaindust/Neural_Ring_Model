@@ -5,7 +5,11 @@
 *.png
 *.jpg
 *.tif
-!VM_bifurcations/*.png
+# NOTE the directory was renamed VM_bifurcations -> VM_bifurcation_old_dtheta;
+# the old negation silently stopped matching, so any NEW png added there was
+# being ignored (the ones committed before the rename stayed tracked, which is
+# why nothing looked wrong).
+!VM_bifurcation_old_dtheta/*.png
 !weighting_analysis/*.png
 .~*
 *.swp
@@ -14,6 +18,12 @@ __pycache__/
 *.pkl
 *.asv
 *.npz
+# The weighting_analysis/ caches specifically: that folder is historical and
+# inactive, and its rasters are all regenerable from committed scripts
+# (_cache_ears.npz is the expensive one -- well over an hour on 10 workers).
+# Stated explicitly so the blanket *.npz above is not later negated for it the
+# way *.png was for this folder.
+weighting_analysis/_cache_*.npz
 # OSX / *nix default autosave extension
 *.m~
 # Compiled MEX binaries (all platforms)

@@ -6,6 +6,14 @@
 blind spot and disappearing/reappearing. This normally is associated with 
 unstable equilibria, but needs to be mathematically considered more carefully. 
 Maybe a mollifier?
+
+  *(2026-08 clarification: this is about the **genuine** blind spot — a weight
+  whose support ends before the rear, e.g. `b_weight < π`, really does make
+  targets wink out. Do not confuse it with the separate **wrapping-extent bug**
+  fixed 2026-08-04, in which the closest target vanished from perception while
+  straddling the rear branch cut even under full-support/uniform weight. That
+  one was an interval-arithmetic error, not a modeling discontinuity; see
+  CLAUDE.md "Common gotchas".)*
 - [AJB] Related: the ODEs have some stiff behavior. One has only to look at the root 
 finding situation for $d\gamma/dt$ to see an example of this. It's horribly 
 unstable. The mathematics of this need to be explored and handled.

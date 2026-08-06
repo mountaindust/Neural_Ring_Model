@@ -6,7 +6,7 @@ Layout (von Mises, k=0.55, two circle targets at (4.33, +/- 2.5)):
 
   (a) upper-left   : # stable self-consistent equilibria over the upper-arc
                      window. Adapted from the LEFT panel of
-                     VM_bifurcations/diagnostic_arc_skeleton.png; the legacy
+                     VM_bifurcation_old_dtheta/diagnostic_arc_skeleton.png; the legacy
                      panel showed total equilibria with a Hopf-curve overlay,
                      but at high resolution that pipeline produced speckles
                      and a noisy Hopf contour. Switching to the stable-count
