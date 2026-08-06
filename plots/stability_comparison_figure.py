@@ -39,6 +39,10 @@ from matplotlib.patches import Rectangle
 
 import decision_model as model
 
+# Render mathtext in Computer Modern, matching the default math font of a
+# LaTeX document. This needs no LaTeX installation (unlike text.usetex).
+plt.rcParams['mathtext.fontset'] = 'cm'
+
 # ----------------------------- config -----------------------------
 TARGET_LOCS = np.array([[4.33, 2.5], [4.33, -2.5]])   # fly2 geometry
 TARGET_R = 0.5
@@ -295,9 +299,9 @@ def main():
         print(f"  ({lt}/{lb}) {lbl}: {len(ang)} eq, {int(np.sum(stab))} stable")
 
     # row y-labels, bottom x-labels
-    axes[0][0].set_ylabel(r'neural consensus angle  $\Theta=\arg\gamma$  [deg]',
+    axes[0][0].set_ylabel(r'neural consensus angle  $\Theta^*=\mathrm{Arg}\,\gamma^*$  [deg]',
                           fontsize=LABEL_FS)
-    axes[1][0].set_ylabel(r'turning rate  $d\theta/dt = K\,R\,\sin(\Theta/2)$',
+    axes[1][0].set_ylabel(r'turning rate  $d\Phi/dt = K\,R\,\sin(\Theta^*/2)$',
                           fontsize=LABEL_FS)
     for ax in axes[1]:
         ax.set_xlabel('heading the observer is facing  [deg]', fontsize=LABEL_FS)
