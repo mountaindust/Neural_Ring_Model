@@ -95,6 +95,21 @@ handle on that recapture (K=2 de-biased the fly from ~55% to ~45% centre), and p
 config below is still the old `a_weight`+`std` tuning, so re-running it at K=2 /
 a_warp-pushed is the obvious next test.
 
+> **Ruled out (2026-08): reweighting perception cannot close the gap.** The obvious
+> alternative — an **anti-foveal** `angle_weight` with a *dip* in the middle, so that
+> whatever is dead ahead is under-weighted and the observer is pushed outward — was
+> implemented and swept. It makes the locust split
+> **worse, not better: 100% centre at 400 walkers**, versus 65% for the shipped foveal
+> weight. The reason is structural rather than a tuning failure: an `angle_weight` is a
+> function of *egocentric* angle, so a central dip suppresses whatever the observer
+> currently faces — centre and outer commitments alike — and the outer commitments are
+> the fragile ones (marginal Ising saddle-nodes, `birth_mechanism.md`), so they die
+> first. On the midline the outer branches are pushed outward monotonically with dip
+> depth and then annihilate entirely. Full analysis, figures and the 2×2 design:
+> [../weighting_analysis/outward_bias.md](../weighting_analysis/outward_bias.md).
+> This *strengthens* the conclusion above — the gap is in the recapture mechanism, and
+> the K=2 / a_warp-pushed locust refit is now the leading untried option.
+
 The shipped locust config therefore favours **cleanliness**: `a_weight=0.10π, std=3.0`
 gives a clean trident with the centre bias reduced as far as it can go without
 degrading the tracks. Final measured splits (80 walkers):
