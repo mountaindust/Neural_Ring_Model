@@ -20,6 +20,11 @@ Bottom row -- the deterministic turning rate dtheta/dt = K * R * sin(Theta/2)
               Panel (d) is zoomed to the 0-stable relaxation loop; (e)/(f)
               are full circle.
 
+Axis labels carry the publication notation: varphi for the heading variable in
+configuration space, Phi for the observer heading itself, and a starred
+Theta^* = Arg gamma^* for the equilibrium consensus angle. The code below keeps
+decision_model's names (theta, Theta = angle(gamma)).
+
 Both rows are drawn from the multivalued gamma-branch structure (every
 gamma-equilibrium at each heading, colored by gamma-stability: stable lobe vs
 unstable saddle).  Each top-row panel carries a bifurcation-diagram inset
@@ -304,18 +309,19 @@ def main():
     axes[1][0].set_ylabel(r'turning rate  $d\Phi/dt = K\,R\,\sin(\Theta^*/2)$',
                           fontsize=LABEL_FS)
     for ax in axes[1]:
-        ax.set_xlabel('heading the observer is facing  [deg]', fontsize=LABEL_FS)
+        ax.set_xlabel(r'heading the observer is facing, $\varphi$  [deg]',
+                      fontsize=LABEL_FS)
 
-    # shared legend (branches + theta-equilibria) in the upper-right of (A)
+    # shared legend (branches + heading equilibria) in the upper-right of (A)
     handles = [
         Line2D([], [], marker='o', ls='', color='C0', ms=8,
                label=r'stable $\gamma$-branch'),
         Line2D([], [], marker='o', ls='', mfc='none', mec='C1', ms=8,
                label=r'unstable $\gamma$-branch'),
         Line2D([], [], marker='o', ls='', mfc='C2', mec='k', ms=10,
-               label=r'$\theta$ stable equilibrium'),
+               label=r'$\Phi$ stable equilibrium'),
         Line2D([], [], marker='o', ls='', mfc='white', mec='k', ms=10,
-               label=r'$\theta$ unstable equilibrium'),
+               label=r'$\Phi$ unstable equilibrium'),
     ]
     axes[0][0].legend(handles=handles, loc='upper right', fontsize=LEGEND_FS,
                       framealpha=0.92)
