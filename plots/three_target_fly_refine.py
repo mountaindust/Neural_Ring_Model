@@ -70,7 +70,12 @@ B_WEIGHT = 0.80*pi
 # ridge. K=2 (the model default) fits best; 3.5 (the old refine value) over-peeled.
 # Override with NR_K.
 K = float(os.environ.get('NR_K', 2.0))
-T = 0.10
+# BETA is the neural Boltzmann factor. This scene has 3 targets and the shipped
+# results were produced under the earlier per-target temperature T=0.10, whose
+# effective coupling was N_targets/T, so beta = 3/0.10 = 30 reproduces them.
+# The two-target sibling therefore does NOT share this value -- see
+# two_target_fly_refine.py, which sets its own beta = 2/0.10 = 20.
+BETA = 30.0
 NOISE_EXP, R_EXP = 2.0, 3.0
 # std is the centre de-bias lever AT HIGH REALIZATION COUNT. The shipped
 # three_target_fly.py uses std=2.5, which three_target_findings.md reported as ~45-49%
@@ -117,7 +122,7 @@ def build_model():
                                neural_angle_dist='lin_cutoff', angle_weight='lin_cutoff',
                                a_warp=A_WARP, b_warp=B_WARP,
                                a_weight=A_WEIGHT, b_weight=B_WEIGHT)
-    return model.NeuralBandModel(pm, T=T, K=K)
+    return model.NeuralBandModel(pm, beta=BETA, K=K)
 
 
 def run_walkers(nm, pool=None, reps=REPETITIONS, std=STD, v=V,
@@ -233,7 +238,7 @@ def main():
              ref_img=ref_img, extent=np.array(EXTENT, float),
              corr_all=corr_all, corr_support=corr_sup, split=counts,
              reps=REPETITIONS, seed=SEED,
-             K=K, T=T, std=STD, v=V, dt=DT,
+             K=K, beta=BETA, std=STD, v=V, dt=DT,
              a_warp=A_WARP, b_warp=B_WARP, a_weight=A_WEIGHT, b_weight=B_WEIGHT,
              noise_exp=NOISE_EXP, R_exp=R_EXP, target_tol=TARGET_TOL,
              start_pos_std=START_POS_STD, start_head_std=START_HEAD_STD,
@@ -264,9 +269,9 @@ def main():
     for a in ax:
         a.set_xlabel('x'); a.set_ylabel('y')
     fig.suptitle('Fly three-target: walker substructure vs GODM  '
-                 '(K=%.1f, T=%.2f, a_warp=%.2fπ, a_weight=%.2fπ, σ=%.1f, '
+                 '(K=%.1f, β=%.4g, a_warp=%.2fπ, a_weight=%.2fπ, σ=%.1f, '
                  'start jitter pos=%.2f head=%.0f°)'
-                 % (K, T, A_WARP/pi, A_WEIGHT/pi, STD, START_POS_STD,
+                 % (K, BETA, A_WARP/pi, A_WEIGHT/pi, STD, START_POS_STD,
                     np.degrees(START_HEAD_STD)), y=1.03)
     fig.tight_layout()
     out = os.path.join(os.path.dirname(os.path.abspath(__file__)),

@@ -35,6 +35,7 @@ The model lives in three distinct angular coordinate frames. Keeping them straig
 The current/preferred model. γ lives in **egocentric/neural** space.
 
 - The coupling kernel *and* the pull direction in `dγ/dt` both use neural (warped egocentric) angles.
+- **Neural coupling is `beta`** (default 10): `dγ/dt = Σⱼ ρⱼ e^{iθ̂ⱼ}·σ(2·β·R·cos(θ̂ⱼ−Θ)) − γ`. See "Neural temperature" below.
 - Walker torque: `dθ/dt = K·R·sin(Θ/2)` where `Θ = arg(γ)` is the **neural** consensus angle and `R = |γ|` — the **half-angle law in the neural angle directly**, no inverse-warp mapping. `Θ ∈ (−π, π]` is already wrapped before halving; neural angle 0 is straight ahead (the SC equilibrium), `±π` is facing-away. Default `K=2`. (Derivation + the 2026-06-02 move off the inverse-warp form: `.claude/rules/torque-and-stability.md`.)
 - Self-consistent equilibria have γ = R + 0j (real positive): heading=consensus ⇒ egocentric consensus = 0 ⇒ Θ_neural = f(0) = 0 ⇒ γ = R + 0j.
 
@@ -69,6 +70,16 @@ Change parameters post-init by **assigning** the generic two-slot properties `a_
 **IEM must be used with `neural_angle_dist=None, angle_weight=None`.** In IEM γ lives in allocentric/physical coordinates; the model assumes the observer perceives target angles directly. A non-identity `neural_angle_dist` on IEM is a category error — its `dγ/dt` math doesn't apply, and `sc_equilib` then returns near-empty diagrams (model rejecting an invalid input, not a solver bug).
 
 **NBM is the model for warped perception.** Foveal density, egocentric warping, any non-identity neural mapping → use NBM. The two are *not* substitutes under warping; they were designed to handle the warping nonlinearity in incompatible ways.
+
+## Neural temperature: `beta` (NBM)
+
+`NeuralBandModel(beta=10)` is the **Boltzmann factor of the Glauber dynamics**, `β = 𝓔/(k_B·temp)`, where `𝓔` is the energy scale of the Ising Hamiltonian, `k_B` the Boltzmann constant, and `temp` the temperature in Kelvin. Large β is cold (sharp commitment), small β is hot (diffuse). It appears in `dγ/dt` as the logistic argument `2·β·R·cos(θ̂ⱼ−Θ)` and in the analytic free-energy Hessian of `_discrim_A` as `w_j = (β/2)·ρⱼ·sech²(β·R·cos(θ̂ⱼ−Θ))`.
+
+**β is a property of the neural ring, not of the scene** — it does not scale with the number of targets. The Hamiltonian is normalized `𝓔/N` over the N *neurons*; an extra factor of the target count would make the per-neuron energy scale depend on how many targets happen to be in view, which is not physical.
+
+**Reading pre-β scripts and write-ups.** The earlier parameterization used a temperature `T` with the target count folded into the coupling, giving an effective `β = N/T` where `N` was the number of **currently visible** targets (`neur_angles.size`). To reproduce an old result, set `β = N_total/T` — exact wherever every target contributes to perception (partial occlusion is fine; only a target contributing *nothing*, `G == 0`, shrinks the old `N`). Under a restricted weight cone the two genuinely differ: in the 3-target foveal setups a target is fully out of view at ~34–48% of (position, heading) states, and there the old law's effective β dropped to `2/T` or lower while the new one holds. Scripts in `plots/`, `walker_analysis/`, `weighting_analysis/` carry their converted `BETA` with the arithmetic in a comment; note that a 2-target and a 3-target scene at the same old `T` need **different** β (e.g. `two_target_fly_refine.py` β=20 vs `three_target_fly_refine.py` β=30).
+
+**IEM still uses `T`** and still carries the visible-target factor (`2·N·R·cos(...)/T`); `IsingExtModel.T` and `NeuralBandModel.beta` are not the same quantity.
 
 ## Self-consistent equilibria
 

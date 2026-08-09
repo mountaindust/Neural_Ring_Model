@@ -25,7 +25,7 @@ The layout from `neural_band_walker.ipynb` (locust/fly reconstruction):
   This is the crux of everything below.
 - Perception: `neural_angle_dist='lin_cutoff'` (`a_warp=0.25π, b_warp=0.9π`),
   `angle_weight='lin_cutoff'` (`a_weight=0.25π, b_weight=0.30π`, a ±54° visual
-  window). `K=4.5`, `T=0.2`, `v=1`, `std=0.025`, `dt=0.1`.
+  window). `K=4.5`, `β=15`, `v=1`, `std=0.025`, `dt=0.1`.
 
 The bifurcation *x-locations* are fixed by experiment (and set with the
 `a_warp`/`b_warp` knobs): for locusts the first bifurcation is at x≈0.7–1.2 and
@@ -80,7 +80,7 @@ the same object.
   and never crosses it. Hence center, deterministically.
 
 - **The Ising gate does the switching.** Tracing an actual walker, at the second
-  bifurcation the sigmoid gate `1/(1+exp(−2NR·cos(Θ−θ_i)/T))` on the *outer*
+  bifurcation the sigmoid gate `1/(1+exp(−2βR·cos(Θ−θ_i)))` on the *outer*
   target collapses to 0 and the consensus snaps back to the center target. The
   outer target is switched off, not the center.
 
@@ -105,7 +105,7 @@ the same object.
 The bifurcation *locations* (warp/weight) are pinned by the data, so they cannot
 be used to fix the skew. The skew is a **basin-size asymmetry** set by the walker
 starting out facing the center target, and it is rebalanced only by the
-**dynamical / noise knobs**: `std`, `v`, `K`, `T`, and the noise law (`noise_exp`).
+**dynamical / noise knobs**: `std`, `v`, `K`, `β`, and the noise law (`noise_exp`).
 
 Restating the target as a number: **1:2:1 (top:center:bottom) is exactly "the
 second bifurcation is a fair 50/50 coin."** Half the walkers go up, half down (by
@@ -124,7 +124,7 @@ even. Constant-noise census (default warp/weight, 80 seeds):
 | 0.40 | 49 / 17 / 14 | 3.2 |
 | 0.80 | 35 / 26 / 19 | 1.6 |
 
-Lowering `v` and `K`, and (slightly) `T`, all push further toward even at fixed
+Lowering `v` and `K`, and (slightly) raising `β`, all push further toward even at fixed
 `std`. The 1:2:1 point is reachable several ways; two clean ones are below.
 
 ## Precise parameterizations that work
@@ -136,7 +136,7 @@ counts are seed sampling, not a real asymmetry.
 ### Route 1 — constant noise, dt-robust, lands ~1:2:1
 
 ```
-K = 4.5,  T = 0.2,  v = 0.3,  std = 0.4,  noise_exp = 0,  dt = 0.1
+K = 4.5,  β = 15,  v = 0.3,  std = 0.4,  noise_exp = 0,  dt = 0.1
 ```
 
 Converged census ≈ **1.1 : 2.1 : 0.9** and stable under dt refinement (see below).
@@ -147,7 +147,7 @@ fuss is the priority.
 ### Route 2 — gated noise, cleanest-looking double bifurcation
 
 ```
-noise_exp ≈ 1,  std ≈ 0.6,  v ≈ 0.5,  K = 4.5,  T = 0.2,  dt ≈ 0.025
+noise_exp ≈ 1,  std ≈ 0.6,  v ≈ 0.5,  K = 4.5,  β = 15,  dt ≈ 0.025
 ```
 
 The gated law (`σ·(1−R)^p·cos(Θ/2)`) explores hard while undecided (low R, on the
@@ -181,7 +181,7 @@ geometry + warp/weight). They only rebalance the basins.
 | **std** ↑ | ↓ (toward even) | most direct lever; too high smears the bifurcations together |
 | **v** ↓ | ↓ | slower walker accumulates more heading diffusion per unit distance through the bifurcation zone; does **not** move bifurcation x |
 | **K** ↓ | ↓ | K=2 overshoots to ~1:1.4:1; K=8 worsens the skew |
-| **T** ↓ | ↓ slightly | sharper Ising gate, marginally larger spread |
+| **β** ↑ | ↓ slightly | sharper Ising gate, marginally larger spread |
 | **noise_exp** (`q`, gate) ↑ | mild ↑ on its own | `q≥1` is the **circling fix** (noise→0 on commitment → no loops, capture 1.0); steeper gate alone nudges center up — offset it with `p`/`σ`. See [gated_pq_analysis.md](gated_pq_analysis.md). |
 | **R_exp** (`p`, drift) ↑ | ↓ (fine-tune) + dt-robust | decoupled from `q` (default now `1`); raising `p` toward/above `q` cancels the steep-gate center bias and stabilizes the ratio vs `dt`. Effect ~0.05–0.10 in center fraction — a fine-tune, not a big lever. |
 | **a_warp/b_warp, a_weight/b_weight** | — (moves *locations*, not skew) | use these only to place the first/second bifurcations at the data-observed x |
@@ -230,7 +230,7 @@ dt-convergence data (120 seeds, total integration time held fixed):
 ## Worked examples: `three_target_fly.py` and `three_target_locust.py`
 
 > **Note:** the centre-skew analysis below predates the GODM-data match. The shipped
-> scripts were since retuned (lower T, higher K, the foveal weight `a_weight` as the
+> scripts were since retuned (higher β, higher K, the foveal weight `a_weight` as the
 > split lever, and the **locust corrected to 35°**), and the data turned out to be
 > *outer*-biased for the locust — see [three_target_findings.md](three_target_findings.md).
 
@@ -258,7 +258,7 @@ The scripts therefore use the **decoupled gated law** (see
 [gated_pq_analysis.md](gated_pq_analysis.md)):
 
 ```
-K = 2.0,  T = 0.2,  noise_exp (q) = 2,  R_exp (p) = 3,  dt = 0.05
+K = 2.0,  β = 15,  noise_exp (q) = 2,  R_exp (p) = 3,  dt = 0.05
 fly:    v = 0.3,  std (σ) = 2.5,  target_tol = 0.2
 locust: v = 0.2,  std (σ) = 2.0,  target_tol = 0.2
 ```

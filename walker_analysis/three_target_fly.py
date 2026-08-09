@@ -43,9 +43,13 @@ A_WARP, B_WARP = 0.65*pi, 0.92*pi      # a_warp sets the first-bifurcation x: 0.
 A_WEIGHT, B_WEIGHT = 0.20*pi, 0.80*pi  # foveal weight window. At high realization count
 #   a_weight is SATURATED -- not the split lever the early low-N work took it for; the
 #   real levers are a_warp (bifurcation x), K (peel sharpness), std (centre de-bias).
-K, T = 2.0, 0.10                       # K=2 (model default): a gentle turn. K does NOT move
+K = 2.0                                # K=2 (model default): a gentle turn. K does NOT move
 #   the bifurcation (K-invariant); higher K corner-cuts onto a target and over-recaptures
 #   to centre -- worse vs the data. Lower K lets walkers ride the trunk to the targets.
+# BETA is the neural Boltzmann factor. This scene has 3 targets and the shipped
+# figure was produced under the earlier per-target temperature T=0.10, whose
+# effective coupling was N_targets/T, so beta = 3/0.10 = 30 reproduces it.
+BETA = 30.0
 # Gated noise (decoupled R^p drift / (1-R)^q gate):
 NOISE_EXP, R_EXP = 2.0, 3.0
 STD, V, DT = 4.0, 0.30, 0.05           # std de-biases the centre at high N (~45% centre)
@@ -61,7 +65,7 @@ def build_model():
                                neural_angle_dist='lin_cutoff', angle_weight='lin_cutoff',
                                a_warp=A_WARP, b_warp=B_WARP,
                                a_weight=A_WEIGHT, b_weight=B_WEIGHT)
-    return model.NeuralBandModel(pm, T=T, K=K)
+    return model.NeuralBandModel(pm, beta=BETA, K=K)
 
 
 def run_walkers(nm, pool=None, std=STD, v=V, k=None):
@@ -105,7 +109,8 @@ def main():
         ax[0].plot(w[0], w[1], 'k', alpha=0.45, lw=0.8)
     nm.percep_model.targets.plot_targets_to_axis(ax[0])
     ax[0].set_xlim(*XLIM); ax[0].set_ylim(*YLIM); ax[0].set_aspect('equal')
-    ax[0].set_title('fly tracks  (K=%.1f, T=%.2f, a_warp=%.2fpi)' % (K, T, A_WARP/pi))
+    ax[0].set_title('fly tracks  (K=%.1f, beta=%.4g, a_warp=%.2fpi)'
+                    % (K, BETA, A_WARP/pi))
     img, extent = density(walks)
     ax[1].imshow(img, extent=extent, origin='lower', aspect='equal')
     ax[1].set_title('fly walker density (cf. godm_heatmap_fly3.png)')

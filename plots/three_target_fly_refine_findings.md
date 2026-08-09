@@ -110,7 +110,7 @@ centre is already ~45% so std=4.0 sits comfortably — see the bifurcation secti
 `NR_STD=<v> python ... three_target_fly_refine.py`.)
 
 Knobs changed from the shipped `three_target_fly.py`: **K 3.5→2.0, a_warp 0.45→0.65π,
-std 2.5→4.0** (plus the start scatter and the GODM-pipeline render). `T`, `a_weight`,
+std 2.5→4.0** (plus the start scatter and the GODM-pipeline render). `β`, `a_weight`,
 `b_warp`, and the gated-noise exponents are unchanged.
 
 A modest **start scatter** (`pos_std=0.075`, `head_std=12°`, override `NR_POS_STD`/

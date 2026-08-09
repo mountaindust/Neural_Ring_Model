@@ -16,7 +16,7 @@ This module is standalone (imports ``decision_model`` but edits nothing in it). 
 fly/locust model setups below *mirror* the walker scripts ``three_target_fly.py`` /
 ``three_target_locust.py`` (and, for the two-target cases, ``two_target_fly_refine.py``)
 -- figure scripts with ``plot_walkers`` side effects in ``__main__``, so they cannot be
-imported. **Keep the two in sync**; only the deterministic warp/weight/geometry/K/T are
+imported. **Keep the two in sync**; only the deterministic warp/weight/geometry/K/beta are
 reproduced here (the noise knobs std/v/noise_exp/R_exp are irrelevant to the
 deterministic skeleton).
 
@@ -47,7 +47,7 @@ pi = np.pi
 
 # ----------------------------------------------------------------------------
 # Model setups -- mirror the walker scripts three_target_{fly,locust}.py. Only the
-# deterministic structure (geometry, warp, weight, K, T) is reproduced here; the noise
+# deterministic structure (geometry, warp, weight, K, beta) is reproduced here; the noise
 # knobs (std/v/noise_exp/R_exp) live only in the walker scripts. Keep the two in sync.
 # a_warp sits the branches on the empirical heatmap ridge; a_weight is tuned to the
 # centre/outer split; K does NOT affect the SC structure (skeleton is K-independent).
@@ -61,7 +61,8 @@ FLY_LOCS = np.array([[5.0000,  0.0000],
 FLY = dict(locs=FLY_LOCS, r=0.5,
            a_warp=0.65*pi, b_warp=0.92*pi,    # a_warp 0.65pi (refit): first bifurcation
            a_weight=0.20*pi, b_weight=0.80*pi, #   pushed out to the empirical x
-           K=2.0, T=0.10,                      # K=2 (refit); K does not affect the skeleton
+           K=2.0, beta=30.0,                   # K=2 (refit); K does not affect the skeleton
+                                              # beta = N/T_old = 3/0.10
            xlim=(-0.3, 5.3), ylim=(-3.6, 3.6), godm_case='fly3')
 
 # Locust: 3 targets at radius 3, target radius 0.1. The EMPIRICAL locust3 separation
@@ -75,25 +76,28 @@ LOCUST_LOCS = np.array([[3.0,             0.0],
 LOCUST = dict(locs=LOCUST_LOCS, r=0.1,
               a_warp=0.50*pi, b_warp=0.90*pi,
               a_weight=0.10*pi, b_weight=0.80*pi,
-              K=6.0, T=0.10,
+              K=6.0, beta=30.0,               # beta = N/T_old = 3/0.10
               xlim=(-0.3, 3.3), ylim=(-2.4, 2.4), godm_case='locust3')
 
 # Fly two-target: GODM fly2 (60 deg separation, distance 5) -> two circle targets at
 # +-30 deg, radius 5 = (4.330, +-2.5), target radius 0.5. Mirrors two_target_fly_refine.py
 # (which imports the 3-target fly params verbatim -- same fly, same setup, two targets):
-# the SAME warp/weight/K/T as FLY, only the geometry differs. The model splits at x~2.2.
+# the SAME warp/weight/K as FLY, only the geometry differs -- and with it beta,
+# which reproduces the old N_targets/T coupling and so is 20 here against FLY's 30.
+# The model splits at x~2.2.
 _fa2 = pi/6.0                                   # 30 deg (half of the 60 deg separation)
 FLY2_LOCS = np.array([[5.0*np.cos(_fa2),  5.0*np.sin(_fa2)],
                       [5.0*np.cos(_fa2), -5.0*np.sin(_fa2)]])   # (4.330, +-2.5)
 FLY2 = dict(locs=FLY2_LOCS, r=0.5,
             a_warp=0.65*pi, b_warp=0.92*pi,
             a_weight=0.20*pi, b_weight=0.80*pi,
-            K=2.0, T=0.10,
+            K=2.0, beta=20.0,                 # beta = N/T_old = 2/0.10
             xlim=(-0.3, 4.8), ylim=(-3.0, 3.0), godm_case='fly2')
 
 # Locust two-target: GODM locust2 (45 deg separation, distance 2) -> two targets at
 # +-22.5 deg. Mirrors LOCUST exactly as FLY2 mirrors FLY: same distance 3 model frame
-# and the SAME warp/weight/K/T as LOCUST, only the separation differs (35->45 deg).
+# and the SAME warp/weight/K as LOCUST, only the separation differs (35->45 deg) --
+# and beta, which is 20 here against LOCUST's 30 for the same reason as FLY2.
 # CAVEAT: unlike fly2, locust2 has no walker-refine/findings validation -- these knobs
 # are ASSUMED (reused from locust3). The --branch-diagram pitchfork and the make_figure
 # arrival check are the validation hooks; re-tune a_warp if the split is not clean.
@@ -103,7 +107,7 @@ LOCUST2_LOCS = np.array([[3.0*np.cos(_la2/2),  3.0*np.sin(_la2/2)],
 LOCUST2 = dict(locs=LOCUST2_LOCS, r=0.1,
                a_warp=0.50*pi, b_warp=0.90*pi,
                a_weight=0.10*pi, b_weight=0.80*pi,
-               K=6.0, T=0.10,
+               K=6.0, beta=20.0,              # beta = N/T_old = 2/0.10
                xlim=(-0.3, 3.3), ylim=(-2.0, 2.0), godm_case='locust2')
 
 CASES = {'fly': FLY, 'fly2': FLY2, 'locust': LOCUST, 'locust2': LOCUST2}
@@ -115,7 +119,7 @@ def _build_model(cfg):
                                neural_angle_dist='lin_cutoff', angle_weight='lin_cutoff',
                                a_warp=cfg['a_warp'], b_warp=cfg['b_warp'],
                                a_weight=cfg['a_weight'], b_weight=cfg['b_weight'])
-    return model.NeuralBandModel(pm, T=cfg['T'], K=cfg['K'])
+    return model.NeuralBandModel(pm, beta=cfg['beta'], K=cfg['K'])
 
 
 def build_fly_model(r=0.5):

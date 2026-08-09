@@ -91,7 +91,10 @@ TARGET_R = 0.1
 # fixed across every case here -- only the WEIGHT changes, which is the whole
 # point of the warp/weight decouple.
 A_WARP, B_WARP = 0.50*pi, 0.90*pi
-K, T = 6.0, 0.10
+# BETA is the neural Boltzmann factor. This scene has 3 targets and the shipped
+# results were produced under the earlier per-target temperature T=0.10, whose
+# effective coupling was N_targets/T, so beta = 3/0.10 = 30 reproduces them.
+K, BETA = 6.0, 30.0
 
 XLIM, YLIM = (0.0, 3.4), (-2.4, 2.4)
 CRITERION = 'reduced'
@@ -120,7 +123,7 @@ def build_model(weight, a_weight, b_weight):
                                neural_angle_dist='lin_cutoff', angle_weight=weight,
                                a_warp=A_WARP, b_warp=B_WARP,
                                a_weight=a_weight, b_weight=b_weight)
-    return model.NeuralBandModel(pm, T=T, K=K)
+    return model.NeuralBandModel(pm, beta=BETA, K=K)
 
 
 # ------------------------------------------------------------------- cache --
@@ -156,7 +159,7 @@ def save_cache(stage, fingerprint, **arrays):
 
 def _base_fp():
     return dict(locs=TARGET_LOCS.tolist(), r=TARGET_R, a_warp=A_WARP,
-                b_warp=B_WARP, K=K, T=T, criterion=CRITERION,
+                b_warp=B_WARP, K=K, beta=BETA, criterion=CRITERION,
                 cases=[[c[0]] + [None if v is None else v for v in c[2:5]]
                        for c in CASES])
 

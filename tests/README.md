@@ -30,6 +30,12 @@ their own functions from a `__main__` block, so `python tests/<file>.py` works t
   non-Hopf regime, and the defaults.
 - [`test_trajectory_intersection.py`](test_trajectory_intersection.py) —
   `Targets.check_trajectory_intersection` and `_min_dist_segments` across circle/delta/capsule.
+- [`test_beta_coupling.py`](test_beta_coupling.py) — the neural Boltzmann factor
+  `NeuralBandModel.beta`: `dγ/dt` against an independent reference, the coupling being
+  independent of the target count (and of a target dropping out of view), agreement of
+  the analytic `_discrim_A` free-energy Hessian with the numerically-differenced fast
+  block (the only cross-check on that Hessian's β), and equivalence with the earlier
+  `N/T` coupling where every target is perceived.
 
 ### 2. Numerics-verification scripts (also pytest-discoverable)
 These run their checks at **module import** using `check_*`/`ok`/`raises` helpers that tally

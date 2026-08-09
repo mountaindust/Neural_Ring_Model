@@ -65,7 +65,7 @@ percep = model.PerceptionModel(
 )
 percep.k = 0.55           # vonmises concentration; broad front bias
 
-nbm = model.NeuralBandModel(percep)   # uses defaults T=0.2, K=1
+nbm = model.NeuralBandModel(percep)   # uses defaults β=10, K=1
 ```
 
 That's it for the model side — every result in this folder uses these

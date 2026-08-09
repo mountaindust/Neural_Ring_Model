@@ -37,7 +37,9 @@ def _blind_model():
                             neural_angle_dist='cutoff', a_warp=0.0, b_warp=np.pi,
                             angle_weight='cutoff', a_weight=0.0,
                             b_weight=np.pi/2)
-    return dm.NeuralBandModel(percep_model=pm, T=0.2, K=2)
+    # One target, so beta = 1/0.2 = 5 matches the old T=0.2 parameterization
+    # (whose effective coupling was N_targets/T).
+    return dm.NeuralBandModel(percep_model=pm, beta=5.0, K=2)
 
 
 def _identity_nbm(K=2):
@@ -47,7 +49,7 @@ def _identity_nbm(K=2):
     pm = dm.PerceptionModel(targets=targets, focal_loc=(0.0, 0.0),
                             focal_angle=0.0,
                             neural_angle_dist=None, angle_weight=None)
-    return dm.NeuralBandModel(percep_model=pm, T=0.2, K=K)
+    return dm.NeuralBandModel(percep_model=pm, beta=10.0, K=K)
 
 
 def _identity_iem(K=2):
@@ -199,8 +201,8 @@ def test_jacobian_invariance_under_K_doubling():
     pm_new = dm.PerceptionModel(targets=targets, focal_loc=(0.0, 0.0),
                                 neural_angle_dist='cutoff', a_warp=0.0,
                                 b_warp=np.pi, angle_weight='neural_angle_dist')
-    nbm_old = dm.NeuralBandModel(percep_model=pm_old, T=0.2, K=1)
-    nbm_new = dm.NeuralBandModel(percep_model=pm_new, T=0.2, K=2)
+    nbm_old = dm.NeuralBandModel(percep_model=pm_old, beta=10.0, K=1)
+    nbm_new = dm.NeuralBandModel(percep_model=pm_new, beta=10.0, K=2)
 
     checked = 0
     for fl in [(0.2, 0.0), (1.0, 0.5), (1.65, -0.8)]:
@@ -339,7 +341,7 @@ def _offaxis_model():
     pm = dm.PerceptionModel(targets=targets, focal_loc=(0.0, 0.0),
                             focal_angle=0.0, neural_angle_dist=None,
                             angle_weight=None)
-    return dm.NeuralBandModel(percep_model=pm, T=0.2, K=2)
+    return dm.NeuralBandModel(percep_model=pm, beta=10.0, K=2)
 
 
 def _one_step_loc(nbm, std, noise_exp, seed, start_angle, R_exp=1, dt=0.1, v=1):

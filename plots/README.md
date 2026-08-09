@@ -76,7 +76,7 @@ NR_MAX_TRACKS=200 python plots/fly_results.py 2    # overlay density (default 10
 Independent figure: a forking-streamline integration of the model's stable
 consensus-heading field (read from `NBM.sc_equilib`), overlaid on the empirical GODM
 heatmap (graceful fallback to target circles). K-independent, noise-free — it mirrors
-the refine scripts' deterministic knobs (geometry / warp / weight / T) only. Cases:
+the refine scripts' deterministic knobs (geometry / warp / weight / β) only. Cases:
 `fly`, `fly2`, `locust`, `locust2`.
 
 ```
@@ -109,7 +109,9 @@ FLYBIF_FAST=1 python plots/fly_bifurcation_plot.py   # coarse, fast layout check
 ## `fly_geom.py` — fly-geometry figures (3-target pair + 9-target ring)
 
 Two independent 300-dpi figures from the same foveal parameterization
-(`lin_cutoff` warp `a=0.25π, b=0.9π`, weight tied to the warp, `T=0.2`, `K=4.5`):
+(`lin_cutoff` warp `a=0.25π, b=0.9π`, weight tied to the warp, `K=4.5`, and the
+neural Boltzmann factor `β` set per case to reproduce the earlier `T=0.2`
+parameterization — `β=15` for the 3-target figure, `β=45` for the 9-target one):
 
 - **`fly_geom_3target_branch.png`** — the 3-target fly, two panels. *Left*: the
   stable-equilibrium-count map over (x, y) with 50 walker tracks overlaid.

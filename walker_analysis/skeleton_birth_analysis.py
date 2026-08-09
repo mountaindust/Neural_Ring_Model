@@ -53,7 +53,7 @@ def ninegon(radius=5.0, sep_deg=40.0):
 
 def make_model(locs, *, r=0.5, warp='lin_cutoff', weight='lin_cutoff',
                a_warp=0.47 * pi, b_warp=0.92 * pi,
-               a_weight=0.40 * pi, b_weight=0.80 * pi, T=0.2, K=2.0):
+               a_weight=0.40 * pi, b_weight=0.80 * pi, beta=None, K=2.0):
     targets = model.Targets(locs=np.asarray(locs, float), geom_name='circle', r=r)
     kw = dict(neural_angle_dist=warp, angle_weight=weight)
     # warp slots
@@ -71,7 +71,13 @@ def make_model(locs, *, r=0.5, warp='lin_cutoff', weight='lin_cutoff',
     elif weight == 'neural_angle_dist' or weight is None:
         pass
     pm = model.PerceptionModel(targets, (0, 0), 0, **kw)
-    return model.NeuralBandModel(pm, T=T, K=K)
+    # beta is the neural Boltzmann factor. The shipped results were produced
+    # under the earlier per-target temperature T=0.2, whose effective coupling
+    # was N_targets/T -- so the default depends on the scene (3 targets -> 15,
+    # 9 targets -> 45), not on a single shared constant.
+    if beta is None:
+        beta = len(targets.locs)/0.2
+    return model.NeuralBandModel(pm, beta=beta, K=K)
 
 
 # --------------------------------------------------------------------------- #

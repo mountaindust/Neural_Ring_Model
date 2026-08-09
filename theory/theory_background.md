@@ -24,7 +24,7 @@ neural population is summarized by an order parameter γ ∈ ℂ (a
 agree and whose phase encodes the agreed-on direction). The deterministic
 dynamics is
 
-$$\dot γ = \sum_j ρ_j e^{i \hat θ_j}\, σ(u_j(γ)) - γ, \qquad u_j(γ) = \tfrac{2k}{T}\, v̂_j \cdot γ,$$
+$$\dot γ = \sum_j ρ_j e^{i \hat θ_j}\, σ(u_j(γ)) - γ, \qquad u_j(γ) = 2β\, v̂_j \cdot γ,$$
 
 with `σ(u) = 1/(1+e^(−u))`, derived as the mean-field N → ∞ limit of
 Glauber dynamics on N Ising spins.
@@ -286,7 +286,7 @@ gives self-consistency equations that fix m_j.
 
 For our model: take Q to be N independent Bernoulli spins with
 within-group probabilities q_j = n_j/ρ_j. Compute ⟨H⟩_Q (gives the
-−kN R² term I used in section 5 of the derivation), compute S(Q) (gives
+−𝓔N R² term I used in section 5 of the derivation), compute S(Q) (gives
 the binomial entropy), minimize over {q_j} with γ held fixed.
 
 ### II.5 The math behind section 5 of the F̂ derivation
@@ -295,7 +295,13 @@ This is the calculation I did. Let me re-walk it more slowly.
 
 The Hamiltonian (from the user's writeup) is
 
-$$H = -\frac{k}{N}\sum_{j \neq l} σ_j σ_l \cos(\hat θ_{g(j)} - \hat θ_{g(l)})$$
+$$H = -\frac{\mathcal{E}}{N}\sum_{j \neq l} σ_j σ_l \cos(\hat θ_{g(j)} - \hat θ_{g(l)})$$
+
+The prefactor is a fixed energy scale $\mathcal{E}$, **not** the target
+count `k`. The `1/N` normalizes the energy per neuron; there is no
+physical reason for the per-neuron energy to also grow with how many
+targets happen to be in view. The Glauber temperature then enters only
+through $\beta = \mathcal{E}/(k_B\,\mathrm{temp})$.
 
 where the sum is over individual spin pairs (not groups), and g(j) is
 the group label of spin j.
@@ -321,16 +327,17 @@ Total entropy: `S = N · Σ_a ρ_a · [-q_a ln q_a − (1-q_a)ln(1-q_a)]`.
 
 So:
 
-$$F_{\text{mf}}/N = -k|γ|^2 + T \sum_a ρ_a [q_a \ln q_a + (1-q_a) \ln(1-q_a)].$$
+$$β\,F_{\text{mf}}/(N\mathcal{E}) = -β|γ|^2 + \sum_a ρ_a [q_a \ln q_a + (1-q_a) \ln(1-q_a)].$$
 
 To project onto γ: minimize over {q_a} with the constraint
 `Σ_a ρ_a q_a e^{iθ̂_a} = γ`. The Lagrangian has multipliers for the
 real and imaginary parts of the constraint. Setting derivatives to
-zero gives `q_a* = σ(u_a)` where `u_a = 2k v̂_a · γ/T` (as in the
+zero gives `q_a* = σ(u_a)` where `u_a = 2β v̂_a · γ` (as in the
 derivation), and the projected F is what comes out after substitution.
 
 The key algebraic miracle of section 5 was that, after the substitution
-and a small amount of identity manipulation, `2k · F̂(γ) = F_mf/N` at
+and a small amount of identity manipulation,
+`2β · F̂(γ) = β F_mf/(N𝓔)` at
 the constrained minimum, up to a constant. That's why the F̂ derived
 by gradient-flow integration in section 3 matches the F̂ derived by
 mean-field projection in section 5 — they're the same object via two
@@ -431,7 +438,7 @@ equation `∂_t P = ∇·(P∇V) + D ∇²P` for the stationary state.
 Equivalent: detailed balance with the Boltzmann form.)
 
 **For our project:** `dγ = -∇F̂(γ) dt + √(2D) dW` has stationary
-distribution `P_ss(γ) ∝ exp(-F̂(γ)/D)`. The choice `D = T/(2kN)` makes
+distribution `P_ss(γ) ∝ exp(-F̂(γ)/D)`. The choice `D = 1/(2βN)` makes
 this match the underlying spin model's γ-marginal in the large-N
 expansion — that's what section 7 of the derivation calibrates.
 
@@ -483,7 +490,7 @@ exponential).
 ### IV.4 The math behind section 7 of the F̂ derivation
 
 Section 7 says the γ-Langevin noise amplitude for matching the
-underlying spin model is `D = T/(2kN)`. Where does this come from?
+underlying spin model is `D = 1/(2βN)`. Where does this come from?
 
 Heuristic derivation. The spin model has fluctuations in n_j of order
 `√(N q_j(1-q_j)/N²) = √(q_j(1-q_j)/N)` per individual spin variance;
@@ -492,15 +499,15 @@ is `q_j(1-q_j) ρ_j / N`. Sums of such fluctuations across groups
 projected onto γ give variance of order `1/N`. Match this to the
 Langevin stationary variance `D` (from `P ∝ exp(-F̂/D)` and a Gaussian
 expansion around the minimum: variance = D / F̂''). Equating gives
-`D ~ T/(kN)` up to the geometric factor. The factor of 2 comes from
-the careful accounting of 2k vs k in the F̂ normalization.
+`D ~ 1/(βN)` up to the geometric factor. The factor of 2 comes from
+the careful accounting of 2β vs β in the F̂ normalization.
 
 A proper derivation goes through the system-size expansion of the
 master equation à la van Kampen — see *Stochastic Processes in Physics
 and Chemistry*, ch. 10. The upshot: in mean-field models, finite-N
 fluctuations give an effective Langevin description with
-`D ~ T/(N · constant)` where the constant depends on the normalization
-of the free energy. For us, the constant is `2k`.
+`D ~ 1/(β N · constant)` where the constant depends on the normalization
+of the free energy. For us, the constant is `2`.
 
 This will be checked numerically in Step 3 by histogramming γ
 trajectories in equilibrium and comparing to the predicted Gaussian
@@ -517,7 +524,7 @@ satisfies `V'(θ) = -f(θ)`. Kramers gives `τ ~ exp(ΔV/D_θ)`.
 
 **(b) γ-saddle escape at fixed θ.** γ leaves its current well in
 γ-space, escaping over a γ-saddle. Kramers gives `τ ~ exp(ΔF̂/D)`,
-where D = T/(2kN) (the γ-Langevin coefficient).
+where D = 1/(2βN) (the γ-Langevin coefficient).
 
 These are competing escape mechanisms. The total escape rate is
 approximately their sum, and the smaller barrier (larger rate)
@@ -583,7 +590,7 @@ current θ, then updates θ.
 
 A general relation: the noise amplitude in a Langevin equation is
 linked to the dissipation rate by the temperature. For our project,
-`D = T/(2kN)` is a special case. The general statement is that linear
+`D = 1/(2βN)` is a special case. The general statement is that linear
 response coefficients (how the system responds to small perturbations)
 and equilibrium fluctuations (how it spontaneously varies) are
 proportional, with constant of proportionality involving T. Gardiner

@@ -45,7 +45,10 @@ TARGET_LOCS = np.array([[4.33, 2.5], [4.33, -2.5]])
 TARGET_R = 0.5
 WARP, A_WARP, B_WARP = 'cutoff', 0.0, np.pi
 CRITERION = 'coupled'
-K, T = 2.0, 0.2
+# BETA is the neural Boltzmann factor. This scene has 2 targets and the
+# write-up's run used the earlier per-target temperature T=0.2, whose effective
+# coupling was N_targets/T, so beta = 2/0.2 = 10 reproduces those numbers.
+K, BETA = 2.0, 10.0
 
 # The upper ear only (the lower is its mirror), at a resolution fine enough to
 # resolve the notch without a long run.
@@ -67,7 +70,7 @@ def build(tied, buggy):
     pm = cls(targets, (0, 0), 0, neural_angle_dist=WARP,
              angle_weight='neural_angle_dist' if tied else None,
              a_warp=A_WARP, b_warp=B_WARP)
-    return dm.NeuralBandModel(pm, T=T, K=K)
+    return dm.NeuralBandModel(pm, beta=BETA, K=K)
 
 
 _MODEL = None

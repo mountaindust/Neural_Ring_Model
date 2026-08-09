@@ -3,7 +3,7 @@
 **Date:** 2026-08-06 · **Script:** [outward_bias.py](outward_bias.py)
 · **Geometry:** empirical `locust3` (3 circle targets, `r=0.1`, distance 3,
 bearings {0°, ±35°}), shipped locust warp `lin_cutoff a_warp=0.50π, b_warp=0.90π`,
-`K=6, T=0.10`, `stability_criterion='reduced'`.
+`K=6, β=30`, `stability_criterion='reduced'`.
 
 ## The question
 

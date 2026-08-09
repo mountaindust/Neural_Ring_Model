@@ -56,10 +56,20 @@ OUT_3TARGET = os.path.join(HERE, 'fly_geom_3target_branch.png')
 OUT_9TARGET = os.path.join(HERE, 'fly_geom_9target.png')
 DPI = 300
 
-# Warp/weight/T shared by both cases (K only scales the turning rate, not the
+# Warp/weight shared by both cases (K only scales the turning rate, not the
 # SC structure). Foveal lin_cutoff warp with the weight tied to it.
 A_WARP, B_WARP = 0.25*np.pi, 0.9*np.pi
-T, K = 0.2, 4.5
+K = 4.5
+
+# Neural Boltzmann factor. The shipped figures were produced under the earlier
+# per-target temperature T=0.2, whose effective coupling was N_targets/T, so
+# beta = N/0.2 reproduces them -- and unlike T it differs between the two cases
+# here, which have different target counts.
+_T_LEGACY = 0.2
+
+
+def beta_for(target_locs):
+    return len(target_locs)/_T_LEGACY
 
 # The y=0 branch scan (scanned over exactly the plotted range).
 BRANCH_XLIM = (-1.0, 4.0)
@@ -84,7 +94,7 @@ def build_model(target_locs):
                                          neural_angle_dist='lin_cutoff',
                                          angle_weight='neural_angle_dist',
                                          a_warp=A_WARP, b_warp=B_WARP)
-    return model.NeuralBandModel(percep_model, T=T, K=K)
+    return model.NeuralBandModel(percep_model, beta=beta_for(target_locs), K=K)
 
 
 def mixed_suptitle(fig, main, note, *, main_fs=SUPTITLE_FS, note_fs=NOTE_FS,

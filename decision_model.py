@@ -2405,27 +2405,34 @@ class NeuralBandModel:
     Relies on get_neural_signals from the PerceptionModel to obtain 
     neural angles and relative neural group size.'''
 
-    def __init__(self, percep_model=None, T=0.2, K=2):
+    def __init__(self, percep_model=None, beta=10, K=2):
         '''From a PerceptionModel with its Targets object, establishes a model
         for chosing direction based on discrete Ising. Relies on get_neural_signals
-        from the PerceptionModel to obtain neural angles and relative neural 
+        from the PerceptionModel to obtain neural angles and relative neural
         group size.
-        
+
         Parameters
         ----------
         percep_model : PerceptionModel
-            A PerceptionModel object (with its Targets object) that establishes 
-            the geometry of the scenario. If none is provided, a default one 
-            will be created. The PerceptionModel can be updated to obtain 
+            A PerceptionModel object (with its Targets object) that establishes
+            the geometry of the scenario. If none is provided, a default one
+            will be created. The PerceptionModel can be updated to obtain
             consensus directions for different layouts or focal locations/angles.
-        T : float
-            Temperature for the neural ring representing amount of noise in the system.
+        beta : float
+            Inverse neural temperature: the Boltzmann factor
+            beta = E/(k_B*temp) of the Glauber dynamics, where E is the energy
+            scale of the Ising Hamiltonian, k_B is the Boltzmann constant, and
+            temp is the temperature in Kelvin. It sets how sharply the neural
+            ring commits to the consensus direction: large beta is cold (low
+            noise, sharp commitment), small beta is hot (diffuse). Because it
+            is a property of the neural ring and not of the scene, it does not
+            scale with the number of targets. Default 10.
         K : float
             Coupling strength for Kuramoto turning speed. Used in models of
             walkers only. Default of 2 in order to match sine argument of ego/2.
         '''
 
-        self.T = T
+        self.beta = beta
         self.K = K
 
         if percep_model is None:
@@ -2498,8 +2505,8 @@ class NeuralBandModel:
         #   trying out a bad R value.
         with np.errstate(over='ignore'):
             summands = rho*np.exp(1j*neur_angles)/(1+np.exp(
-                -2*neur_angles.size*R*np.cos(neur_angles-Theta)/self.T))
-        
+                -2*self.beta*R*np.cos(neur_angles-Theta)))
+
         return np.sum(summands) - gamma
 
 
@@ -3100,17 +3107,16 @@ class NeuralBandModel:
         Theta = np.angle(gamma_star)
         R = np.abs(gamma_star)
         neur_angles, rho = self.percep_model.get_neural_signals(focal_angle, focal_loc)
-        k = rho.size
         with np.errstate(over='ignore'):
-            # w_j = (k/2T) rho_j sech^2(k R cos(Theta - theta_j)/T) >= 0 is the
-            # per-target weight in the Cartesian free-energy Hessian
+            # w_j = (beta/2) rho_j sech^2(beta R cos(Theta - theta_j)) >= 0 is
+            # the per-target weight in the Cartesian free-energy Hessian
             # H_Fhat = I - sum_j w_j vhat_j vhat_j^T (gradient flow: fast
             # block A_block = -H_Fhat). Work in the frame rotated to gamma so
             # x = radial (R), y = tangential (arg gamma); det is rotation-
             # invariant. cc/ss are cos/sin of the target angle relative to
             # the consensus.
-            w = (k/(2*self.T)*rho
-                 / np.cosh(k*R*np.cos(Theta-neur_angles)/self.T)**2)
+            w = (self.beta/2*rho
+                 / np.cosh(self.beta*R*np.cos(Theta-neur_angles))**2)
             cc = np.cos(Theta - neur_angles)
             ss = np.sin(Theta - neur_angles)
             A = np.sum(w*ss**2)            # transverse: 1 - H_tt (the old scalar)
@@ -4352,7 +4358,11 @@ class IsingExtModel:
             will be created. The PerceptionModel can be updated to obtain 
             consensus directions for different layouts or focal locations/angles.
         T : float
-            Temperature for Ising model
+            Temperature for Ising model. Note that IEM's coupling carries a
+            factor of the number of visible targets (see `dgamma_dt`), so its
+            effective Boltzmann factor is N/T. This is NOT the same quantity as
+            `NeuralBandModel.beta`, which is a scene-independent E/(k_B*temp);
+            the two coincide only when N targets are visible and beta = N/T.
         K : float
             Coupling strength for Kuramoto turning speed. Default 2 to match
             the near-heading gain of the half-angle torque law

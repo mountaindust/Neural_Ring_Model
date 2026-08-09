@@ -192,7 +192,7 @@ with open(report_path, 'w') as fh:
     fh.write(f"Investigating {len(pts)} representative points\n")
     fh.write(f"  geometry: 2 circle targets r=0.5 at (4.33, +-2.5)\n")
     fh.write(f"  perception: vonmises k=0.55, integral neural-angle\n")
-    fh.write(f"  NBM defaults: T={nbm.T}, K={nbm.K}\n\n")
+    fh.write(f"  NBM defaults: beta={nbm.beta}, K={nbm.K}\n\n")
     for (label, (x, y), expected) in pts:
         focal_loc = np.array([x, y])
         theta, im, eqs = independent_root_sweep(focal_loc)

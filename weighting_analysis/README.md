@@ -625,7 +625,7 @@ is in the conversation transcript that produced this section.
   decision about removing the weighting.
 - **Walker SDE dynamics, basin sizes, noise-induced switching.** All the
   long-time integrations above are deterministic. With noise (the
-  walker's T term), the Hopf-unstable focus + stable focus pair may show
+  walker's `std` term), the Hopf-unstable focus + stable focus pair may show
   noise-driven switching between near-orbiting and settled states; this
   has not been characterized.
 - **Capsule targets.** Likely lie between deltas and circles depending on

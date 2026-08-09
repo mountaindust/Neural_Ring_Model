@@ -64,7 +64,7 @@ saddle-nodes (with some near-fold solver jitter, visible in the diagram).
 
 The *mechanism* of this separation — the center is a **pitchfork** (re-stabilizes
 once the outer targets swing past neural ±90° broadside) while the outer is an
-**Ising saddle-node** (a marginal single-target commitment, fragile to T / weight /
+**Ising saddle-node** (a marginal single-target commitment, fragile to β / weight /
 separation) — is worked out in [birth_mechanism.md](../walker_analysis/birth_mechanism.md)
 (parameter sweeps, kernels, the 9-gon ring; figure
 [birth_mechanism.png](../walker_analysis/birth_mechanism.png)), via

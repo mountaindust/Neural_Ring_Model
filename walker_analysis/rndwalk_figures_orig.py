@@ -44,7 +44,10 @@ def make_model(locs, geom, K, r=None):
                             focal_angle=0.0,
                             neural_angle_dist='cutoff', a_warp=0.0, b_warp=np.pi,
                             angle_weight=None)
-    return dm.NeuralBandModel(percep_model=pm, T=0.2, K=K)
+    # BETA is the neural Boltzmann factor. These figures were produced under the
+    # earlier per-target temperature T=0.2, whose effective coupling was
+    # N_targets/T -- so beta depends on the scene: 10 for TWO, 20 for FOUR.
+    return dm.NeuralBandModel(percep_model=pm, beta=len(locs)/0.2, K=K)
 
 
 def figure(locs, geom, K, fname, title, *, r=None, max_steps=1500,

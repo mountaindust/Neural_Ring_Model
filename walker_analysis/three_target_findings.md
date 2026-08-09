@@ -50,7 +50,7 @@ branch) as it advances.
 
 **At ~80 walkers** this was pinned on the perception weight `angle_weight` (a narrower
 foveal window releasing more walkers outward; uniform weight the most centre-biased),
-with std / start-heading / T appearing to barely move it.
+with std / start-heading / β appearing to barely move it.
 
 **The high-realization refit (N≥1000) corrected this for the fly** — see
 [three_target_fly_refine_findings.md](../plots/three_target_fly_refine_findings.md):
@@ -126,7 +126,7 @@ degrading the tracks. Final measured splits (80 walkers):
 | targets | 40°, dist 5, r=0.5 | 35°, dist 3, r=0.1 |
 | `a_warp` / `b_warp` | **0.65π** / 0.92π | 0.40π / 0.90π |
 | `a_weight` / `b_weight` | **0.20π** / 0.80π | **0.10π** / 0.80π |
-| K, T | **2.0**, 0.10 | 6.0, 0.10 |
+| K, β | **2.0**, 30 | 6.0, 30 |
 | noise_exp, R_exp | 2, 3 | 2, 3 |
 | std, v, dt | **4.0**, 0.30, 0.05 | 3.0, 0.20, 0.04 |
 

@@ -70,7 +70,10 @@ NUM_X, NUM_Y = 37, 43
 REFINEMENT = 2
 MAX_COUNT = 3
 CRITERION = 'reduced'
-K, T = 2.0, 0.2
+# BETA is the neural Boltzmann factor. This scene has 2 targets and the shipped
+# figures were produced under the earlier per-target temperature T=0.2, whose
+# effective coupling was N_targets/T, so beta = 2/0.2 = 10 reproduces them.
+K, BETA = 2.0, 10.0
 
 # The ear region: to the RIGHT of the target line, where a close-but-off-axis
 # target would otherwise dominate a far-target commitment by visual extent.
@@ -99,7 +102,7 @@ def build(warp, a_warp, b_warp, tied):
         neural_angle_dist=warp,
         angle_weight='neural_angle_dist' if tied else None,
         a_warp=a_warp, b_warp=b_warp)
-    return model.NeuralBandModel(pm, T=T, K=K)
+    return model.NeuralBandModel(pm, beta=BETA, K=K)
 
 
 # ------------------------------------------------------------------ cache ---
@@ -179,7 +182,7 @@ def _row_fp(warp, a_w, b_w, tied):
     return dict(locs=TARGET_LOCS.tolist(), r=TARGET_R, xlim=list(XLIM),
                 ylim=list(YLIM), num_x=NUM_X, num_y=NUM_Y,
                 refinement=REFINEMENT, max_count=MAX_COUNT,
-                criterion=CRITERION, K=K, T=T,
+                criterion=CRITERION, K=K, beta=BETA,
                 warp=warp, a_warp=a_w, b_warp=b_w, tied=bool(tied))
 
 
@@ -259,7 +262,7 @@ def figure_sweep(full, unif):
         'The far-target "ear": the one structural difference between FULL '
         'weighting and uniform weight\n'
         f'NBM, two circle targets at (4.33, $\\pm$2.5), r={TARGET_R}; '
-        f"stability_criterion='{CRITERION}'; K={K:g}, T={T}; "
+        f"stability_criterion='{CRITERION}'; K={K:g}, $\\beta$={BETA:g}; "
         f'grid {NUM_X}x{NUM_Y} + {REFINEMENT} refinement passes',
         fontsize=13, y=0.995)
     fig.tight_layout(rect=[0.015, 0, 1, 0.975])

@@ -56,25 +56,25 @@ The γ-flow is **exact gradient descent** of a closed-form Lyapunov function,
 `dγ/dt = −∇F̂(γ; θ, focal_loc)`, with
 
 ```
-F̂(γ) = ½|γ|² − (T/2k) Σⱼ ρⱼ ln(1 + e^{uⱼ(γ)}),   uⱼ(γ) = (2k/T) v̂ⱼ·γ.
+F̂(γ) = ½|γ|² − (1/2β) Σⱼ ρⱼ ln(1 + e^{uⱼ(γ)}),   uⱼ(γ) = 2β v̂ⱼ·γ.
 ```
 
 F̂ is **Hamiltonian / Glauber-derived**, hence *independent of dθ/dt*. Two
-independent routes (gradient-flow integration; mean-field projection `2k·F̂ =
-F_mf` per spin at the constrained minimum) give the same object. Full
+independent routes (gradient-flow integration; mean-field projection
+`2β·F̂ = β·F_mf` per spin at the constrained minimum) give the same object. Full
 derivation + numerical validation: [free_energy_derivation.md](free_energy_derivation.md).
 
 Adding physical γ-noise gives the **γ-Langevin SDE**
 
 ```
-dγ = −∇F̂(γ) dt + √(2D) dW,    D = T/(2kN),
+dγ = −∇F̂(γ) dt + √(2D) dW,    D = 1/(2βN),
 ```
 
 with stationary distribution `P_ss(γ) ∝ exp(−F̂(γ)/D)` (Boltzmann with
 effective temperature D). Near a γ-minimum the cloud is Gaussian with
-covariance `Σ = D·H⁻¹` (H the F̂-Hessian). `D = T/(2kN)` is a finite-size
+covariance `Σ = D·H⁻¹` (H the F̂-Hessian). `D = 1/(2βN)` is a finite-size
 (1/N) correction — verified by the empirical γ-variance scaling as 1/N
-(~2% rel. err.) — vanishing as N→∞ (deterministic mean field). The 2k arises
+(~2% rel. err.) — vanishing as N→∞ (deterministic mean field). The 2β arises
 from the F̂ normalization; rigorous route is van Kampen's system-size
 expansion ([theory_background.md](theory_background.md) §IV.4).
 
@@ -288,9 +288,9 @@ own first-passage treatment (a repelling fork, not a Kramers barrier);
 ## 11. Open / deferred questions
 
 - **Headline gap — is θ-noise a faithful proxy for γ-noise?** The walker uses
-  θ-noise (`std`); the physical noise is γ-side (Glauber T, 1/N). Whether the
-  `std ↔ T·g(geometry)` mapping is roughly constant across the (x,y) plane
-  (so existing `std` results back-translate to an effective N and T) is
+  θ-noise (`std`); the physical noise is γ-side (Glauber β, 1/N). Whether the
+  `std ↔ g(geometry)/β` mapping is roughly constant across the (x,y) plane
+  (so existing `std` results back-translate to an effective N and β) is
   **deferred** and dθ/dt-dependent. Only meaningful in multistable cells.
 - **Committed-walker (history-dependent) decision basins** — the full
   both-sides-at-both-stables recompute via slaved-flow bisection. The
@@ -355,7 +355,8 @@ escape-rate.
 ## Calibration setups & cost
 
 - **VM-k055** (primary): vonmises warp `k=0.55`, two **circle** targets at
-  (4.33, ±2.5); `T=0.2`, `k=2`, `N=1000` ⇒ `D≈5e-5` in the γ-Langevin tests.
+  (4.33, ±2.5); `β=10` (two targets at the earlier `T=0.2`), `N=1000`
+  ⇒ `D≈5e-5` in the γ-Langevin tests.
 - **BlindSpot** (discontinuity stress test): tight cutoff weight `b=π/2`, used
   to exhibit perception-collapse zones.
 - **Cost:** ~4.2 min parallel (32 cores) for a 41×41 grid with basins, vs ~21 s
@@ -367,7 +368,7 @@ escape-rate.
 ## Further reading
 
 - [free_energy_derivation.md](free_energy_derivation.md) — F̂(γ) closed form,
-  gradient-flow proof, mean-field cross-check, D = T/(2kN) calibration.
+  gradient-flow proof, mean-field cross-check, D = 1/(2βN) calibration.
 - [theory_background.md](theory_background.md) — Lyapunov functions, free
   energy, Langevin & Kramers, for a reader new to statistical mechanics.
 - [.claude/rules/torque-and-stability.md](../.claude/rules/torque-and-stability.md)

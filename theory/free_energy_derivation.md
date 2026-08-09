@@ -16,8 +16,9 @@ analytical gradient matches finite differences (~1e-8) and equals
 dγ/dt; ∇F̂≈0 at γ-equilibria; the Hessian matches the full-block
 stability criteria (`_discrim_reduced`/`_discrim_coupled` — but see
 §6.1 for why the scalar `A < 1` alone is necessary-not-sufficient); and
-`2k·F̂` equals the mean-field free energy per spin. The
-barrier height ΔF_γ and the noise calibration `D=T/(2kN)` built on this
+`2β·F̂` equals the mean-field free energy per spin (measured in units of
+`k_B·temp`). The barrier height ΔF_γ and the noise calibration
+`D=1/(2βN)` built on this
 are summarized in [basins_of_attraction.md](basins_of_attraction.md).
 
 **Convention pinned in planning session:** F̂ is a real function on
@@ -28,17 +29,20 @@ $$\dot γ_x = -\partial_{γ_x} F̂(γ), \qquad \dot γ_y = -\partial_{γ_y} F̂(
 
 ## 1. Notation (matching the writeup and the code)
 
-- `k` = number of visible targets (`neur_angles.size` in the code).
+- `k` = number of visible targets (`neur_angles.size` in the code). It
+  indexes the sum only — it does **not** set the coupling strength.
 - `N` = total number of spins. Drops out in the large-N limit but
-  resurfaces as the γ-noise amplitude `D=T/(2kN)` (§7).
+  resurfaces as the γ-noise amplitude `D=1/(2βN)` (§7).
 - `ρⱼ` = relative group size, normalized by `Σⱼ ρⱼ = 1` (matches
   `PerceptionModel._get_target_signals`'s `rho`).
 - `θ̂ⱼ` = neural angle of target j (egocentric angle through the
   warping; `neural_angles` in the code).
 - `v̂ⱼ = (cos θ̂ⱼ, sin θ̂ⱼ)` = unit vector at neural angle θ̂ⱼ.
 - `γ = (γ_x, γ_y) ∈ ℝ²` ≡ `γ_x + i γ_y ∈ ℂ`. R = |γ|, Θ̂ = arg(γ).
-- `T` = Ising temperature (`self.T` in the code).
-- Define `uⱼ(γ) := 2k · v̂ⱼ · γ / T = 2k(γ_x cos θ̂ⱼ + γ_y sin θ̂ⱼ)/T`.
+- `β` = neural Boltzmann factor `β = 𝓔/(k_B·temp)` (`self.beta` in the
+  code), with `𝓔` the energy scale of the Hamiltonian. Energies below are
+  measured in units of `𝓔`, so the temperature is `1/β`.
+- Define `uⱼ(γ) := 2β · v̂ⱼ · γ = 2β(γ_x cos θ̂ⱼ + γ_y sin θ̂ⱼ)`.
   Sigmoid σ(u) := 1/(1+e^(−u)).
 
 The γ-ODE from the user's writeup (with the missing sum restored):
@@ -59,11 +63,11 @@ implicitly.
 If `Φ` has a symmetric Jacobian, then `-(Φ − γ)` is a gradient of some
 scalar field.
 
-$$\partial_{γ_y} Φ_x = \sum_j ρⱼ \cos θ̂ⱼ \cdot σ'(uⱼ) \cdot \tfrac{2k \sin θ̂ⱼ}{T}
-                    = \frac{2k}{T}\sum_j ρⱼ\, \sin θ̂ⱼ \cos θ̂ⱼ\, σ(uⱼ)(1-σ(uⱼ)).$$
+$$\partial_{γ_y} Φ_x = \sum_j ρⱼ \cos θ̂ⱼ \cdot σ'(uⱼ) \cdot 2β \sin θ̂ⱼ
+                    = 2β\sum_j ρⱼ\, \sin θ̂ⱼ \cos θ̂ⱼ\, σ(uⱼ)(1-σ(uⱼ)).$$
 
-$$\partial_{γ_x} Φ_y = \sum_j ρⱼ \sin θ̂ⱼ \cdot σ'(uⱼ) \cdot \tfrac{2k \cos θ̂ⱼ}{T}
-                    = \frac{2k}{T}\sum_j ρⱼ\, \sin θ̂ⱼ \cos θ̂ⱼ\, σ(uⱼ)(1-σ(uⱼ)).$$
+$$\partial_{γ_x} Φ_y = \sum_j ρⱼ \sin θ̂ⱼ \cdot σ'(uⱼ) \cdot 2β \cos θ̂ⱼ
+                    = 2β\sum_j ρⱼ\, \sin θ̂ⱼ \cos θ̂ⱼ\, σ(uⱼ)(1-σ(uⱼ)).$$
 
 Equal — so `Φ` is curl-free, and `dγ/dt = -∇F̂(γ)` for some F̂.
 
@@ -77,17 +81,17 @@ The `γ_x` piece integrates to `½ γ_x²`. For `Φ_x`, change variables in
 the integral over `γ_x`:
 
 $$\int \frac{ρⱼ \cos θ̂ⱼ}{1+e^{-uⱼ(γ)}} dγ_x
-   = ρⱼ \cos θ̂ⱼ \cdot \frac{T}{2k\cos θ̂ⱼ} \cdot \ln(1+e^{uⱼ})
-   = \frac{T ρⱼ}{2k} \ln(1+e^{uⱼ(γ)}).$$
+   = ρⱼ \cos θ̂ⱼ \cdot \frac{1}{2β\cos θ̂ⱼ} \cdot \ln(1+e^{uⱼ})
+   = \frac{ρⱼ}{2β} \ln(1+e^{uⱼ(γ)}).$$
 
 Repeating for the `γ_y` partial gives the same antiderivative
 (consistency follows from step 2). The candidate F̂:
 
-$$\boxed{\;F̂(γ) \;=\; \tfrac{1}{2}|γ|^2 \;-\; \frac{T}{2k}\sum_{j=1}^k ρⱼ\, \ln\!\bigl(1 + e^{uⱼ(γ)}\bigr), \qquad uⱼ(γ) = \tfrac{2k}{T}\, v̂ⱼ\cdot γ\;}$$
+$$\boxed{\;F̂(γ) \;=\; \tfrac{1}{2}|γ|^2 \;-\; \frac{1}{2β}\sum_{j=1}^k ρⱼ\, \ln\!\bigl(1 + e^{uⱼ(γ)}\bigr), \qquad uⱼ(γ) = 2β\, v̂ⱼ\cdot γ\;}$$
 
 **Verification:**
 
-$$\partial_{γ_x} F̂ = γ_x - \frac{T}{2k}\sum_j ρⱼ \cdot \frac{e^{uⱼ}}{1+e^{uⱼ}} \cdot \frac{2k \cos θ̂ⱼ}{T}
+$$\partial_{γ_x} F̂ = γ_x - \frac{1}{2β}\sum_j ρⱼ \cdot \frac{e^{uⱼ}}{1+e^{uⱼ}} \cdot 2β \cos θ̂ⱼ
                   = γ_x - \sum_j ρⱼ \cos θ̂ⱼ\, σ(uⱼ)
                   = γ_x - Φ_x. \quad\checkmark$$
 
@@ -98,7 +102,7 @@ deterministic γ-flow.
 
 Using `ln(1+e^u) = ln(2 cosh(u/2)) + u/2`:
 
-$$F̂(γ) = \tfrac{1}{2}|γ|^2 - \frac{T}{2k}\sum_j ρⱼ \ln\!\bigl(2\cosh(uⱼ/2)\bigr) - \tfrac{1}{2}\,μ \cdot γ$$
+$$F̂(γ) = \tfrac{1}{2}|γ|^2 - \frac{1}{2β}\sum_j ρⱼ \ln\!\bigl(2\cosh(uⱼ/2)\bigr) - \tfrac{1}{2}\,μ \cdot γ$$
 
 where `μ := Σⱼ ρⱼ v̂ⱼ` is the perceptual centroid. The two forms differ
 by `-½ μ·γ + const`, which is a linear (gauge) shift — same F̂ up to
@@ -107,15 +111,18 @@ constant, but the log-cosh form is more symmetric and matches the
 **log-(1+exp)** form everywhere in code because it's the direct
 antiderivative.
 
-## 5. Cross-check against mean-field free energy F = ⟨H⟩ − T·S
+## 5. Cross-check against mean-field free energy F = ⟨H⟩ − (1/β)·S
+
+Energies are in units of `𝓔`, so the temperature is `1/β` and the
+equations below are the old energy-unit ones divided by `k_B·temp`.
 
 Independent route (validation of section 3, not used downstream).
 
 Mean-field ⟨H⟩ at fixed `{nⱼ}` with the large-N rewriting from the
-writeup (dropping the `k·Σ nⱼ` term that's `O(N⁰)` vs. the leading
+writeup (dropping the `𝓔·Σ nⱼ` term that's `O(N⁰)` vs. the leading
 `O(N¹)` term):
 
-$$⟨H⟩/N \approx -k\, R^2 = -k|γ|^2.$$
+$$⟨H⟩/(N𝓔) \approx -R^2 = -|γ|^2.$$
 
 Entropy of independent Bernoulli spins with within-group probabilities
 `qⱼ = nⱼ/ρⱼ`:
@@ -125,34 +132,36 @@ $$S/N = -\sum_j ρⱼ\bigl[ qⱼ \ln qⱼ + (1-qⱼ)\ln(1-qⱼ)\bigr].$$
 Constrained minimum over `{nⱼ}` at fixed γ gives
 `qⱼ*(γ) = σ(uⱼ(γ))`. Substituting back:
 
-$$(F_{\text{mf}})_{\text{per spin}}\big|_{n_j^*(γ)} \;=\; -k|γ|^2 \;-\; T\sum_j ρⱼ \ln(1+e^{-uⱼ}) \;-\; T\!\sum_j ρⱼ(1-qⱼ^*) uⱼ.$$
+$$β\,(F_{\text{mf}})_{\text{per spin}}\big|_{n_j^*(γ)} \;=\; -β|γ|^2 \;-\; \sum_j ρⱼ \ln(1+e^{-uⱼ}) \;-\; \sum_j ρⱼ(1-qⱼ^*) uⱼ.$$
 
-The last term: `T(1-qⱼ*)uⱼ = T·(1-σ(uⱼ))·uⱼ`. Using
+The last term: `(1-qⱼ*)uⱼ = (1-σ(uⱼ))·uⱼ`. Using
 `Σⱼ (ρⱼ - nⱼ*) v̂ⱼ · γ = μ·γ - |γ|²` (since `Σⱼ nⱼ* v̂ⱼ = γ` at the
 constrained minimum):
 
-$$T\sum_j ρⱼ(1-qⱼ^*) uⱼ = 2k(μ·γ - |γ|^2).$$
+$$\sum_j ρⱼ(1-qⱼ^*) uⱼ = 2β(μ·γ - |γ|^2).$$
 
 So:
 
-$$(F_{\text{mf}})_{\text{per spin}}\big|_{n_j^*} = k|γ|^2 - 2k μ·γ - T\sum_j ρⱼ \ln(1+e^{-uⱼ}).$$
+$$β\,(F_{\text{mf}})_{\text{per spin}}\big|_{n_j^*} = β|γ|^2 - 2β μ·γ - \sum_j ρⱼ \ln(1+e^{-uⱼ}).$$
 
-Compare to `2k · F̂(γ)` using the log-(1+exp) → log-(1+exp(−u)) − u
+Compare to `2β · F̂(γ)` using the log-(1+exp) → log-(1+exp(−u)) − u
 identity `ln(1+eᵘ) = ln(1+e^(−u)) + u`:
 
-$$2k\, F̂(γ) = k|γ|^2 - T\sum_j ρⱼ[\ln(1+e^{-uⱼ}) + uⱼ]
-            = k|γ|^2 - T\sum_j ρⱼ \ln(1+e^{-uⱼ}) - 2k μ·γ.$$
+$$2β\, F̂(γ) = β|γ|^2 - \sum_j ρⱼ[\ln(1+e^{-uⱼ}) + uⱼ]
+            = β|γ|^2 - \sum_j ρⱼ \ln(1+e^{-uⱼ}) - 2β μ·γ.$$
 
 Equal. ✓
 
-So `F̂(γ) = (F_mf per spin at constrained minimum) / (2k)`, up to an
-additive constant. The `1/(2k)` is normalization that makes
-`dγ/dt = -∇F̂` exact; the physical free energy per spin is `2k · F̂`.
+So `F̂(γ) = (F_mf per spin at constrained minimum) / (2𝓔)`, up to an
+additive constant. The `1/(2𝓔)` is normalization that makes
+`dγ/dt = -∇F̂` exact; the free energy per spin in units of `k_B·temp` is
+`2β · F̂`.
 
-This also makes contact with the user's identity `R² ≈ -H/(kN)` from
-the writeup: at the constrained minimum and large N, the
-energy-per-spin part of `2k · F̂` is `k|γ|² = k R²`, matching `-H/N` =
-`k R²` from the writeup's eqn after the line "as N gets large".
+This also makes contact with the writeup's identity, which with the `k`
+prefactor dropped from the Hamiltonian in favour of the energy scale `𝓔`
+reads `R² ≈ -H/(𝓔N)`: at the constrained minimum and large N, the
+energy-per-spin part of `2 · F̂` (in units of `𝓔`) is `|γ|² = R²`,
+matching `-H/(N𝓔) = R²`.
 
 ## 6. Gradient and Hessian (used for ΔF_γ and the stability checks)
 
@@ -162,7 +171,7 @@ $$\nabla F̂(γ) = γ - \sum_j ρⱼ\, σ(uⱼ(γ))\, v̂ⱼ.$$
 
 Hessian:
 
-$$H_{F̂}(γ) = I_2 - \frac{2k}{T}\sum_j ρⱼ\, σ(uⱼ)(1-σ(uⱼ))\, v̂ⱼ v̂ⱼ^T.$$
+$$H_{F̂}(γ) = I_2 - 2β\sum_j ρⱼ\, σ(uⱼ)(1-σ(uⱼ))\, v̂ⱼ v̂ⱼ^T.$$
 
 At any γ-equilibrium γ* (where `∇F̂(γ*) = 0`), the eigenvalues of
 `H_{F̂}(γ*)` classify stability:
@@ -172,10 +181,10 @@ At any γ-equilibrium γ* (where `∇F̂(γ*) = 0`), the eigenvalues of
   a γ-repeller).
 
 Note the connection to the writeup's stability scalar
-`A = (k/(2T))·Σⱼ ρⱼ sech²(k γ⃗·v̂ⱼ/T)·(v̂ⱼ·n̂*)²`:
-using `σ(u)(1-σ(u)) = ¼ sech²(u/2)` and `u/2 = k γ⃗·v̂ⱼ/T`,
+`A = (β/2)·Σⱼ ρⱼ sech²(β γ⃗·v̂ⱼ)·(v̂ⱼ·n̂*)²`:
+using `σ(u)(1-σ(u)) = ¼ sech²(u/2)` and `u/2 = β γ⃗·v̂ⱼ`,
 
-$$(H_{F̂})_{nn} = 1 - \frac{2k}{T}\sum_j ρⱼ \cdot \tfrac{1}{4}\operatorname{sech}^2(k γ⃗·v̂ⱼ/T) \cdot (v̂ⱼ·n̂^*)^2
+$$(H_{F̂})_{nn} = 1 - 2β\sum_j ρⱼ \cdot \tfrac{1}{4}\operatorname{sech}^2(β γ⃗·v̂ⱼ) \cdot (v̂ⱼ·n̂^*)^2
               = 1 - A.$$
 
 So the writeup's `A < 1` criterion is exactly the statement that the
@@ -201,7 +210,7 @@ conditions a symmetric 2×2 Hessian must satisfy to be positive definite.
 **The Hessian is the fast γ-block.** At a self-consistent equilibrium
 γ = R + 0j (so Θ̂ = arg γ = 0), the x-axis is radial (the R direction)
 and the y-axis is tangential (the arg γ / n̂* direction). Writing
-`w_k := (k/2T)·ρ_k·sech²(k R cos θ̂_k / T) ≥ 0`, the Cartesian Hessian is
+`w_k := (β/2)·ρ_k·sech²(β R cos θ̂_k) ≥ 0`, the Cartesian Hessian is
 
 $$H_{F̂}(R{+}0j) = \begin{bmatrix} 1 - \sum_k w_k \cos^2 θ̂_k & -\sum_k w_k \cos θ̂_k \sin θ̂_k \\[2pt] -\sum_k w_k \cos θ̂_k \sin θ̂_k & 1 - \sum_k w_k \sin^2 θ̂_k \end{bmatrix} \equiv \begin{bmatrix} H_{xx} & H_{xy} \\ H_{xy} & H_{yy} \end{bmatrix}.$$
 
@@ -250,7 +259,8 @@ was indefinite:
    `R < 0.01` filter.
 2. *Committed-R determinant flip* (R ≈ 0.31–0.48): **both** diagonals
    positive but `det H_{F̂} < 0` — a genuine γ-saddle whose unstable
-   mode is a tilted R–Θ blend. Witness (power warp c=0.5, T=0.5,
+   mode is a tilted R–Θ blend. Witness (power warp c=0.5, β=4 — the
+   two-target equivalent of the T=0.5 this was found at,
    focal_loc=(0.30, 0.71), θ=−0.607, R=0.338):
    `H_xx=+0.730, H_yy=+0.009 (A=0.991<1), H_xy=+0.321, det=−0.097`,
    eigenvalues `{−0.114, +0.853}`, unstable eigenvector 69° off the
@@ -284,19 +294,19 @@ $$P(γ) \propto \exp\!\bigl(-F̂(γ)/D\bigr).$$
 To match the underlying spin model (large-N expansion of binomial
 fluctuations in {nⱼ}, projected onto γ), we want:
 
-$$P(γ) \propto \exp\!\bigl(-N \cdot 2k\, F̂(γ)/T\bigr) \quad \Rightarrow \quad
-  D = \frac{T}{2kN}.$$
+$$P(γ) \propto \exp\!\bigl(-2βN\, F̂(γ)\bigr) \quad \Rightarrow \quad
+  D = \frac{1}{2βN}.$$
 
 So:
 
-$$\boxed{\;D_\gamma = \frac{T}{2 k N}\;}$$
+$$\boxed{\;D_\gamma = \frac{1}{2 β N}\;}$$
 
 `N` is the effective spin count, a tunable parameter; in the `N → ∞`
 limit, `D → 0` and γ-dynamics is deterministic (recovering the
 mean-field model). For Monte Carlo vetting a moderate `N` was picked so
 that escape events occur on a tractable timescale.
 
-The derivation of `D = T/(2kN)` from the binomial fluctuations is
+The derivation of `D = 1/(2βN)` from the binomial fluctuations is
 standard mean-field stat mech (van Kampen system-size expansion; see
 [theory_background.md](theory_background.md) §IV.4). It was confirmed
 numerically by the stationary-distribution and 1/N-scaling tests
@@ -334,9 +344,9 @@ above. No new perception code needed.
    `A < 1` scalar only where the R–Θ off-diagonal is ≈0 (mirror-symmetric
    / on-axis configs, which this spot-check happened to sample); `A < 1`
    is necessary but not sufficient in general.
-4. The identity `2k·F̂(γ) = (F_mf per spin at constrained minimum) +
+4. The identity `2β·F̂(γ) = β·(F_mf per spin at constrained minimum) +
    const` from section 5 holds numerically.
 
 With these passed, F̂ is trusted for ΔF_γ evaluation and for calibrating
-γ-Langevin noise via the `D_γ = T/(2kN)` relation — both summarized in
+γ-Langevin noise via the `D_γ = 1/(2βN)` relation — both summarized in
 [basins_of_attraction.md](basins_of_attraction.md).

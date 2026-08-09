@@ -58,6 +58,10 @@ def main():
     target_R = float(d['target_R'])
     n_targets = len(target_locs)
     f = lambda k: float(d[k])
+    # Neural Boltzmann factor. Caches written by an earlier revision of the refine
+    # scripts stored the per-target temperature T instead, whose effective coupling
+    # was n_targets/T -- convert so those caches still render.
+    beta = f('beta') if 'beta' in d.files else n_targets/f('T')
     pi = np.pi
     out = os.path.join(HERE, 'fly_results_%dtarget.png' % n_targets)
 
@@ -92,12 +96,12 @@ def main():
     ax.set_aspect('equal')                          # true aspect, no distortion
     ax.set_xlabel('x'); ax.set_ylabel('y')
 
-    params = (r'$K$=%.1f  $T$=%.2f  $\sigma$=%.1f  $v$=%.2f  $dt$=%.2f' '\n'
+    params = (r'$K$=%.1f  $\beta$=%.4g  $\sigma$=%.1f  $v$=%.2f  $dt$=%.2f' '\n'
               r'warp $(a,b)$=(%.2f, %.2f)$\pi$   weight $(a,b)$=(%.2f, %.2f)$\pi$'
               '\n'
               r'$q$(noise_exp)=%g  $p$(R_exp)=%g   start jitter '
               r'$\sigma_{pos}$=%.3f  $\sigma_{head}$=%.0f$\degree$'
-              % (f('K'), f('T'), f('std'), f('v'), f('dt'),
+              % (f('K'), beta, f('std'), f('v'), f('dt'),
                  f('a_warp')/pi, f('b_warp')/pi, f('a_weight')/pi, f('b_weight')/pi,
                  f('noise_exp'), f('R_exp'),
                  f('start_pos_std'), np.degrees(f('start_head_std'))))

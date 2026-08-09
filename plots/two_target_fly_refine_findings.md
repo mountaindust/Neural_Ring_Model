@@ -20,7 +20,7 @@ That same early-peeling was visible in the 3-target outer branches too, and refi
 [three_target_fly_refine_findings.md](three_target_fly_refine_findings.md)) fixes both
 cases with a *single shared* parameterization — no 2-target-specific tuning.
 
-**2500 realizations, shared refit params** (K=2.0, T=0.10, σ=4.0, warp 0.65π/0.92π,
+**2500 realizations, shared refit params** (K=2.0, β=20, σ=4.0, warp 0.65π/0.92π,
 weight 0.20π/0.80π, q=2/p=3, v=0.30, dt=0.05, start jitter 0.075/12°):
 
 | config | split | corr(all) | corr(support) |

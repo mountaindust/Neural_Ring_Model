@@ -39,7 +39,11 @@ percep_model = model.PerceptionModel(targets, focal_loc, focal_angle,
                                      angle_weight='neural_angle_dist',
                                      a_warp=0.2, b_warp=0.8*np.pi)
 
-neur_model = model.NeuralBandModel(percep_model)
+# beta is the neural Boltzmann factor. This scene has 3 targets and the notebook
+# result was produced under the earlier per-target temperature T=0.2, whose
+# effective coupling was N_targets/T, so beta = 3/0.2 = 15 reproduces it (the
+# model default of 10 corresponds to two targets).
+neur_model = model.NeuralBandModel(percep_model, beta=15.0)
 neur_model.rng = np.random.default_rng(seed = 3)
 
 neur_model.K = 4.5 # Coupling strength for physical turning

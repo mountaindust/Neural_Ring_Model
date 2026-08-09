@@ -28,9 +28,16 @@ import walker_analysis.godm_heatmaps as gh
 # Shared parameterization -- identical to the 3-target case by import, not by copy.
 # (Sibling module in this same plots/ directory.)
 from three_target_fly_refine import (
-    K, T, NOISE_EXP, R_EXP, STD, V, DT, A_WARP, B_WARP, A_WEIGHT, B_WEIGHT,
+    K, NOISE_EXP, R_EXP, STD, V, DT, A_WARP, B_WARP, A_WEIGHT, B_WEIGHT,
     TARGET_TOL, MAX_STEPS, SEED, START_POS_STD, START_HEAD_STD, N_TIME, WIN_FRAC,
     similarity)
+
+# BETA is the one parameter NOT shared with the 3-target case. It is the neural
+# Boltzmann factor; the shipped results were produced under the earlier
+# per-target temperature T=0.10, whose effective coupling was N_targets/T, so
+# this two-target scene needs beta = 2/0.10 = 20 where the 3-target sibling
+# needs 30.
+BETA = 20.0
 
 pi = np.pi
 
@@ -61,7 +68,7 @@ def build_model():
                                neural_angle_dist='lin_cutoff', angle_weight='lin_cutoff',
                                a_warp=A_WARP, b_warp=B_WARP,
                                a_weight=A_WEIGHT, b_weight=B_WEIGHT)
-    return model.NeuralBandModel(pm, T=T, K=K)
+    return model.NeuralBandModel(pm, beta=BETA, K=K)
 
 
 def run_walkers(nm, pool=None, reps=REPETITIONS, std=STD, v=V,
@@ -139,7 +146,7 @@ def main():
              ref_img=ref_img, extent=np.array(EXTENT, float),
              corr_all=corr_all, corr_support=corr_sup, split=counts,
              reps=REPETITIONS, seed=SEED,
-             K=K, T=T, std=STD, v=V, dt=DT,
+             K=K, beta=BETA, std=STD, v=V, dt=DT,
              a_warp=A_WARP, b_warp=B_WARP, a_weight=A_WEIGHT, b_weight=B_WEIGHT,
              noise_exp=NOISE_EXP, R_exp=R_EXP, target_tol=TARGET_TOL,
              start_pos_std=START_POS_STD, start_head_std=START_HEAD_STD,
@@ -165,9 +172,9 @@ def main():
     for a in ax:
         a.set_xlabel('x'); a.set_ylabel('y')
     fig.suptitle('Fly two-target: walker substructure vs GODM  '
-                 '(K=%.1f, T=%.2f, a_warp=%.2fπ, a_weight=%.2fπ, σ=%.1f, '
+                 '(K=%.1f, β=%.4g, a_warp=%.2fπ, a_weight=%.2fπ, σ=%.1f, '
                  'start jitter pos=%.3f head=%.0f°)'
-                 % (K, T, A_WARP/pi, A_WEIGHT/pi, STD, START_POS_STD,
+                 % (K, BETA, A_WARP/pi, A_WEIGHT/pi, STD, START_POS_STD,
                     np.degrees(START_HEAD_STD)), y=1.03)
     fig.tight_layout()
     out = os.path.join(here, 'two_target_fly_refine.png')

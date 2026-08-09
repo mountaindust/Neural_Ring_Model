@@ -42,7 +42,12 @@ A_WARP, B_WARP = 0.40*pi, 0.90*pi      # a_warp near original: branches sit on t
 A_WEIGHT, B_WEIGHT = 0.10*pi, 0.80*pi  # narrow foveal weight: pushes walkers toward the
 #   outer targets (the data is outer-biased, ~29% centre). NOTE: the model cannot fully
 #   reach the locust's clean-yet-outer-biased split -- see three_target_findings.md.
-K, T = 6.0, 0.10                       # locusts turn fast -> high K; low T for cleanliness
+K = 6.0                                # locusts turn fast -> high K
+# BETA is the neural Boltzmann factor -- high beta (cold) for cleanliness. This
+# scene has 3 targets and the shipped figure was produced under the earlier
+# per-target temperature T=0.10, whose effective coupling was N_targets/T, so
+# beta = 3/0.10 = 30 reproduces it.
+BETA = 30.0
 NOISE_EXP, R_EXP = 2.0, 3.0
 STD, V, DT = 3.0, 0.20, 0.04           # std raised modestly (clean trident); higher std
 #   reduces centre bias further but muddies the tracks -- this config favours cleanliness.
@@ -58,7 +63,7 @@ def build_model():
                                neural_angle_dist='lin_cutoff', angle_weight='lin_cutoff',
                                a_warp=A_WARP, b_warp=B_WARP,
                                a_weight=A_WEIGHT, b_weight=B_WEIGHT)
-    return model.NeuralBandModel(pm, T=T, K=K)
+    return model.NeuralBandModel(pm, beta=BETA, K=K)
 
 
 def run_walkers(nm, pool=None, std=STD, v=V):
@@ -99,7 +104,8 @@ def main():
         ax[0].plot(w[0], w[1], 'k', alpha=0.45, lw=0.8)
     nm.percep_model.targets.plot_targets_to_axis(ax[0])
     ax[0].set_xlim(*XLIM); ax[0].set_ylim(*YLIM); ax[0].set_aspect('equal')
-    ax[0].set_title('locust tracks  (K=%.1f, T=%.2f, a_warp=%.2fpi)' % (K, T, A_WARP/pi))
+    ax[0].set_title('locust tracks  (K=%.1f, beta=%.4g, a_warp=%.2fpi)'
+                    % (K, BETA, A_WARP/pi))
     img, extent = density(walks)
     ax[1].imshow(img, extent=extent, origin='lower', aspect='equal')
     ax[1].set_title('locust walker density (cf. godm_heatmap_locust3.png)')
