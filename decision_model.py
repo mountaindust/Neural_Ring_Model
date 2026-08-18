@@ -4,6 +4,7 @@ it wants to go based on static targets with certain geometry
 '''
 
 import warnings
+from contextlib import contextmanager
 
 import numpy as np
 from scipy.integrate import solve_ivp, quad
@@ -589,6 +590,12 @@ class PerceptionModel:
     Following mathematics conventions, egocentric angles increase counterclockwise;
     e.g., positive egocentric angles are to the left of the observer and 
     negative egocentric angles are to the right.'''
+
+    # Memo installed by the signal_cache() context manager; None means
+    # "no caching" (the normal state). A class attribute rather than an
+    # instance one so objects unpickled from before this existed still read
+    # None instead of raising.
+    _signal_cache = None
 
     def __init__(self, targets=None, focal_loc=(5,10), focal_angle=0,
                  neural_angle_dist='lin_cutoff', angle_weight=None,
@@ -2360,6 +2367,41 @@ class PerceptionModel:
         plt.show()
 
 
+    @contextmanager
+    def signal_cache(self):
+        '''Memoize get_neural_signals on (focal_angle, focal_loc) within a block.
+
+        The perception signals are a pure function of the observer state
+        (heading, location) and the perception geometry, so a root finder that
+        evaluates the model repeatedly at states it has already visited pays
+        for identical interval arithmetic and spline evaluations again and
+        again. Inside this context manager each distinct state is computed once
+        and reused; outside it (the default) nothing is cached, and no caller
+        that does not opt in is affected.
+
+        The cache lives only for the duration of the block, so it cannot go
+        stale against a later warp/weight/target change. Nesting is safe: an
+        inner block reuses the cache an outer block already installed. The
+        cached arrays are shared between callers, so treat them as read-only.
+
+        The key is the *exact* float state, deliberately not a tolerance: the
+        Jacobians probe theta +- h (h = 1e-6 in _coupled_jacobian, 1e-7 in
+        _self_consistent_jac), and a key that merged those probes with the base
+        point would hand back the same signals for all three. Since perception
+        is the ONLY theta dependence in dgamma_dt, that would zero the theta
+        column of the coupled Jacobian, making det(J) = 0 and reporting every
+        equilibrium unstable.
+        '''
+        if self.__dict__.get('_signal_cache') is not None:
+            yield                      # an enclosing block already owns one
+            return
+        self._signal_cache = {}
+        try:
+            yield
+        finally:
+            del self._signal_cache     # falls back to the class attribute None
+
+
     def get_neural_signals(self, focal_angle=None, focal_loc=None):
         '''Returns the neural angles and neural group sizes for each target based 
         on the perceived angles and the neural position transformation function. 
@@ -2381,6 +2423,11 @@ class PerceptionModel:
             neural angles corresponding to visible targets
         rho : length N ndarray
             normalized neural group size for each visible target
+
+        See Also
+        --------
+        signal_cache : context manager that memoizes this call on the observer
+            state, for solvers that revisit the same states many times.
         '''
 
         if focal_angle is None:
@@ -2388,13 +2435,26 @@ class PerceptionModel:
         if focal_loc is None:
             focal_loc = self.focal_loc
 
+        # Inside a signal_cache() block, hand back the arrays already computed
+        # for this exact observer state (see signal_cache for the exact-key
+        # requirement).
+        cache = self._signal_cache
+        if cache is not None:
+            key = (float(focal_angle), float(focal_loc[0]), float(focal_loc[1]))
+            cached = cache.get(key)
+            if cached is not None:
+                return cached
+
         angles, rho = self._get_target_signals(focal_angle=focal_angle,
                                               focal_loc=focal_loc)
         if angles.size == 0:
-            return angles, rho
-        neural_angles = self.get_neural_angle(angles)
+            signals = (angles, rho)
+        else:
+            signals = (self.get_neural_angle(angles), rho)
 
-        return neural_angles, rho
+        if cache is not None:
+            cache[key] = signals
+        return signals
 
 
 
@@ -2475,6 +2535,10 @@ class NeuralBandModel:
         focal_loc : array-like of length 2, optional
             (x,y) location of the observer. If None, use the 
             self.percep_model.focal_loc.
+        signals : tuple of (neural_angles, rho), optional
+            Precomputed neural angles and normalized group sizes for each 
+            visible target (for when the heading is held fixed across evaluations).
+            If None, compute them from the perception model.
 
         Returns
         -------
@@ -2487,10 +2551,6 @@ class NeuralBandModel:
         Theta = np.angle(gamma)
         R = np.abs(gamma)
 
-        # ``signals`` lets a caller pass precomputed (neural_angles, rho)
-        # when the heading is held fixed across many evaluations (an ODE
-        # solve / root find at constant focal_angle), avoiding a redundant
-        # perception recompute per call. When None, fetch as usual.
         if signals is None:
             neur_angles, rho = self.percep_model.get_neural_signals(
                 focal_angle, focal_loc)
@@ -2663,22 +2723,27 @@ class NeuralBandModel:
         init_angles = np.linspace(-np.pi, np.pi-0.01)
         final_gammas = []
         stability = []
-        for angle in init_angles:
-            init_gamma = np.array([0.5*np.cos(angle), 0.5*np.sin(angle)])
-            sol = root(self.dgamma_dt_vec, init_gamma,
-                       args=(focal_angle, focal_loc),
-                       method='hybr', tol=1e-7)
-            if sol.success:
-                gamma_eq = sol.x[0] + 1j*sol.x[1]
-                close_check = False
-                for existing_gamma in final_gammas:
-                    if np.abs(gamma_eq - existing_gamma) < 0.01:
-                        close_check = True
-                        break
-                if not close_check:
-                    final_gammas.append(gamma_eq)
-                    stability.append(stability_test(
-                        gamma_eq, focal_angle, focal_loc))
+        # The heading is held fixed here, so every dgamma_dt evaluation in the
+        # whole multistart -- all 50 hybr solves -- shares one perception
+        # state; only the stability test steps off it (theta +- h). Memoizing
+        # the signals collapses ~1400 identical recomputations to one.
+        with self.percep_model.signal_cache():
+            for angle in init_angles:
+                init_gamma = np.array([0.5*np.cos(angle), 0.5*np.sin(angle)])
+                sol = root(self.dgamma_dt_vec, init_gamma,
+                           args=(focal_angle, focal_loc),
+                           method='hybr', tol=1e-7)
+                if sol.success:
+                    gamma_eq = sol.x[0] + 1j*sol.x[1]
+                    close_check = False
+                    for existing_gamma in final_gammas:
+                        if np.abs(gamma_eq - existing_gamma) < 0.01:
+                            close_check = True
+                            break
+                    if not close_check:
+                        final_gammas.append(gamma_eq)
+                        stability.append(stability_test(
+                            gamma_eq, focal_angle, focal_loc))
         return final_gammas, stability
 
 
@@ -2750,97 +2815,107 @@ class NeuralBandModel:
                 f"stability_criterion must be 'reduced', 'coupled', or "
                 f"'discrim_a', got {stability_criterion!r}")
 
-        theta_mesh = np.linspace(-np.pi, np.pi, 100)
-        final_angles = []
-        stability = []
+        # theta is a solve variable here, not a constant, so the signals
+        # cannot be hoisted -- but the same headings recur constantly: each
+        # scan node is evaluated at all three probe radii, the hybr polish
+        # revisits its iterates, and the residual check and stability test
+        # land back on the converged theta. Memoizing on the exact state
+        # removes those repeats (~60-70% of the perception calls) without
+        # changing what is computed.
+        with self.percep_model.signal_cache():
+            theta_mesh = np.linspace(-np.pi, np.pi, 100)
+            final_angles = []
+            stability = []
 
-        # Collect candidate theta seeds from sign changes in Im(dgamma_dt),
-        # scanning at SEVERAL probe radii. A single probe (formerly R=0.5)
-        # only "sees" equilibria whose R sits near it: near a saddle-node a
-        # stable/unstable pair can sit at R~0.6 and produce NO Im sign-change
-        # at R=0.5, so its stable member was silently dropped -- undercounting
-        # the diagram and leaving a spurious no-commit ("grey") basin where the
-        # slaved flow in fact commits to that attractor. Pooling seeds over
-        # probe radii catches these; every seed is still hybr-polished,
-        # residual-verified and deduped below, so extra probes can only surface
-        # genuine equilibria, never spurious ones. Each seed carries the probe
-        # R it was found at so the polish starts near the right coherence.
-        candidates = []   # (theta_seed, R_seed)
-        for R_probe in (0.3, 0.5, 0.7):
-            imag_vals = np.array([self.dgamma_dt(
-                gamma=R_probe+0j, focal_angle=t,
-                focal_loc=focal_loc).imag for t in theta_mesh])
-            for i in range(len(imag_vals)-1):
-                if imag_vals[i]*imag_vals[i+1] < 0:
-                    try:
-                        theta_c = brentq(
-                            lambda t: self.dgamma_dt(
-                                gamma=R_probe+0j, focal_angle=t,
-                                focal_loc=focal_loc).imag,
-                            theta_mesh[i], theta_mesh[i+1])
-                        candidates.append((theta_c, R_probe))
-                    except ValueError:
-                        pass
-        # Always include theta=0 and theta=+-pi as candidates since
-        # Im(dgamma_dt) is often zero there by symmetry but the sign
-        # change can be narrower than the mesh spacing.
-        for theta_extra in [0.0, np.pi, -np.pi]:
-            candidates.append((theta_extra, 0.5))
+            # Collect candidate theta seeds from sign changes in Im(dgamma_dt),
+            # scanning at SEVERAL probe radii. A single probe (formerly R=0.5)
+            # only "sees" equilibria whose R sits near it: near a saddle-node a
+            # stable/unstable pair can sit at R~0.6 and produce NO Im
+            # sign-change at R=0.5, so its stable member was silently dropped
+            # -- undercounting the diagram and leaving a spurious no-commit
+            # ("grey") basin where the slaved flow in fact commits to that
+            # attractor. Pooling seeds over probe radii catches these; every
+            # seed is still hybr-polished, residual-verified and deduped below,
+            # so extra probes can only surface genuine equilibria, never
+            # spurious ones. Each seed carries the probe R it was found at so
+            # the polish starts near the right coherence.
+            candidates = []   # (theta_seed, R_seed)
+            for R_probe in (0.3, 0.5, 0.7):
+                imag_vals = np.array([self.dgamma_dt(
+                    gamma=R_probe+0j, focal_angle=t,
+                    focal_loc=focal_loc).imag for t in theta_mesh])
+                for i in range(len(imag_vals)-1):
+                    if imag_vals[i]*imag_vals[i+1] < 0:
+                        try:
+                            theta_c = brentq(
+                                lambda t: self.dgamma_dt(
+                                    gamma=R_probe+0j, focal_angle=t,
+                                    focal_loc=focal_loc).imag,
+                                theta_mesh[i], theta_mesh[i+1])
+                            candidates.append((theta_c, R_probe))
+                        except ValueError:
+                            pass
+            # Always include theta=0 and theta=+-pi as candidates since
+            # Im(dgamma_dt) is often zero there by symmetry but the sign
+            # change can be narrower than the mesh spacing.
+            for theta_extra in [0.0, np.pi, -np.pi]:
+                candidates.append((theta_extra, 0.5))
 
-        # Polish each candidate with the 2D root finder
-        final_Rs = []
-        for theta_c, R_seed in candidates:
-            sol = root(self._self_consistent_eq, [theta_c, R_seed],
-                       args=(focal_loc,), method='hybr', tol=1e-10,
-                       jac=self._self_consistent_jac)
-            if not sol.success:
-                continue
-            theta_eq = convert_angles(sol.x[0])
-            R_eq = sol.x[1]
+            # Polish each candidate with the 2D root finder
+            final_Rs = []
+            for theta_c, R_seed in candidates:
+                sol = root(self._self_consistent_eq, [theta_c, R_seed],
+                           args=(focal_loc,), method='hybr', tol=1e-10,
+                           jac=self._self_consistent_jac)
+                if not sol.success:
+                    continue
+                theta_eq = convert_angles(sol.x[0])
+                R_eq = sol.x[1]
 
-            if R_eq < 0.01 or R_eq > 1.0:
-                continue
+                if R_eq < 0.01 or R_eq > 1.0:
+                    continue
 
-            # Verify residual is small
-            residual = self.dgamma_dt(gamma=R_eq+0j,
-                                      focal_angle=theta_eq,
-                                      focal_loc=focal_loc)
-            if np.abs(residual) > 1e-4:
-                continue
+                # Verify residual is small
+                residual = self.dgamma_dt(gamma=R_eq+0j,
+                                          focal_angle=theta_eq,
+                                          focal_loc=focal_loc)
+                if np.abs(residual) > 1e-4:
+                    continue
 
-            # Dedup by both theta and R: near a saddle-node bifurcation
-            # two genuine equilibria can share a theta to within the
-            # angular tolerance while differing in R, so theta alone is
-            # not enough to distinguish them.
-            close_idx = None
-            for j, (existing_angle, existing_R) in enumerate(
-                    zip(final_angles, final_Rs)):
-                angle_diff = np.abs(convert_angles(
-                    theta_eq - existing_angle))
-                R_diff = np.abs(R_eq - existing_R)
-                if angle_diff < 0.02 and R_diff < 0.01:
-                    close_idx = j
-                    break
-            gamma_eq = R_eq + 0j
-            if close_idx is None:
-                final_angles.append(theta_eq)
-                final_Rs.append(R_eq)
-                stability.append(stability_test(
-                    gamma_eq, theta_eq, focal_loc))
-            elif not stability[close_idx]:
-                # The first-kept member of this near-coincident pair is
-                # UNSTABLE. Near a saddle-node a stable and an unstable
-                # equilibrium can collide to within the (angle, R) dedup
-                # tolerance even with the full (theta, R) test; which member
-                # is found first depends on the brentq candidate order, which
-                # REVERSES under the y-mirror, so keeping "the first" makes the
-                # survivor's stability -- and the stable count -- flip between
-                # (x, y) and (x, -y). Prefer the STABLE member (a mirror-
-                # invariant choice) so the count stays correct and y-symmetric.
-                if stability_test(gamma_eq, theta_eq, focal_loc):
-                    final_angles[close_idx] = theta_eq
-                    final_Rs[close_idx] = R_eq
-                    stability[close_idx] = True
+                # Dedup by both theta and R: near a saddle-node bifurcation
+                # two genuine equilibria can share a theta to within the
+                # angular tolerance while differing in R, so theta alone is
+                # not enough to distinguish them.
+                close_idx = None
+                for j, (existing_angle, existing_R) in enumerate(
+                        zip(final_angles, final_Rs)):
+                    angle_diff = np.abs(convert_angles(
+                        theta_eq - existing_angle))
+                    R_diff = np.abs(R_eq - existing_R)
+                    if angle_diff < 0.02 and R_diff < 0.01:
+                        close_idx = j
+                        break
+                gamma_eq = R_eq + 0j
+                if close_idx is None:
+                    final_angles.append(theta_eq)
+                    final_Rs.append(R_eq)
+                    stability.append(stability_test(
+                        gamma_eq, theta_eq, focal_loc))
+                elif not stability[close_idx]:
+                    # The first-kept member of this near-coincident pair is
+                    # UNSTABLE. Near a saddle-node a stable and an unstable
+                    # equilibrium can collide to within the (angle, R) dedup
+                    # tolerance even with the full (theta, R) test; which
+                    # member is found first depends on the brentq candidate
+                    # order, which REVERSES under the y-mirror, so keeping "the
+                    # first" makes the survivor's stability -- and the stable
+                    # count -- flip between (x, y) and (x, -y). Prefer the
+                    # STABLE member (a mirror-invariant choice) so the count
+                    # stays correct and y-symmetric.
+                    if stability_test(gamma_eq, theta_eq, focal_loc):
+                        final_angles[close_idx] = theta_eq
+                        final_Rs[close_idx] = R_eq
+                        stability[close_idx] = True
 
         if return_R:
             return final_angles, final_Rs, stability

@@ -30,6 +30,11 @@ their own functions from a `__main__` block, so `python tests/<file>.py` works t
   non-Hopf regime, and the defaults.
 - [`test_trajectory_intersection.py`](test_trajectory_intersection.py) —
   `Targets.check_trajectory_intersection` and `_min_dist_segments` across circle/delta/capsule.
+- [`test_signal_cache.py`](test_signal_cache.py) — `PerceptionModel.signal_cache`, the
+  perception memo used by `NBM.sc_equilib`/`gamma_equilib`: cache-hit contents and lifetime
+  (dropped on exit/exception, nesting), the exact-key requirement (the Jacobians' θ±h probes
+  must not collide with the base state), and bit-identical solver output with the memo
+  disabled across setups × all three stability criteria.
 - [`test_beta_coupling.py`](test_beta_coupling.py) — the neural Boltzmann factor
   `NeuralBandModel.beta`: `dγ/dt` against an independent reference, the coupling being
   independent of the target count (and of a target dropping out of view), agreement of

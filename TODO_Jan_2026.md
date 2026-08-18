@@ -2,18 +2,6 @@
 
 ## Dynamical systems and numerical analysis related stuff
 
-- Discontinuties lurk in $d\theta/dt$ equation related to targets being in the 
-blind spot and disappearing/reappearing. This normally is associated with 
-unstable equilibria, but needs to be mathematically considered more carefully. 
-Maybe a mollifier?
-
-  *(2026-08 clarification: this is about the **genuine** blind spot — a weight
-  whose support ends before the rear, e.g. `b_weight < π`, really does make
-  targets wink out. Do not confuse it with the separate **wrapping-extent bug**
-  fixed 2026-08-04, in which the closest target vanished from perception while
-  straddling the rear branch cut even under full-support/uniform weight. That
-  one was an interval-arithmetic error, not a modeling discontinuity; see
-  CLAUDE.md "Common gotchas".)*
 - [AJB] Related: the ODEs have some stiff behavior. One has only to look at the root 
 finding situation for $d\gamma/dt$ to see an example of this. It's horribly 
 unstable. The mathematics of this need to be explored and handled.
@@ -31,18 +19,6 @@ leverage the fact that you are probably close to an equilibrium already to
 speed things up. There's lots of nice analysis that can be done here, and if we 
 are going to scale up to 100s of individuals, we are going to need to work out 
 these wrinkles.
-
-- From the point of view of dynamical systems analysis, the addition of signal 
-strengths related to the precieved size of targets with positive area is wholly 
-unexplored. And it's clearly different than the delta function target case. 
-What are the geometries involved? What happens if you add a third target? Do you 
-recover that infinite bifurcation chain which is broken when you change $\nu$ 
-away from 1?
-
-- Related to THAT: the published results assume that locusts turn infinitely 
-fast to face the consensus direction. Now that we have a physical model of 
-turning, the best-fit value for $\nu$ is probably different, and we may have an 
-even better match to the experimental data.
 
 ## Modeling related thoughts
 
