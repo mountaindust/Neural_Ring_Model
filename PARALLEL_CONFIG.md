@@ -69,10 +69,6 @@ without editing files, set `NR_N_WORKERS` in the shell.
 | [weighting_analysis/ears_figure.py](weighting_analysis/ears_figure.py) | `N_WORKERS = get_n_workers()` |
 | [weighting_analysis/outward_bias.py](weighting_analysis/outward_bias.py) | `N_WORKERS = get_n_workers()` |
 | [tests/test_broad_validation.py](tests/test_broad_validation.py) | `with Pool(get_n_workers()) as pool:` |
-| [VM_bifurcation_old_dtheta/diagnostic_arc_skeleton.py](VM_bifurcation_old_dtheta/diagnostic_arc_skeleton.py) | `with Pool(get_n_workers()) as pool:` |
-| [VM_bifurcation_old_dtheta/diagnostic_arc_bifurcation.py](VM_bifurcation_old_dtheta/diagnostic_arc_bifurcation.py) | `with Pool(get_n_workers()) as pool:` |
-| [VM_bifurcation_old_dtheta/diagnostic_island_final.py](VM_bifurcation_old_dtheta/diagnostic_island_final.py) | `with Pool(get_n_workers()) as pool:` |
-| [VM_bifurcation_old_dtheta/diagnostic_recount_grid.py](VM_bifurcation_old_dtheta/diagnostic_recount_grid.py) | `with Pool(get_n_workers()) as pool:` |
 
 Note: [decision_model.py](decision_model.py) does **not** create its own
 pool; several of its methods accept a `pool=` keyword argument and the

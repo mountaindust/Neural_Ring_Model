@@ -5,11 +5,10 @@
 *.png
 *.jpg
 *.tif
-# NOTE the directory was renamed VM_bifurcations -> VM_bifurcation_old_dtheta;
-# the old negation silently stopped matching, so any NEW png added there was
-# being ignored (the ones committed before the rename stayed tracked, which is
-# why nothing looked wrong).
-!VM_bifurcation_old_dtheta/*.png
+# Figures are ignored by default; weighting_analysis/ is the one folder whose
+# PNGs are committed (its rasters take over an hour to rebuild). A negation
+# must name the CURRENT directory path -- an earlier one pointed at a folder
+# that had since been renamed and silently stopped matching.
 !weighting_analysis/*.png
 .~*
 *.swp

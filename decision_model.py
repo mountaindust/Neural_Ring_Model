@@ -1725,8 +1725,10 @@ class PerceptionModel:
         which compresses (c > 1) or expands (c < 1) angles near the front
         relative to those near the back. Fixed points at -pi, 0, and pi.
 
-        This mimics the transformation used in Sridhar et al. (2018) but
-        applied in the perception stage rather than only the decision stage.
+        This mimics the neural-tuning transformation of Sridhar et al.
+        (2021) -- their Eq. [2] applies the same power map to the angular
+        difference inside the coupling kernel -- but applied here in the
+        perception stage rather than only the decision stage.
 
         Parameters
         ----------
@@ -4447,10 +4449,16 @@ class IsingExtModel:
             dtheta/dt = K*|gamma|*sin((angle(gamma)-theta)/2); see
             NeuralBandModel.__init__.
         nu : float
-            Exponent for cosine weighting kernel in Sridhar et al. (2018). 
-            Higher values lead to sharper peaks. This should be 1 unless you are 
-            running a simulation to recover their results, in which case set it 
-            to 0.5 and use a flat neural weight in the PerceptionModel.
+            Neural tuning exponent of the cosine coupling kernel in Sridhar
+            et al. (2021), their Eq. [2]:
+            J(x) = cos(pi*(|x|/pi)**nu).
+            LOWER nu gives a SHARPER (more locally excitatory) peak: the
+            kernel's zero crossing sits at pi*(1/2)**(1/nu), i.e. 0.25*pi at
+            nu=0.5, 0.5*pi at nu=1, 0.707*pi at nu=2. Leave at 1 (the plain
+            cosine kernel) unless reproducing their results, in which case
+            set 0.5 and drive the model with an identity warp and uniform
+            weight (PerceptionModel(neural_angle_dist=None,
+            angle_weight=None)).
         '''
 
         self.T = T
