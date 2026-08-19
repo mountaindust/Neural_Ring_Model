@@ -588,9 +588,14 @@ scripts that were never committed (their parameterizations are recorded here so
 they can be rebuilt, but there is no runnable file):
 
 - `delta_sweep_comparison.png` was computed from scratch (no companion
-  scripts existed for delta targets); rasters are cached in
-  `_delta_rasters.npz` next to the PNG. Reproduction script in the
-  transcript.
+  scripts existed for delta targets); its rasters were cached in a
+  `_delta_rasters.npz` beside the PNG. **Nothing in the repository builds
+  that file, and it was never committed** — no script reads or writes the
+  name (note it does not even follow this folder's `_cache_*.npz`
+  convention), and `git log -S_delta_rasters` finds only this README. It
+  was a scratch cache on the machine that made the figure. So this raster
+  is not reproducible from anything here; regenerating it means writing a
+  fresh delta sweep.
 - `delta_diagnostic.png` runs the same three-panel mechanism layout as
   `ear_diagnostic.png` but for deltas at observer (0.76, 0) with
   vonMises `k=0.9`.
@@ -610,6 +615,3 @@ section above). So these rasters and threshold crossings are correct except in
 the handful of Hopf cells. The `ears_figure.py` circle sweep has been
 regenerated under the current defaults; these have not.
 
-The `_delta_rasters.npz` cache referenced above is **not present** in this
-folder, so `delta_sweep_comparison.png` cannot currently be rebuilt even from
-the recorded parameterization.

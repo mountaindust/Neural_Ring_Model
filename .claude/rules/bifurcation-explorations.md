@@ -1,7 +1,6 @@
 ---
 paths:
   - "VM_bifurcation_old_dtheta/**"
-  - "bifurc_plots/**"
   - "stale_coupled_model_starting_code/**"
 ---
 
@@ -11,7 +10,6 @@ Auto-loads under the exploratory parameter-sweep directories. Authoritative writ
 
 ## Script roles
 
-- **`bifurc_plots/`** — exploratory parameter-sweep scripts. `neural_weight_sweep.py` (full weighting) and `neural_weight_sweep_angle_only.py` (warping-only) are companions; `bifurcation_compare_discrim_vs_coupled.py` and `arc_skeleton_and_island_dynamics.py` are **stale** — both call the removed `'coupled'` criterion and will raise. Not publication-quality — settings are sized for fast iteration on a many-core machine. More function-space exploration is needed before any of these can be locked in for publication.
 - **`stale_coupled_model_starting_code/`** — **stale.** Scripts written against the removed `'coupled'` criterion; kept only as starting code for an eventual `(n⃗, θ)` population-level comparison. See its [README.md](../../stale_coupled_model_starting_code/README.md).
 - **`VM_bifurcation_old_dtheta/`** — diagnostic scripts + [VERDICT.md](../../VM_bifurcation_old_dtheta/VERDICT.md) for the saddle-node skeleton near (2.1, ±2.45) in the vonmises-k0.55 / two-target setup. **Old-law (`sin(ego)`) analysis.** Its Hopf/limit-cycle findings were retracted (see VERDICT.md).
 

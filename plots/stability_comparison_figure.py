@@ -71,8 +71,12 @@ LEGEND_FS = 11
 PANEL_FS = 24         # interior panel-letter labels (A-F)
 SUPTITLE_FS = 18
 
-CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
-                     'bifurc_plots',
+# Bifurcation raster for the top-row insets. This is the cache written by
+# plots/neural_weight_sweep.py under its DEFAULT config (WARP_FAMILY
+# 'lin_cutoff', WEIGHT None), so if it is missing, regenerate it with
+#     python plots/neural_weight_sweep.py
+# The npz is gitignored, so a fresh clone must run that once.
+CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                      '_cache_neural_weight_sweep_lin_cutoff_warp_uniform_weight.npz')
 OUT_BASE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         'stability_comparison')
@@ -157,6 +161,10 @@ def yvals(Theta, R, K, ymode):
 
 
 def load_bifurcation():
+    if not os.path.exists(CACHE):
+        raise SystemExit(
+            f"missing bifurcation cache for the insets:\n  {CACHE}\n"
+            "regenerate it with:  python plots/neural_weight_sweep.py")
     d = np.load(CACHE, allow_pickle=False)
     fp = json.loads(str(d['fingerprint_json']))
     return d['imgs'][0], fp

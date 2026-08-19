@@ -21,7 +21,7 @@ needed.
    a cluster job script:
    ```powershell
    $env:NR_N_WORKERS = "12"
-   python bifurc_plots/neural_weight_sweep.py
+   python plots/neural_weight_sweep.py
    ```
 2. `N_WORKERS` from [machine_config.py](machine_config.py), if present.
    This file is gitignored so each machine keeps its own copy.
@@ -54,9 +54,6 @@ without editing files, set `NR_N_WORKERS` in the shell.
 
 | File | Symbol / call |
 | --- | --- |
-| [bifurc_plots/neural_weight_sweep.py](bifurc_plots/neural_weight_sweep.py) | `DEFAULT_N_WORKERS = get_n_workers()` (also `--workers` CLI override) |
-| [bifurc_plots/arc_skeleton_and_island_dynamics.py](bifurc_plots/arc_skeleton_and_island_dynamics.py) | `N_WORKERS = get_n_workers()` |
-| [bifurc_plots/bifurcation_compare_discrim_vs_coupled.py](bifurc_plots/bifurcation_compare_discrim_vs_coupled.py) (stale — calls the removed `'coupled'` criterion) | `N_WORKERS = get_n_workers()` |
 | [plots/neural_weight_sweep.py](plots/neural_weight_sweep.py) | `DEFAULT_N_WORKERS = get_n_workers()` (also `--workers` CLI override) |
 | [plots/fly_bifurcation_plot.py](plots/fly_bifurcation_plot.py) | `with Pool(get_n_workers()) as pool:` |
 | [plots/fly_geom.py](plots/fly_geom.py) | `with Pool(get_n_workers()) as pool:` |

@@ -31,12 +31,17 @@ Each row is an Nx3 panel matrix:
     col 2 -- PerceptionModel.plot_blocked_signals (target-geometry panel)
     col 3 -- NeuralBandModel.plot_bifurcation_diagram (# stable equilibria)
 
-PUBLICATION COPY (lives in plots/). This is the higher-resolution sibling of
-``bifurc_plots/neural_weight_sweep.py``: identical code, but NUM_X=NUM_Y=49,
-REFINEMENT_LEVELS=3, DPI=300, PNG output. Because it lives in plots/,
-OUTPUT_DIR *is* plots/, so ``--out <name>`` writes the figure AND its cache
-straight into plots/ with no ``../`` path footgun. Keep the bifurc_plots/
-version for fast, low-res exploration.
+Publication settings: NUM_X=NUM_Y=49, REFINEMENT_LEVELS=3, DPI=300, PNG
+output. OUTPUT_DIR *is* plots/, so ``--out <name>`` writes the figure AND its
+cache straight into plots/. For fast exploration drop NUM_X/NUM_Y to 29,
+REFINEMENT_LEVELS to 2 and DPI to 150. (A low-resolution duplicate of this
+script used to live in ``bifurc_plots/``; that directory was removed
+2026-08-19 -- the other two scripts in it called the deleted ``'coupled'``
+criterion.)
+
+Its default-config cache, ``_cache_neural_weight_sweep_lin_cutoff_warp_
+uniform_weight.npz``, also feeds the bifurcation insets in
+``stability_comparison_figure.py``.
 
 Caching: the rasterized bifurcation ``img`` for every row is saved to
 ``_cache_<out_name>.npz`` next to the figure, alongside a JSON fingerprint of

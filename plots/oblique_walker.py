@@ -12,7 +12,7 @@ Three-row layout via GridSpec:
   Row 3 -- single panel spanning all three columns (TODO -- left blank).
 
 The bifurcation panels are rendered exactly like the sweep figures
-(``bifurc_plots/neural_weight_sweep.py``): viridis keyed on the stable-equilibrium
+(``plots/neural_weight_sweep.py``): viridis keyed on the stable-equilibrium
 count alone, pinned to ``MAX_COUNT`` for cross-panel color comparability, no
 two-axis coding, no basin wheels. A single shared stable-count legend serves the
 whole row.
