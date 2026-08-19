@@ -379,7 +379,7 @@ K-dimensional Glauber population dynamics and drops a term proportional to
 question the section was answering ("is there a Hopf island here like the
 vonMises k=0.55 circle case?") is void at both ends: **the vonMises circle
 island was itself the same artifact** — see
-[stale_coupled_model_starting_code/README.md](../stale_coupled_model_starting_code/README.md).
+[stale_coupled_model_starting_code/README.md](../archive/stale_coupled_model_starting_code/README.md).
 (The `VM_bifurcation_old_dtheta/` write-up that first reported the vonMises
 island was deleted 2026-08-19 along with its scripts, which reconstructed a
 two-generations-old torque law.)

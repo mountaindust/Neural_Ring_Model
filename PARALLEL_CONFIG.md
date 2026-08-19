@@ -62,10 +62,10 @@ without editing files, set `NR_N_WORKERS` in the shell.
 | [plots/oblique_walker_uniform_check.py](plots/oblique_walker_uniform_check.py) | `with ow.Pool(ow.get_n_workers()) as pool:` |
 | [plots/three_target_fly_refine.py](plots/three_target_fly_refine.py) | `n_workers = get_n_workers()` |
 | [plots/two_target_fly_refine.py](plots/two_target_fly_refine.py) | `n_workers = get_n_workers()` |
-| [stale_coupled_model_starting_code/compare_reduced_vs_coupled.py](stale_coupled_model_starting_code/compare_reduced_vs_coupled.py) (stale) | `with Pool(get_n_workers()) as pool:` |
-| [stale_coupled_model_starting_code/cycle_birth_death.py](stale_coupled_model_starting_code/cycle_birth_death.py) | `with Pool(get_n_workers()) as pool:` |
-| [stale_coupled_model_starting_code/island_anatomy.py](stale_coupled_model_starting_code/island_anatomy.py) | `with Pool(get_n_workers()) as pool:` |
-| [stale_coupled_model_starting_code/reduced_vs_full_dynamics.py](stale_coupled_model_starting_code/reduced_vs_full_dynamics.py) | `with Pool(get_n_workers()) as pool:` |
+| [archive/stale_coupled_model_starting_code/compare_reduced_vs_coupled.py](archive/stale_coupled_model_starting_code/compare_reduced_vs_coupled.py) (stale) | `with Pool(get_n_workers()) as pool:` |
+| [archive/stale_coupled_model_starting_code/cycle_birth_death.py](archive/stale_coupled_model_starting_code/cycle_birth_death.py) | `with Pool(get_n_workers()) as pool:` |
+| [archive/stale_coupled_model_starting_code/island_anatomy.py](archive/stale_coupled_model_starting_code/island_anatomy.py) | `with Pool(get_n_workers()) as pool:` |
+| [archive/stale_coupled_model_starting_code/reduced_vs_full_dynamics.py](archive/stale_coupled_model_starting_code/reduced_vs_full_dynamics.py) | `with Pool(get_n_workers()) as pool:` |
 | [weighting_analysis/ears_figure.py](weighting_analysis/ears_figure.py) | `N_WORKERS = get_n_workers()` |
 | [weighting_analysis/outward_bias.py](weighting_analysis/outward_bias.py) | `N_WORKERS = get_n_workers()` |
 | [tests/test_broad_validation.py](tests/test_broad_validation.py) | `with Pool(get_n_workers()) as pool:` |

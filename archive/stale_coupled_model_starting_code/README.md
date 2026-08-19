@@ -100,7 +100,7 @@ Notes for whoever picks this up:
 | `compare_reduced_vs_coupled.py` | **Broken.** Calls `sc_equilib(stability_criterion='coupled')`, which now raises. Scan/plot/report scaffolding is reusable. |
 | `island_anatomy.py` | **Runs, partly invalid.** Its per-equilibrium `saddle` / `slow-unstable` classes and the near-γ-fold conditioning report are valid (they use only the γ block and `det J`); its `hopf` class and the Hopf-cell detector are the artifact. Good scaffolding for the per-equilibrium eigenvalue table. |
 | `cycle_birth_death.py` | **Runs, invalid.** Traces the "supercritical Hopf" of the γ-level ODE. The transverse-parameter-sweep + amplitude/period measurement machinery is exactly what a `κτ₀` sweep needs. |
-| `reduced_vs_full_dynamics.py` | **Runs, half invalid.** Its "FULL" system is the γ-level coupled ODE (artifact); its "REDUCED" (slaved) half is valid. The side-by-side figure layout is reusable. Its reference to `reduced_dynamics_anatomy.py` now points at [theory/reduced_dynamics_anatomy.py](../theory/reduced_dynamics_anatomy.py). |
+| `reduced_vs_full_dynamics.py` | **Runs, half invalid.** Its "FULL" system is the γ-level coupled ODE (artifact); its "REDUCED" (slaved) half is valid. The side-by-side figure layout is reusable. Its reference to `reduced_dynamics_anatomy.py` now points at [theory/reduced_dynamics_anatomy.py](../../theory/reduced_dynamics_anatomy.py). |
 
 Figures previously generated here (`island_anatomy.png`, `reduced_vs_full.png`,
 `compare_vonmises_island.png`, …) are not committed; regenerating them from the
@@ -115,7 +115,7 @@ the main docs:
 
 - The **block-determinant identity** and the `sign(det J)` formulation of the
   slow test — well-conditioned at a γ-fold where `λ_slow` itself diverges.
-  Unit-tested in [`tests/test_reduced_criterion.py`](../tests/test_reduced_criterion.py).
+  Unit-tested in [`tests/test_reduced_criterion.py`](../../tests/test_reduced_criterion.py).
 - **`discrim_a` over-counts** by exactly the slow heading-tracking mode; the
   worked (1.5, 0) example (reduced = 3, discrim_a = 5) is regression-tested.
 - The **near-saddle-node skin** where a γ-block eigenvalue passes through zero
@@ -123,5 +123,5 @@ the main docs:
 - The **γ-bistability relaxation oscillation** in the 0-stable band: a
   property of the slaved system, and the thing the walker actually does.
 
-See the "Stability criterion" section of [CLAUDE.md](../CLAUDE.md) and
+See the "Stability criterion" section of [CLAUDE.md](../../CLAUDE.md) and
 `NeuralBandModel._discrim_reduced` for the current picture.
