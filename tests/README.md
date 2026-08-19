@@ -26,8 +26,8 @@ their own functions from a `__main__` block, so `python tests/<file>.py` works t
   noise/blind-spot behavior.
 - [`test_reduced_criterion.py`](test_reduced_criterion.py) — correctness of the `'reduced'`
   stability criterion: Schur block-determinant identity, Schur == slaved slow flow, the
-  documented vonmises (1.5, 0) `reduced`-vs-`discrim_a` disagreement, `reduced == coupled` in a
-  non-Hopf regime, and the defaults.
+  documented vonmises (1.5, 0) `reduced`-vs-`discrim_a` disagreement, the absence of any
+  `'coupled'` criterion, and the defaults.
 - [`test_trajectory_intersection.py`](test_trajectory_intersection.py) —
   `Targets.check_trajectory_intersection` and `_min_dist_segments` across circle/delta/capsule.
 - [`test_signal_cache.py`](test_signal_cache.py) — `PerceptionModel.signal_cache`, the

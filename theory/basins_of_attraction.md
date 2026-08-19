@@ -272,7 +272,6 @@ sees g; θ feeds back into dγ/dt *only* through perception geometry. Therefore:
   widths bounded by **saddles/folds**.
 - **Tied to dθ/dt (θ-side, rescales with K·g′(0)):** slow-eigenvalue
   *magnitudes* → θ-relaxation timescale → **θ-noise barrier heights ΔV**; the
-  coupled-3×3 fine structure (Hopf-boundary locations) if K·g′(0) drifts off 1;
   and the existence/width of branch-cut-bounded basins.
 
 The K=2 default was chosen so K·g′(0) = 2·½ = 1·1, holding even the θ-side
@@ -361,7 +360,7 @@ escape-rate.
   to exhibit perception-collapse zones.
 - **Cost:** ~4.2 min parallel (32 cores) for a 41×41 grid with basins, vs ~21 s
   for `sc_equilib`-only. Multistable cells dominate (~2–4 s each); 1-stable and
-  Hopf-island / collapse cells are nearly free (~0.09 s, scan skipped /
+  collapse cells are nearly free (~0.09 s, scan skipped /
   short-circuited). Mitigations if higher resolution is needed: subgrid-sample
   the clustered multistable regions; cross-cell γ warm-start; coarser scans.
 
@@ -372,5 +371,5 @@ escape-rate.
 - [theory_background.md](theory_background.md) — Lyapunov functions, free
   energy, Langevin & Kramers, for a reader new to statistical mechanics.
 - [.claude/rules/torque-and-stability.md](../.claude/rules/torque-and-stability.md)
-  — the half-angle torque, the three stability criteria, the coupled Jacobian.
+  — the half-angle torque, the two stability criteria, the coupled Jacobian.
 - [CLAUDE.md](../CLAUDE.md) — model architecture, coordinate frames, conventions.

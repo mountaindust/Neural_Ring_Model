@@ -1,24 +1,26 @@
 # Bifurcation diagram verdict: VM k=0.55, two circle targets
 
-> **⚠️ STALE — predates the current dθ/dt turning law.** This directory
-> (formerly `VM_bifurcations/`) was produced under an **older heading torque**
-> and the diagnostic scripts here still reconstruct dθ/dt with the stale form
-> `K·R·sin(ego)` / `K·R·sin(ego/2)` using the inverse-warped egocentric angle.
-> The model has since moved to `dθ/dt = K·R·sin(arg(γ)/2)` — the half-angle law
-> in the **neural** consensus angle (no inverse-warp mapping). Two caveats for
-> anyone reading these results:
+> **⚠️ STALE, AND ITS HOPF/LIMIT-CYCLE RESULTS ARE RETRACTED (2026-08-19).**
 >
-> 1. **The scripts' torque reconstructions are not updated** (kept as-is, hence
->    the directory rename to `_old_dtheta`). They no longer match
->    `NeuralBandModel.dtheta_dt` / `_discrim_coupled`.
-> 2. **The numerical results below have not been re-run since the `sin(ego)` →
->    `sin(ego/2)` half-angle change**, let alone the later `ego → arg(γ)`
->    change. The SC-equilibrium locations and stable/unstable *counts* are
->    provably invariant under both changes (sign-preserving), but the
->    **Hopf-island fine structure** (the (2.1, ±2.45) loop, limit-cycle period,
->    panel-(d) phase portraits) depends on the coupled 3×3 magnitudes and may
->    shift. Treat the Hopf/limit-cycle specifics here as indicative, not
->    current; regenerate against the new law before relying on them.
+> 1. **Retraction.** Everything here that rests on the *full 3×3 eigenvalues*
+>    of the `(γ_re, γ_im, θ)` Jacobian — the Hopf curve, the Bautin points, the
+>    "stable limit cycle of period ≈ 17.4", the head-bobbing interpretation —
+>    is an **artifact of an incomplete reduction**, not a property of the model.
+>    `dγ/dt` is the rank-2 readout of the K-dimensional Glauber population
+>    dynamics and drops a term proportional to `dθ/dt`; taking the full
+>    eigenvalues linearizes the incomplete equation. Measured on this very
+>    setup under *both* old torque laws (`K·R·sin(ego)`, `K·R·sin(ego/2)`): the
+>    γ-3×3 flags 7 equilibria Hopf-unstable where the exact `(n₁,n₂,θ)` system
+>    is stable at every one. The `'coupled'` criterion has been removed from the
+>    model; see `NeuralBandModel._discrim_reduced` for the full note. The
+>    retracted sections have been deleted from this document; the scripts that
+>    produced them are unchanged and still in this folder.
+> 2. **Stale torque law.** This directory (formerly `VM_bifurcations/`) was
+>    produced under an older heading torque and the diagnostic scripts still
+>    reconstruct dθ/dt as `K·R·sin(ego)` / `K·R·sin(ego/2)` using the
+>    inverse-warped egocentric angle. The model has since moved to
+>    `dθ/dt = K·R·sin(arg(γ)/2)`. SC-equilibrium locations and stable/unstable
+>    *counts* are provably invariant under both changes (sign-preserving).
 
 ## TL;DR
 
@@ -28,14 +30,21 @@ below, two non-obvious features appear:
 
 1. **A small "4 / 5-stable" bullseye near (1.5, 0)** — *numerical artifact.*
    The `_discrim_A` stability test only checks the 2×2 γ-Jacobian at fixed
-   heading; the full coupled 3×3 (γ_re, γ_im, θ) Jacobian shows the extra
-   "stable" equilibria are saddles in the heading direction. True
-   coupled-stable count there is 3.
-2. **Two symmetric "0-stable" islands near (2.1, ±2.45)** — *real.* Inside
-   each, the unique self-consistent equilibrium is Hopf-unstable and a
-   small-amplitude **stable limit cycle of period ≈ 17.4** is the actual
-   attractor. The walker would settle into a steady "head-bobbing"
-   oscillation rather than reaching any fixed heading.
+   heading and misses the slow heading-tracking mode; the extra "stable"
+   equilibria are unstable in the heading direction. The correct count there
+   is 3. **This finding stands** — it is a statement about the slow (Schur)
+   mode, which the current `'reduced'` criterion tests directly, and
+   `reduced` reproduces the 3-vs-5 split (regression-tested in
+   [tests/test_reduced_criterion.py](../tests/test_reduced_criterion.py)).
+2. **Two symmetric "0-stable" islands near (2.1, ±2.45).** The *0-stable*
+   classification stands: at those cells the γ-block has a positive
+   eigenvalue, so no self-consistent heading is stable under the slaved
+   dynamics the walker integrates. **What was inside them is retracted** —
+   the claimed Hopf-unstable focus and stable limit cycle of period ≈ 17.4
+   were artifacts of the removed `'coupled'` criterion (see banner). The
+   slaved walker does not head-bob there; where the symmetric SC equilibrium
+   is γ-bistable it performs a smaller, faster relaxation oscillation between
+   two γ-branches instead.
 
 ---
 
@@ -101,14 +110,18 @@ neur_model_vm.plot_bifurcation_diagram(
 That's effective resolution `(41-1)·2⁴+1 = 641` virtual pixels per side, fine
 enough to render the bullseye and the 0-stable arcs visibly.
 
-### Coupled-stability criterion
+### Stability criterion used by these scripts
 
-`sc_equilib`'s historical default `_discrim_A` checks only the γ-Jacobian
-at fixed heading (it has since been replaced by `_discrim_coupled` —
-this section was written before that fix). The "true" coupled stability requires forming the 3×3 Jacobian of
-the (γ_re, γ_im, θ) system, where `dθ/dt = K·R·sin(ego_angle)`. All
-diagnostic scripts in this folder do this check by finite difference; see
-e.g. `coupled_jacobian_max_re` in [diagnostic_arc_skeleton.py](diagnostic_arc_skeleton.py).
+`sc_equilib`'s historical default `_discrim_A` checks only the γ-Jacobian at
+fixed heading. The scripts here instead form the full 3×3 Jacobian of the
+(γ_re, γ_im, θ) system with `dθ/dt = K·R·sin(ego_angle)` by finite difference
+(see e.g. `coupled_jacobian_max_re` in
+[diagnostic_arc_skeleton.py](diagnostic_arc_skeleton.py)) and take **all
+three eigenvalues**. That test is the removed `'coupled'` criterion and is
+**not valid** (see banner): only its *fast-block* content (the 2×2 γ block)
+and the *sign of det J* — i.e. what the current `'reduced'` criterion uses —
+carry over. Results below that depend on the third eigenvalue have been
+removed.
 
 ### How to run the scripts
 
@@ -176,95 +189,26 @@ current plot, true count, difference) and
 
 ---
 
-## Why the 0-stable islands are real (and what's inside them)
+## The 0-stable islands (retracted content removed)
 
-There is no occlusion at (2.10, 2.45) — both targets are visible. The
-configuration is asymmetric: target 0 (close) is at distance 2.23,
-bearing +1.3°, half-extent 13°; target 1 (far) is at distance 5.43,
-bearing -65.8°, half-extent 5.3°. The observer sits almost level with
-the upper target's y-coordinate.
+There is no occlusion at (2.10, 2.45) — both targets are visible, and the
+configuration is asymmetric. The cells are genuinely 0-stable under the
+slaved dynamics: the γ-block at the unique self-consistent equilibrium has a
+positive eigenvalue, so no fixed heading is attracting.
 
-At this point only one self-consistent equilibrium exists
-(θ ≈ -0.088, R ≈ 0.754). Coupled-Jacobian eigenvalues are
-**-1.00 and +0.082 ± 0.197j** — a Hopf-unstable focus.
+**Everything this document previously said about what happens *inside* the
+islands has been deleted** (Hopf curve, Bautin points, the period-17.4 limit
+cycle, the bifurcation cascade across the arc, the head-bobbing
+interpretation). All of it came from the third eigenvalue of the γ-level 3×3
+Jacobian — the removed `'coupled'` criterion — which linearizes an incomplete
+equation. Re-measured on this setup under both old torque laws, the exact
+`(n₁, n₂, θ)` population system has **no** Hopf instability at any of the
+cells the γ-3×3 flagged (7 → 0). The saddle-node curve and the equilibrium
+counts are unaffected and stand.
 
-Long-time integration (t=4000, LSODA, rtol=1e-10) reveals a clean
-**stable limit cycle** with period ≈ **17.378 ± 0.04** time units.
-Phase portrait in (θ, ego_angle) is a closed orbit encircling the
-unstable equilibrium:
-
-- θ oscillates between -0.155 and -0.006 (amplitude ≈ 0.075 rad ≈ 4.3°)
-- ego_angle oscillates between -0.040 and +0.037 rad
-- |γ| stays nearly constant at 0.755
-
-So a walker placed inside the 0-stable island does not converge to any
-heading — it settles into a slow heading-oscillation ("head-bobbing").
-This is qualitatively different from "decision paralysis" (which would
-be slow drift); it's a genuine periodic attractor.
-
-See [diagnostic_island_long_dynamics.png](diagnostic_island_long_dynamics.png).
-
-### Shape of the island and the bifurcation skeleton
-
-A fine 121×79 scan over (x∈[1, 3.5], y∈[1.5, 2.8]) — see
-[diagnostic_arc_skeleton.png](diagnostic_arc_skeleton.png) — shows that
-**the Hopf curve and the saddle-node curve are entirely separate** in
-this parameter window:
-
-- **Hopf curve (magenta loop in the skeleton plot)** is a closed-loop
-  curve inside the 1-equilibrium region, spanning roughly (1.75, 2.18)
-  up to (2.5, 2.63) and back. It encloses the 0-stable island. Crossing
-  it, the unique self-consistent equilibrium loses stability via
-  Andronov-Hopf and a small-amplitude stable limit cycle is born. The
-  width of the Hopf-unstable interval narrows monotonically with y:
-  Δx ≈ 0.05 at y=2.55, Δx ≈ 0.04 at y=2.45, Δx ≈ 0.03 at y=2.35,
-  Δx ≈ 0.02 at y=2.15, Δx ≈ 0.01 at y=2.05. Both ends of the curve
-  close to a *degenerate Hopf* point where the eigenvalue's positive
-  peak just touches zero — these are codim-2 generalised Hopf (Bautin)
-  points.
-
-- **Saddle-node curve** is the boundary between the 1-equilibrium region
-  (blue, upper-left) and the 3-equilibrium region (yellow, lower-right).
-  Crossing it from above to below, two new equilibria are born: one
-  stable node + one saddle.
-
-The two curves do **not** intersect in the resolved window. There is a
-thin sliver of "1-equilibrium, stable" between the SN curve and the
-Hopf arc — the equilibrium has just survived SN annihilation but has
-not yet been Hopf-destabilised.
-
-### Bifurcation cascade across the arc
-
-Following a path from deep inside the 3-equilibrium region (e.g.
-(3.0, 1.8)) up across the saddle-node curve, through the 1-stable
-wedge, and into the 0-stable arc:
-
-1. **Inside the 3-eq region**: 3 equilibria coexist.
-   (a) the *original* upper-branch equilibrium (θ ≈ +0.05 at y=2.05),
-   (b) a SN-born stable node (θ ≈ -1.13 at (3.0, 2.05)),
-   (c) a SN-born saddle between them. (a) and (b) are stable.
-2. **Crossing the SN curve upward**: (b) and (c) collide and annihilate
-   in a standard saddle-node bifurcation. Only (a) remains, still
-   stable. Coupled-stable count = 1.
-3. **Wedge between SN and Hopf curves**: 1 stable equilibrium (a).
-4. **Crossing the Hopf curve into the arc**: (a)'s complex eigenvalues
-   pass through the imaginary axis — Andronov-Hopf bifurcation. (a)
-   becomes an unstable focus and a small-amplitude stable limit cycle
-   appears around it. Coupled-stable count = 0.
-5. **Inside the arc**: 1 unstable focus + 1 stable limit cycle.
-6. **Crossing the Hopf curve again** (other side of the loop):
-   (a) regains stability. Limit cycle shrinks back into (a). 1 stable eq.
-
-So **only one stable equilibrium genuinely "disappears"** in the
-cascade — the SN-born node (b) — and it does so by colliding with the
-saddle (c) in an ordinary saddle-node bifurcation. The other stable
-equilibrium (a) persists across all three regions; what changes is its
-stability, via a Hopf bifurcation on a totally separate curve.
-
-The lower symmetric island (y < 0) has the same structure mirrored
-across y=0. See [diagnostic_arc_slices.png](diagnostic_arc_slices.png) for
-the per-y x-sweeps and [diagnostic_island_final.png](diagnostic_island_final.png)
-for the upper-island close-up.
+See [diagnostic_arc_slices.png](diagnostic_arc_slices.png) and
+[diagnostic_island_final.png](diagnostic_island_final.png) for the raw scans;
+read the stability colouring in them as `'coupled'` output, i.e. not current.
 
 ---
 
@@ -314,8 +258,9 @@ plots — its `_discrim_A` is structurally identical.
   [diagnostic_recount_compare.png](diagnostic_recount_compare.png) and
   [diagnostic_y0_slice.png](diagnostic_y0_slice.png).
 - [diagnostic_island_dynamics.py](diagnostic_island_dynamics.py) —
-  verifies saddles are 3-eq equilibria; long-time integration showing
-  the limit cycle; x-slice at y=2.45 through the island. Produces
+  verifies saddles are 3-eq equilibria; long-time integration (its "limit
+  cycle" is the retracted γ-level artifact); x-slice at y=2.45 through the
+  island. Produces
   [diagnostic_island_long_dynamics.png](diagnostic_island_long_dynamics.png).
 - [diagnostic_island_final.py](diagnostic_island_final.py) — fine 81×61
   map of the upper island. Produces
@@ -325,7 +270,7 @@ plots — its `_discrim_A` is structurally identical.
   per-equilibrium stability tracking, plus bifurcation event detection
   (SN-births, Hopf transitions). Produces
   [diagnostic_arc_slices.png](diagnostic_arc_slices.png).
-- [diagnostic_arc_skeleton.py](diagnostic_arc_skeleton.py) — separates
-  Hopf curve (level set of complex-eigenvalue real part) from SN curve
-  (boundary of n_eqs jump) on a 121×79 grid. Produces
+- [diagnostic_arc_skeleton.py](diagnostic_arc_skeleton.py) — separates the
+  (retracted) Hopf curve from the SN curve (boundary of n_eqs jump) on a
+  121×79 grid. Only the SN curve is meaningful. Produces
   [diagnostic_arc_skeleton.png](diagnostic_arc_skeleton.png).

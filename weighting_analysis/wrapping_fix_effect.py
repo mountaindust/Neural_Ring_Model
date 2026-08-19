@@ -39,12 +39,15 @@ from multiprocessing import Pool
 import decision_model as dm
 from parallel_config import get_n_workers
 
-# Same scene as ears_figure.py, and the criterion the 2026-05 run used, so the
-# comparison is against that write-up's numbers.
+# Same scene as ears_figure.py. NOTE: the 2026-05 run of this comparison used
+# the 'coupled' criterion, which has since been REMOVED (it linearized an
+# incomplete equation -- see NeuralBandModel._discrim_reduced). This now runs
+# under 'reduced', so the absolute counts are not directly comparable to that
+# write-up's numbers; the wrapping-fix effect it measures is unaffected.
 TARGET_LOCS = np.array([[4.33, 2.5], [4.33, -2.5]])
 TARGET_R = 0.5
 WARP, A_WARP, B_WARP = 'cutoff', 0.0, np.pi
-CRITERION = 'coupled'
+CRITERION = 'reduced'
 # BETA is the neural Boltzmann factor. This scene has 2 targets and the
 # write-up's run used the earlier per-target temperature T=0.2, whose effective
 # coupling was N_targets/T, so beta = 2/0.2 = 10 reproduces those numbers.

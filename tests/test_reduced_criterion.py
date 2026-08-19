@@ -3,8 +3,15 @@
 The 'reduced' criterion declares a self-consistent equilibrium stable iff
   (1) the fast gamma block A = d(dgamma)/dgamma is Hurwitz, and
   (2) the slow Schur complement lam_slow = d - c A^{-1} b < 0,
-where the coupled Jacobian is partitioned J = [[A, b], [c, d]] with
-b = d(dgamma)/dtheta, c = d(dtheta)/dgamma, d = d(dtheta)/dtheta.
+where the (gamma_re, gamma_im, theta) Jacobian is partitioned
+J = [[A, b], [c, d]] with b = d(dgamma)/dtheta, c = d(dtheta)/dgamma,
+d = d(dtheta)/dtheta.
+
+There is deliberately no 'coupled' criterion: the full eigenvalues of that
+Jacobian linearize an incomplete equation (dgamma_dt drops the readout term
+of the underlying population dynamics, which is nonzero whenever
+dtheta/dt != 0) and report instabilities the model does not have. See
+NeuralBandModel._discrim_reduced, "Why there is no fully-coupled criterion".
 
 These tests verify the criterion is *correct*, not merely self-consistent:
 
@@ -21,12 +28,12 @@ These tests verify the criterion is *correct*, not merely self-consistent:
 
  - test_reduced_reproduces_documented_vonmises_disagreement:
        at the documented (1.5, 0) vonmises k=0.55 config, reduced=3 stable,
-       coupled=3, discrim_a=5; the two extra discrim_a-stable equilibria are
-       fast-stable but slow-unstable (positive Schur complement).
+       discrim_a=5; the two extra discrim_a-stable equilibria are fast-stable
+       but slow-unstable (positive Schur complement).
 
- - test_reduced_equals_coupled_on_standard_grid:
-       in a non-Hopf regime (smooth cutoff a=0, b=pi, uniform weight) reduced
-       and coupled agree everywhere.
+ - test_no_coupled_criterion:
+       'coupled' is rejected by every entry point that takes a
+       stability_criterion, and _discrim_coupled no longer exists.
 
  - test_fast_unstable_is_reduced_unstable / test_defaults_are_reduced.
 """
@@ -34,6 +41,7 @@ import sys, os, inspect
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
+import pytest
 from scipy.optimize import root
 import warnings
 warnings.filterwarnings('ignore')
@@ -182,11 +190,9 @@ def test_reduced_reproduces_documented_vonmises_disagreement():
     nbm = _nbm_vonmises()
     fl = np.array([1.5, 0.0])
     _, s_red = nbm.sc_equilib(focal_loc=fl, stability_criterion='reduced')
-    _, s_cpl = nbm.sc_equilib(focal_loc=fl, stability_criterion='coupled')
     _, s_dsc = nbm.sc_equilib(focal_loc=fl, stability_criterion='discrim_a')
     assert sum(s_dsc) == 5, f"expected discrim_a=5 stable, got {sum(s_dsc)}"
     assert sum(s_red) == 3, f"expected reduced=3 stable, got {sum(s_red)}"
-    assert sum(s_cpl) == 3, f"expected coupled=3 stable, got {sum(s_cpl)}"
 
     # The discrim_a-stable-but-reduced-unstable equilibria must be exactly the
     # two near theta = +-0.16: fast-stable (A Hurwitz) yet slow-unstable
@@ -203,19 +209,31 @@ def test_reduced_reproduces_documented_vonmises_disagreement():
 
 
 # --------------------------------------------------------------------------
-# 4. In a non-Hopf regime reduced and coupled agree everywhere.
+# 4. There is no 'coupled' criterion, on either model.
 # --------------------------------------------------------------------------
-def test_reduced_equals_coupled_on_standard_grid():
-    nbm = _nbm_cutoff()
-    disagreements = []
-    for x in (1.0, 2.0, 3.0, 4.0):
-        for y in (-1.0, 0.0, 1.0):
-            fl = np.array([x, y])
-            _, s_red = nbm.sc_equilib(focal_loc=fl, stability_criterion='reduced')
-            _, s_cpl = nbm.sc_equilib(focal_loc=fl, stability_criterion='coupled')
-            if sum(s_red) != sum(s_cpl):
-                disagreements.append((x, y, sum(s_red), sum(s_cpl)))
-    assert not disagreements, f"reduced != coupled at: {disagreements}"
+def test_no_coupled_criterion():
+    """'coupled' was removed: the full eigenvalues of the
+    (gamma_re, gamma_im, theta) Jacobian linearize an incomplete equation.
+    Every entry point must reject it, and the discriminant must be gone."""
+    nbm, iem = _nbm_cutoff(), _iem_plain()
+    fl = np.array([2.0, 0.5])
+
+    for model in (nbm, iem):
+        assert not hasattr(model, '_discrim_coupled'), (
+            f"{type(model).__name__}._discrim_coupled should not exist")
+
+    for call in (lambda: nbm.sc_equilib(focal_loc=fl,
+                                        stability_criterion='coupled'),
+                 lambda: nbm.gamma_equilib(focal_angle=0.0, focal_loc=fl,
+                                           stability_criterion='coupled'),
+                 lambda: nbm._count_stable_at(('k', 2.0, 0.5, 'coupled')),
+                 lambda: iem._count_stable_at(('k', 2.0, 0.5, 'coupled'))):
+        with pytest.raises(ValueError, match='stability_criterion'):
+            call()
+
+    # the surviving criteria still work
+    for crit in ('reduced', 'discrim_a'):
+        nbm.sc_equilib(focal_loc=fl, stability_criterion=crit)
 
 
 # --------------------------------------------------------------------------
@@ -289,7 +307,7 @@ if __name__ == '__main__':
     test_schur_block_determinant_identity_iem()
     test_schur_equals_slaved_slow_flow_nbm()
     test_reduced_reproduces_documented_vonmises_disagreement()
-    test_reduced_equals_coupled_on_standard_grid()
+    test_no_coupled_criterion()
     test_fast_unstable_is_reduced_unstable()
     test_reduced_robust_near_gamma_fold()
     test_defaults_are_reduced()

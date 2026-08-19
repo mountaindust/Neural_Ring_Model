@@ -208,8 +208,9 @@ def test_jacobian_invariance_under_K_doubling():
     for fl in [(0.2, 0.0), (1.0, 0.5), (1.65, -0.8)]:
         nbm_old.percep_model.focal_loc = np.array(fl, dtype=float)
         nbm_new.percep_model.focal_loc = np.array(fl, dtype=float)
-        angles, _ = nbm_old.sc_equilib(focal_loc=fl,
-                                       stability_criterion='coupled')
+        # criterion is irrelevant here: only the equilibrium LOCATIONS are
+        # used (the stability flags are discarded).
+        angles, _ = nbm_old.sc_equilib(focal_loc=fl)
         for th in angles:
             gamma_star = nbm_old.run_dgamma_dt(
                 focal_angle=th, focal_loc=fl,

@@ -108,7 +108,7 @@ NUM_X = 29
 NUM_Y = 29
 REFINEMENT_LEVELS = 2
 MAX_COUNT = 3
-STABILITY_CRITERION = 'reduced'   # 'reduced' (default) | 'coupled' | 'discrim_a'
+STABILITY_CRITERION = 'reduced'   # 'reduced' (default) | 'discrim_a'
 
 # Output filename. None -> auto-generated from the config (so distinct sweeps
 # don't collide). Override on the command line with --out.
@@ -218,9 +218,9 @@ def validate_config():
             f"{sorted(k for k in model._FAMILY_INFO if k != 'direct_power')}, "
             f"got {WEIGHT!r}.")
 
-    if STABILITY_CRITERION not in ('reduced', 'coupled', 'discrim_a'):
+    if STABILITY_CRITERION not in ('reduced', 'discrim_a'):
         raise ValueError(
-            "STABILITY_CRITERION must be 'reduced', 'coupled', or 'discrim_a', "
+            "STABILITY_CRITERION must be 'reduced' or 'discrim_a', "
             f"got {STABILITY_CRITERION!r}.")
 
 

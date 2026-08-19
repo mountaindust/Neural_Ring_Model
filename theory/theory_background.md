@@ -658,7 +658,7 @@ conversation.
   log lived in `basin_estimation/`, retired 2026-06; recover from git
   history if needed.)
 - Code: `decision_model.py` (NeuralBandModel class, especially
-  `dgamma_dt` ~L2417, `sc_equilib` ~L2647, `_discrim_coupled` ~L2953).
+  `dgamma_dt`, `sc_equilib`, `_discrim_reduced`).
 
 A fresh session can load `CLAUDE.md`, `theory/theory_background.md`, and
 [basins_of_attraction.md](basins_of_attraction.md) to recover full

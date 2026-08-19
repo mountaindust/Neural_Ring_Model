@@ -1,4 +1,13 @@
-"""Anatomy of the REDUCED (slaved / uncoupled) dynamics in the 0-stable band.
+"""Anatomy of the REDUCED (slaved) dynamics in the 0-stable band.
+
+Lives in theory/ because it DERIVES a number rather than producing a paper
+figure: the relaxation-oscillation period, obtained by integrating
+dt = dtheta / |dtheta/dt| along each gamma-branch between its folds.
+plots/stability_comparison_figure.py draws the same branch structure, the
+same multivalued (theta, dtheta/dt) flow and the same warm-started slaved
+walker for the paper, but does not compute a period or amplitude.
+
+Run standalone; nothing imports it.
 
 The fast gamma-subsystem is BISTABLE over a heading window: two stable
 gamma-branches (Theta_neur>0 and <0) flank an unstable symmetric branch

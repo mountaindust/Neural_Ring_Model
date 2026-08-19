@@ -1,6 +1,6 @@
 # Weighting vs warping in NBM
 
-**Started:** 2026-05-22 · **Last revised:** 2026-08-06
+**Started:** 2026-05-22 · **Last revised:** 2026-08-19
 
 > **Decision (2026-06):** keep uniform weight (`angle_weight=None`); do not adopt
 > a foveal vonMises weight. The `1/N` pathology is exclusive to the *exact delta*
@@ -89,7 +89,7 @@ them:
 **The criterion change accounts for essentially none of it** (columns 3 and 4
 agree to ≤0.03 sq units, i.e. a couple of boundary cells). The ears grew by
 **+58% to +106%**, and that is the wrapping fix. Reproduce column 3 with
-`python weighting_analysis/ears_figure.py sweep --criterion coupled --areas-only`.
+`python weighting_analysis/ears_figure.py sweep --criterion discrim_a --areas-only`.
 
 Peakedness ordering and the qualitative reading are unchanged — but every ear
 area quoted in the 2026-05 write-up is an **undercount**.
@@ -293,7 +293,9 @@ out in physical space.
 along the y=0 axis from x=0 toward the target line at x=4.33 (so the
 half-angle α between targets seen from the observer grows from 30° to
 90°), the third (heading-coupled) eigenvalue of the midway equilibrium's
-3×3 Jacobian crosses zero at:
+3×3 Jacobian crosses zero at (a **real** crossing, hence a `det J` sign
+change and invariant under the reduction error — see the retraction section
+below):
 
 - **FULL: x = 0.534 (α ≈ 33.4°)** — midway destabilizes here
 - **ANGLE: x = 0.783 (α ≈ 35.2°)** — midway destabilizes here
@@ -310,8 +312,14 @@ modes too. The eigenvalue analysis at observer (0.76, 0) shows the
 difference:
 
 - FULL eigenvalues: (−0.84, −0.49, **+0.38**) — destabilized
-- ANGLE eigenvalues: (−0.84, −0.054 ± 0.175i) — stable spiral
+- ANGLE eigenvalues: (−0.84, −0.054 ± 0.175i) — stable
 - `dρ_target0/dθ` at midway: FULL = +0.258, ANGLE = exactly 0
+
+(These are γ-level 3×3 spectra. The **signs** are trustworthy — the positive
+`+0.38` is real, so it is a `det J` sign change, and `eig(A)` is invariant —
+but the *complex pair* `−0.054 ± 0.175i` in the ANGLE row is an artifact of
+the reduction and should not be read as a spiral rate. See the retraction
+section below.)
 
 ANGLE's `dρ/dθ = 0` is structural: when neural_weight is ignored, ρ
 depends only on which targets are visible, not on where they sit, so a
@@ -355,151 +363,63 @@ conservative for deltas than for circles — for deltas it costs only a
 small shift in where bifurcation arcs sit, but for circles it gives up
 the asymmetric-position bistability that produces the ears.
 
-## Delta + uniform weight: Hopf-unstable foci exist, but no limit cycle
+## Delta + uniform weight: Hopf investigation — RETRACTED (2026-08-19)
 
-Follow-up to the open question above about whether the uniform-weight delta
-midway spiral signals a nearby Hopf island like the vonMises `k=0.55`
-circle case in [VM_bifurcation_old_dtheta/VERDICT.md](../VM_bifurcation_old_dtheta/VERDICT.md).
+This section reported a scan for Hopf-unstable foci in the delta + uniform
+configuration (86 "Hopf+" cells over a 121×141 raster, an
+exit-via-saddle criticality analysis, a near-Bogdanov-Takens claim at
+(1.35, 2.40), figures `hopf_overview.png` and `hopf_criticality.png`).
+**It has been deleted, and the two figures with it.**
 
-**Headline:** **No.** Hopf-unstable foci do appear in this configuration
-(more than one might expect, in fact), but they are *not* the unique
-attractor in any cell — every Hopf-positive cell coexists with at least one
-coupled-stable focus, and long-time integration from the Hopf focus
-escapes to the stable focus rather than orbiting a limit cycle. There is
-no observable head-bobbing behavior.
+Every Hopf classification in it came from the **full eigenvalues of the
+γ-level `(γ_re, γ_im, θ)` Jacobian** — the `'coupled'` criterion, removed
+from the model on 2026-08-19. `dγ/dt` is the rank-2 readout of the
+K-dimensional Glauber population dynamics and drops a term proportional to
+`dθ/dt`; taking the full eigenvalues linearizes an incomplete equation. The
+question the section was answering ("is there a Hopf island here like the
+vonMises k=0.55 circle case?") is void at both ends: **the vonMises circle
+island was itself the same artifact** — see
+[stale_coupled_model_starting_code/README.md](../stale_coupled_model_starting_code/README.md)
+and the retraction banner in
+[VM_bifurcation_old_dtheta/VERDICT.md](../VM_bifurcation_old_dtheta/VERDICT.md).
 
-### What was scanned
+### What this does *not* touch — the triage rule
 
-Same observer window `[0, 6] × [-3.5, 3.5]` and delta-target geometry as
-the rest of this folder. Resolution 121×141 cells, multiprocessing pool.
-For each cell, `NeuralBandModel.sc_equilib(focal_loc=fl,
-stability_criterion='coupled')` returns all self-consistent equilibria;
-the coupled 3×3 Jacobian is built by finite difference for each. Hopf
-indicator = max real part among complex-pair eigenvalues, across all
-non-saddle eqs in the cell.
+The dropped term adds, to each γ-row of the Jacobian, a multiple of the
+θ-row. That is a determinant-preserving row operation, so **`sign(det J)`
+and `eig(A)` are exactly invariant.** Verified over 1950 self-consistent
+equilibria across four configurations (vonMises circle, delta + uniform,
+delta + tied weight, cutoff circle): det-sign matched 1950/1950 and
+`eig(A)` to ≤ 2.7e-9.
 
-All four weighting choices from the earlier delta sweep:
+Therefore:
 
-| weight                  | Hopf+ cells / 17061 | max Re(complex eig) |
-|-------------------------|---------------------|----------------------|
-| **vonMises k=0.9**      | 86                  | **+0.1741**          |
-| **vonMises k=0.5**      | 57                  | +0.1493              |
-| cutoff `a=0`, `b=π`     | 2                   | +0.0166              |
-| cutoff `a=π/3`, `b=π`   | 0                   | (none)               |
+- **Everything determined by a real eigenvalue crossing zero is
+  unaffected** — saddle-node curves, pitchfork/threshold crossings, and
+  every stable-count boundary that is not a Hopf boundary. This includes
+  the delta threshold-shift numbers above (`x = 0.534` FULL, `x = 0.783`
+  uniform): those are real-eigenvalue crossings, i.e. `det J` sign changes,
+  and they stand.
+- **Only complex-pair (Hopf) classifications are corrupted.** In the
+  delta + uniform configuration the full-spectrum verdict differed from the
+  invariant one at 4 of 544 equilibria in the check above — precisely the
+  Hopf cells.
 
-vonMises uniform-weight is the unambiguous winner: Hopf-unstable foci with
-positive real parts that comfortably exceed the VM-circle island's max
-(+0.082 from [VERDICT.md](../VM_bifurcation_old_dtheta/VERDICT.md)). Cutoff
-weighting barely shows it.
+So the `'coupled'`-era rasters elsewhere in this folder are correct except
+in those few cells, and the `'reduced'` and `'discrim_a'` criteria — which
+use only `eig(A)` and `sign(det J)` — were never affected at all.
 
-The Hopf-positive cells are spread broadly — `x ∈ [0.1, 6.0]`,
-`|y| ∈ [0.5, 2.9]` — and are not confined to a thin curve like the
-VM-circle Hopf loop. They line up roughly along the inner saddle-node
-arcs of the bifurcation diagram, where new equilibria are being born.
+### The open question it was meant to answer
 
-`hopf_overview.png` (top row) shows the four Hopf-indicator rasters
-with the level-zero contour drawn where it exists. Bottom row of the
-same figure is a representative trajectory at the strongest Hopf+ cell
-(see "No stable limit cycle is born" below).
-
-### Crucial distinction from the VM/circle case
-
-In the VM-circle Hopf island, the Hopf-unstable focus is the **only**
-self-consistent equilibrium in the cell — coupled-stable count is 0, and
-the stable limit cycle is the unique attractor.
-
-In delta + uniform, **no cell has Hopf+ AND `n_stable=0` simultaneously**
-in any of the four weightings. Concretely, at the strongest Hopf+ cell
-(observer `(1.35, 2.40)`, vonMises k=0.9), there are three
-self-consistent eqs:
-
-| θ (deg) | R     | classification     | eigenvalues                                    |
-|---------|-------|--------------------|-----------------------------------------------|
-| −54.1°  | 0.480 | **Hopf-unstable focus** | (−0.981, **+0.174 ± 0.009j**)          |
-| −28.4°  | 0.512 | stable focus            | (−0.973, −0.463 ± 0.453j)              |
-| −3.4°   | 0.477 | saddle                  | (−0.983, +0.574, −0.054)               |
-
-The Hopf-unstable focus coexists with a stable focus and a saddle.
-
-### No stable limit cycle is born
-
-Long-time integration of the coupled 3-eq ODE
-(`dγ/dt = nbm.dgamma_dt(γ, θ, focal_loc)`,
-`dθ/dt = K·R·sin(ego_angle)`)
-from `[R_u + ε, 0, θ_u]` at the (1.35, 2.40) Hopf focus, for
-`ε ∈ {1e-5, 1e-3, 1e-1}` and `T=200`, settles in every case onto the
-stable focus at `(θ=-0.4954, R=0.5124)`. No orbit of any amplitude
-persists, even though the Hopf eigenvalue real part `+0.174` corresponds
-to a time constant of only ~6 units (compared to ~12 units for the
-VM-circle island, which orbits with period ≈ 17.4).
-
-Trajectories shown in the bottom row of `hopf_overview.png`.
-
-### Criticality: exit-via-saddle, not exit-via-LC
-
-The (1.35, 2.40) cell has Re=+0.174 but Im=+0.0094 — nearly
-Bogdanov-Takens. Re-evaluating all 86 Hopf+ cells for the (Re, Im) of
-their complex pair, the Hopf-unstable foci trace a curve from
-large-Re/small-Im (near-BT) to small-Re/large-Im (just past the Hopf
-curve, Im ≈ 0.39). At observer (1.45, 2.45) the eigenvalues are
-`+0.0517 ± 0.3388j` — modest unstable spiral with period 2π/0.339 ≈ 18.5
-and growth e-folding 1/0.052 ≈ 19, comparable to the VM-circle Hopf
-island (period ≈ 17.4).
-
-Forward integration from `ε ∈ {1e-4, 5e-3, 5e-2}` perturbations:
-log-distance from the focus grows **almost exactly as `exp(Re·t)`** with
-no intermediate saturation. Around t ≈ 120 (for ε=1e-4), the trajectory
-reaches the saddle at θ=-0.928 (only 0.053 rad from the Hopf focus at
-θ=-0.981); the saddle's unstable manifold then sweeps the trajectory to
-the global stable focus within ~30 more time units. **No limit-cycle
-plateau interposes at any amplitude scale.**
-
-Backward integration diverges to e+37 within t=100 (the global stable
-focus becomes repelling in reverse time and pushes trajectories
-unboundedly), so backward integration cannot reveal a putative unstable
-LC in this multistable landscape.
-
-Mechanistically: the Hopf-unstable focus is the *local* picture in the
-linearization, but the *global* escape route runs through the
-neighboring saddle's stable manifold rather than around a limit cycle.
-The Hopf bifurcation here is "soft" — linearly Hopf-unstable but with
-no robust limit-cycle attractor or repeller, because the saddle
-structure intervenes before any LC can develop. This is fundamentally
-different from the VM-circle case, where the Hopf focus sits inside a
-1-equilibrium region with no nearby saddles, so the unstable manifold
-*must* close into a stable cycle.
-
-`hopf_criticality.png` shows the exp(Re·t) growth and the absence of
-any saturation plateau.
-
-### Why the picture is so different from VM/circle
-
-In the VM-circle case, the Hopf-unstable focus appears inside a
-1-equilibrium region — a thin "wedge" between the saddle-node curve and
-the Hopf curve where only one self-consistent eq exists. There is
-nowhere else for a trajectory to go, so a limit cycle must exist (and
-does).
-
-In delta + uniform, the Hopf-positive cells sit inside multistable regions
-(3 to 5 self-consistent eqs). The Hopf bifurcation removes the local
-stability of one focus but the other stable focus remains a global
-attractor; the basin of the stable focus extends across the formerly
-local basin of the now-unstable focus, with at most a tiny unstable
-limit cycle separating them. There's no closed bounded region where
-trajectories must orbit.
-
-### On the y=0 midway spiral specifically
-
-The original open question was prompted by the uniform-weight midway
-equilibrium at (0.76, 0) having eigenvalues `−0.054 ± 0.175i` — a
-slowly-decaying spiral that looked Hopf-adjacent. Walking the observer
-along y=0 and tracking the midway-equilibrium eigenvalues shows that
-the complex pair never actually crosses zero from below: the spiral
-collides on the real axis (the complex pair merges into two real
-eigenvalues) and one of the resulting real eigenvalues then crosses
-zero — i.e., the destabilization is a real-eigenvalue crossing
-(pitchfork-like, consistent with the y=0 symmetry), not a Hopf. The
-Hopf-positive cells found above are all off-axis.
+The prompt was the uniform-weight midway equilibrium at (0.76, 0) having a
+slowly-decaying complex pair that "looked Hopf-adjacent". That complex pair
+is a γ-level object and is not trustworthy. What *is* trustworthy is the
+destabilization itself: along y=0 the midway equilibrium loses stability
+through a **real** eigenvalue crossing zero (pitchfork-like, consistent with
+the y=0 mirror symmetry) — a `det J` sign change, hence invariant. Whether
+any genuine oscillatory instability exists in this configuration is
+**unanswered**, and answering it requires the `(n⃗, θ)` population system
+plus an explicit neural timescale `τ₀`.
 
 ## Walker blind-spot trap under cutoff weighting (delta targets)
 
@@ -624,10 +544,8 @@ is in the conversation transcript that produced this section.
   the comparison was not conclusive. Worth a focused follow-up before any
   decision about removing the weighting.
 - **Walker SDE dynamics, basin sizes, noise-induced switching.** All the
-  long-time integrations above are deterministic. With noise (the
-  walker's `std` term), the Hopf-unstable focus + stable focus pair may show
-  noise-driven switching between near-orbiting and settled states; this
-  has not been characterized.
+  long-time integrations above are deterministic; noise-induced switching
+  between coexisting stable headings has not been characterized.
 - **Capsule targets.** Likely lie between deltas and circles depending on
   `l`/`w`; not characterized here.
 
@@ -647,7 +565,7 @@ caching behind a JSON fingerprint of every input that affects the result):
 ```
 python weighting_analysis/ears_figure.py              # both ear figures
 python weighting_analysis/ears_figure.py diagnostic   # just the mechanism panel
-python weighting_analysis/ears_figure.py sweep --criterion coupled --areas-only
+python weighting_analysis/ears_figure.py sweep --criterion discrim_a --areas-only
 python weighting_analysis/outward_bias.py all
 python weighting_analysis/wrapping_fix_effect.py
 python weighting_analysis/anti_foveal_selftest.py
@@ -682,39 +600,16 @@ they can be rebuilt, but there is no runnable file):
   the eigenvalue through zero define the FULL/uniform disagreement band
   on the y=0 axis. Reproduction script in the transcript.
 
-Note that all four delta figures predate both the `'reduced'` default and the
+Note that the three delta figures predate both the `'reduced'` default and the
 wrapping-extent fix. The fix cannot touch them — delta targets use a *pointwise*
 weight, never the arc integral, so they were never subject to the wrapping bug —
-but the criterion change means their numbers are `'coupled'` numbers. The
-`ears_figure.py` circle sweep has been regenerated under the current defaults;
-these have not.
-### Hopf-island investigation — numerical methods
+and the criterion change is now known to be almost inert here: `'coupled'` and
+`'reduced'` differ only where a *complex pair* crosses zero, since `eig(A)` and
+`sign(det J)` are invariant under the reduction error (see the retraction
+section above). So these rasters and threshold crossings are correct except in
+the handful of Hopf cells. The `ears_figure.py` circle sweep has been
+regenerated under the current defaults; these have not.
 
-The Hopf-island section above (`hopf_overview.png`, `hopf_criticality.png`)
-was produced by a set of one-off scripts that have since been deleted;
-this paragraph captures the parameterization for reproducibility.
-
-- **Equilibrium finder.** `NeuralBandModel.sc_equilib(focal_loc=fl,
-  stability_criterion='coupled')`. This is the canonical self-consistent
-  finder in the library (see [decision_model.py:2250](../decision_model.py)) —
-  brentq sign-change scan over θ at `R_probe = 0.5`, hybr polish each
-  candidate, residual filter `1e-4`, dedup with circle-distance(θ) <
-  0.02 AND `|R − R'| < 0.01`. At all test cells above it returns the
-  same eqs as my one-off custom finder, with machine-precision residuals.
-- **Coupled Jacobian.** 3×3 finite-difference Jacobian of
-  `(γ_re, γ_im, θ) → (Re dγ/dt, Im dγ/dt, K·R·sin(ego_angle))` at the
-  equilibrium, with step `h = 1e-6`. Stability classification:
-  *Hopf-unstable focus* if max real part is positive and any eigenvalue
-  has `|Im| > 1e-6`; *saddle* if all eigenvalues are real with exactly
-  one positive; *stable* if max real part `< −1e-8`.
-- **Bifurcation rasters.** Observer window `[0, 6] × [-3.5, 3.5]` at
-  121 × 141 cells. Multiprocessing pool sized via `parallel_config.get_n_workers()`.
-- **Forward / backward integration.** `scipy.integrate.solve_ivp` with
-  `method='LSODA'`, `rtol=1e-10`, `atol=1e-12`, `max_step=0.2`. Time
-  windows: `T_fwd = 200` and `T_bwd = 100` for the criticality test at
-  (1.45, 2.45); longer windows (T=300–4000) for the (1.35, 2.40)
-  trajectory in `hopf_overview.png`.
-- **Test cells.** (1.35, 2.40) for the headline trajectory (Re=+0.174,
-  Im=+0.009, near-BT); (1.45, 2.45) for the criticality test (Re=+0.052,
-  Im=+0.339, period ≈ 18.5, e-folding ≈ 19); (2.0, 2.7) as a
-  just-past-Hopf-curve probe (Re=+0.0005, Im=+0.392).
+The `_delta_rasters.npz` cache referenced above is **not present** in this
+folder, so `delta_sweep_comparison.png` cannot currently be rebuilt even from
+the recorded parameterization.

@@ -9,7 +9,7 @@ Auto-loads under `weighting_analysis/`. Full write-up: [weighting_analysis/READM
 
 One-line takeaway: now that warp and weight are decoupled, **warping alone reproduces the bifurcation structure of full weighting except for two "ears"** of extra far-target bistability at off-axis observer positions behind two circle targets — present under a non-uniform `angle_weight`, absent under uniform (`angle_weight=None`, the default). The ears are therefore now opt-in.
 
-The README also covers the delta-target threshold shift, a delta+ANGLE Hopf follow-up (Hopf-unstable foci but no limit cycle), and the cutoff blind-spot trap (**resolved** — its "torque death" step describes the pre-half-angle `sin(ego)` law; the README section now carries a status banner).
+The README also covers the delta-target threshold shift, a **retracted** delta+ANGLE Hopf follow-up (it used the removed `'coupled'` criterion; its retraction section carries the triage rule — `eig(A)` and `sign(det J)` are invariant under the reduction error, so only complex-pair/Hopf classifications anywhere in the folder are affected), and the cutoff blind-spot trap (**resolved** — its "torque death" step describes the pre-half-angle `sin(ego)` law; the README section now carries a status banner).
 
 **Vocabulary note:** the README's tables and prose still say **FULL** / **ANGLE-only**; read those as *weight tied to the warp* / *uniform weight*. It now carries its own Old→new mapping table near the top (see also [.claude/rules/perception-and-solver.md](perception-and-solver.md)).
 

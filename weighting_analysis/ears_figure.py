@@ -13,14 +13,16 @@ transcript). They are now stale for two independent reasons:
      figure therefore showed phantom structure.
   2. **The default stability criterion** moved from `'coupled'` to `'reduced'`
      (2026-06-08), and warp/weight were decoupled, retiring the
-     `weight_angle_only` flag the old titles used.
+     `weight_angle_only` flag the old titles used. `'coupled'` has since been
+     removed from the model entirely (2026-08-19): it linearized an incomplete
+     equation -- see `NeuralBandModel._discrim_reduced`.
 
 This script pins the whole computation so the figures can be rebuilt. It uses
 the CURRENT model defaults -- `stability_criterion='reduced'`, `K=2` -- rather
 than the old `'coupled'`/`K=1` pair. (Stable counts are K-invariant at an SC
 equilibrium; see .claude/rules/torque-and-stability.md. The criterion is not
 invariant, so the numbers here are not directly comparable to the old table --
-see README.md.)
+see README.md. `'coupled'` is no longer selectable.)
 
 Vocabulary: the old FULL / ANGLE-only pair is now
     FULL    = neural_angle_dist=W, angle_weight='neural_angle_dist'
@@ -442,10 +444,9 @@ def main(argv=None):
                     help='sweep, diagnostic, or all')
     ap.add_argument('--regenerate', action='store_true')
     ap.add_argument('--criterion', default=CRITERION,
-                    choices=['reduced', 'coupled', 'discrim_a'],
+                    choices=['reduced', 'discrim_a'],
                     help="stability criterion (default %(default)s -- the "
-                         "model default). Use 'coupled' to reproduce the "
-                         "2026-05 run's criterion.")
+                         "model default).")
     ap.add_argument('--rows', type=int, nargs='*', default=None,
                     help='restrict to these row indices (default: all). Useful '
                          'for the slow most-peaked row 0 alone.')

@@ -37,7 +37,7 @@ import pytest
 from decision_model import Targets, PerceptionModel, NeuralBandModel
 
 pi = np.pi
-CRITERIA = ('reduced', 'coupled', 'discrim_a')
+CRITERIA = ('reduced', 'discrim_a')
 
 
 def _fly2():

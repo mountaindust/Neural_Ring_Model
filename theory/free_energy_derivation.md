@@ -5,16 +5,15 @@ deterministic NBM γ-dynamics, in a form usable for (a) computing
 γ-basin barrier heights ΔF_γ, and (b) calibrating the γ-Langevin noise
 amplitude.
 
-**Independence note.** This derivation uses the user's Hamiltonian
-(Eq. `eq:H_orig` in the writeup shared in session) and the Glauber
-route to the γ-ODE (which matches `decision_model.py`'s `dgamma_dt`). It
-does **not** refer to any free-energy expression in
-`Hamiltonian ideas.tex` or other prior notes.
+**Independence note.** This derivation uses the project Hamiltonian and the
+Glauber route to the γ-ODE from the project preprint (which matches
+`decision_model.py`'s `dgamma_dt`). It does **not** reuse any free-energy
+expression from earlier notes.
 
 **Status — validated.** Every numerical check in §9 passed: the
 analytical gradient matches finite differences (~1e-8) and equals
 dγ/dt; ∇F̂≈0 at γ-equilibria; the Hessian matches the full-block
-stability criteria (`_discrim_reduced`/`_discrim_coupled` — but see
+stability criteria (`_discrim_reduced` — but see
 §6.1 for why the scalar `A < 1` alone is necessary-not-sufficient); and
 `2β·F̂` equals the mean-field free energy per spin (measured in units of
 `k_B·temp`). The barrier height ΔF_γ and the noise calibration
@@ -268,7 +267,7 @@ was indefinite:
    `_discrim_reduced = False` (right).
 
 **Implications for the code.**
-- `_discrim_reduced` (default) and `_discrim_coupled` use the **full**
+- `_discrim_reduced` (default) uses the **full**
   2×2 block (`all(eig(A_block)) < 0`), i.e. the complete `H_{F̂} ≻ 0`
   test — both diagonal conditions *and* the determinant. They are
   unaffected: they correctly reject all 148 over-counts.
@@ -339,8 +338,7 @@ above. No new perception code needed.
 2. At γ-equilibria from `gamma_equilib(focal_angle=θ)`, `∇F̂(γ*) ≈ 0`
    to ~1e-6.
 3. Hessian eigenvalues at γ-equilibria match the *full 2×2*
-   positive-definiteness label (and `_discrim_coupled` after projecting
-   out the θ-direction). **Caveat (see §6.1):** they match `_discrim_A`'s
+   positive-definiteness label (after projecting out the θ-direction). **Caveat (see §6.1):** they match `_discrim_A`'s
    `A < 1` scalar only where the R–Θ off-diagonal is ≈0 (mirror-symmetric
    / on-axis configs, which this spot-check happened to sample); `A < 1`
    is necessary but not sufficient in general.
