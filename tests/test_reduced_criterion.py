@@ -15,7 +15,7 @@ NeuralBandModel._discrim_reduced, "Why there is no fully-coupled criterion".
 
 These tests verify the criterion is *correct*, not merely self-consistent:
 
- - test_schur_block_determinant_identity_*:
+ - test_schur_block_determinant_identity_nbm:
        det(J) == det(A) * (d - c A^{-1} b)  -- the block-determinant identity,
        validating the Schur partition against the full Jacobian.
 
@@ -46,8 +46,7 @@ from scipy.optimize import root
 import warnings
 warnings.filterwarnings('ignore')
 
-from decision_model import (Targets, PerceptionModel, NeuralBandModel,
-                            IsingExtModel)
+from decision_model import Targets, PerceptionModel, NeuralBandModel
 
 TWO_CIRCLE = np.array([[4.33, 2.5], [4.33, -2.5]])
 
@@ -67,11 +66,6 @@ def _nbm_cutoff():
                          a_warp=0.0, b_warp=np.pi, angle_weight=None)
     return NeuralBandModel(pm)
 
-
-def _iem_plain():
-    t = Targets(locs=TWO_CIRCLE, geom_name='circle', r=0.5)
-    pm = PerceptionModel(t, (0, 0), 0, neural_angle_dist=None, angle_weight=None)
-    return IsingExtModel(pm)
 
 
 def _blocks(J):
@@ -103,11 +97,6 @@ def _nbm_sc_eqs(nbm, fl):
         eqs.append((R_s + 0j, float(th_s)))
     return eqs
 
-
-def _iem_sc_eqs(iem, fl):
-    """IEM self-consistent equilibria: gamma is already the equilibrium in
-    allocentric coordinates, with focal_angle = angle(gamma)."""
-    return [(g, float(np.angle(g))) for g in iem.sc_equilib(focal_loc=fl)]
 
 
 def _branch_gamma(model, theta, focal_loc, warm):
@@ -145,12 +134,6 @@ def test_schur_block_determinant_identity_nbm():
     assert max_rel < 1e-4, f"NBM det(J) != det(A)*Schur, max rel err {max_rel:.2e}"
 
 
-def test_schur_block_determinant_identity_iem():
-    iem = _iem_plain()
-    locs = [(1.0, 0.0), (1.5, 0.0), (2.0, 0.0), (2.5, 0.0), (1.5, 0.5)]
-    max_rel, n = _check_block_det_identity(iem, _iem_sc_eqs, locs)
-    assert n >= 4, f"too few IEM equilibria sampled ({n})"
-    assert max_rel < 1e-4, f"IEM det(J) != det(A)*Schur, max rel err {max_rel:.2e}"
 
 
 # --------------------------------------------------------------------------
@@ -215,19 +198,17 @@ def test_no_coupled_criterion():
     """'coupled' was removed: the full eigenvalues of the
     (gamma_re, gamma_im, theta) Jacobian linearize an incomplete equation.
     Every entry point must reject it, and the discriminant must be gone."""
-    nbm, iem = _nbm_cutoff(), _iem_plain()
+    nbm = _nbm_cutoff()
     fl = np.array([2.0, 0.5])
 
-    for model in (nbm, iem):
-        assert not hasattr(model, '_discrim_coupled'), (
-            f"{type(model).__name__}._discrim_coupled should not exist")
+    assert not hasattr(nbm, '_discrim_coupled'), (
+        "NeuralBandModel._discrim_coupled should not exist")
 
     for call in (lambda: nbm.sc_equilib(focal_loc=fl,
                                         stability_criterion='coupled'),
                  lambda: nbm.gamma_equilib(focal_angle=0.0, focal_loc=fl,
                                            stability_criterion='coupled'),
-                 lambda: nbm._count_stable_at(('k', 2.0, 0.5, 'coupled')),
-                 lambda: iem._count_stable_at(('k', 2.0, 0.5, 'coupled'))):
+                 lambda: nbm._count_stable_at(('k', 2.0, 0.5, 'coupled'))):
         with pytest.raises(ValueError, match='stability_criterion'):
             call()
 
@@ -293,8 +274,6 @@ def test_defaults_are_reduced():
         (NeuralBandModel, 'gamma_equilib'),
         (NeuralBandModel, 'plot_bifurcation_diagram'),
         (NeuralBandModel, 'plot_direction_mesh'),
-        (IsingExtModel, 'plot_bifurcation_diagram'),
-        (IsingExtModel, 'plot_direction_mesh'),
     ]
     for cls, name in targets:
         sig = inspect.signature(getattr(cls, name))
@@ -304,7 +283,6 @@ def test_defaults_are_reduced():
 
 if __name__ == '__main__':
     test_schur_block_determinant_identity_nbm()
-    test_schur_block_determinant_identity_iem()
     test_schur_equals_slaved_slow_flow_nbm()
     test_reduced_reproduces_documented_vonmises_disagreement()
     test_no_coupled_criterion()

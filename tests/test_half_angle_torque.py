@@ -1,13 +1,12 @@
-"""Tests for the half-angle heading-torque law (NBM: dtheta/dt =
-K*R*sin(arg(gamma)/2) in the neural consensus angle; IEM: K*|gamma|*sin(ego/2)
-in the physical angle difference).
+"""Tests for the half-angle heading-torque law
+dtheta/dt = K*R*sin(arg(gamma)/2) in the neural consensus angle.
 
 Covers:
-  - NBM torque shape: zero only at arg(gamma)=0, monotone, +-K*R at
+  - Torque shape: zero only at arg(gamma)=0, monotone, +-K*R at
     arg(gamma)->+-pi, and the intentional 2*K*R jump across the +-pi branch cut.
-    (The NBM shape tests use the identity warp, where ego == arg(gamma).)
-  - IEM torque shape + the convert_angles wrapping regression (sin(x/2) is
-    4*pi-periodic, so the egocentric argument MUST be wrapped before halving).
+    (The shape tests use the identity warp, where ego == arg(gamma).)
+  - convert_angles is odd at the +-pi branch cut, so the fork direction is
+    inherited from the sign of its argument.
   - Bifurcation invariance: doubling K exactly cancels the 1/2 from
     sin(arg(gamma)/2) in the coupled 3x3 Jacobian at self-consistent equilibria,
     so eigenvalues (and hence stability / Hopf / SN structure) are unchanged vs
@@ -52,21 +51,12 @@ def _identity_nbm(K=2):
     return dm.NeuralBandModel(percep_model=pm, beta=10.0, K=K)
 
 
-def _identity_iem(K=2):
-    targets = dm.Targets(locs=np.array([(4.33, 2.5), (4.33, -2.5)]),
-                         geom_name='circle', r=0.5)
-    pm = dm.PerceptionModel(targets=targets, focal_loc=(0.0, 0.0),
-                            focal_angle=0.0,
-                            neural_angle_dist=None, angle_weight=None)
-    return dm.IsingExtModel(percep_model=pm, T=0.2, K=K)
-
 
 # ---------------------------------------------------------------------------
 # NBM torque shape
 # ---------------------------------------------------------------------------
 def test_nbm_default_K_is_2():
     assert dm.NeuralBandModel().K == 2
-    assert dm.IsingExtModel().K == 2
 
 
 def test_nbm_torque_shape():
@@ -102,30 +92,6 @@ def test_nbm_torque_max_at_facing_away_and_jump():
 
 
 # ---------------------------------------------------------------------------
-# IEM torque shape + wrapping regression
-# ---------------------------------------------------------------------------
-def test_iem_torque_value_and_wrapping():
-    K, R = 2.0, 0.6
-    iem = _identity_iem(K=K)
-    # pick phi, theta so the raw egocentric arg leaves (-pi, pi]
-    phi, theta = 2.0, -2.0          # phi - theta = 4.0 > pi
-    gamma = R*np.exp(1j*phi)
-    val = iem.dtheta_dt(theta=theta, gamma=gamma)
-    ego_wrapped = dm.convert_angles(phi - theta)       # 4.0 -> 4.0 - 2pi
-    assert val == pytest.approx(K*R*np.sin(ego_wrapped/2))
-    # regression: must NOT use the unwrapped argument
-    assert val != pytest.approx(K*R*np.sin((phi - theta)/2))
-
-
-def test_iem_torque_2pi_invariance():
-    iem = _identity_iem(K=2.0)
-    gamma = 0.6*np.exp(1j*1.1)
-    base = iem.dtheta_dt(theta=0.3, gamma=gamma)
-    # invariant under theta -> theta + 2pi (would fail without convert_angles)
-    assert iem.dtheta_dt(theta=0.3 + 2*np.pi, gamma=gamma) == pytest.approx(base)
-
-
-# ---------------------------------------------------------------------------
 # convert_angles is odd at the +-pi branch cut
 # ---------------------------------------------------------------------------
 def test_convert_angles_is_odd_including_the_cut():
@@ -151,20 +117,6 @@ def test_convert_angles_is_odd_including_the_cut():
     # idempotent: wrapping an already-wrapped value is a no-op
     assert np.array_equal(dm.convert_angles(wide), wide)
 
-
-def test_fork_direction_follows_the_sign_of_the_unwrapped_argument():
-    """At exactly facing-away the torque is a left/right fork; its direction
-    must be inherited from the sign of the raw egocentric argument, not fixed.
-    """
-    K, R = 2.0, 0.6
-    iem = _identity_iem(K=K)
-    # two mirror-image states, both with |ego| == pi exactly
-    t_plus = iem.dtheta_dt(theta=-np.pi/2, gamma=R*np.exp(1j*(np.pi/2)))
-    t_minus = iem.dtheta_dt(theta=np.pi/2, gamma=R*np.exp(1j*(-np.pi/2)))
-    assert t_plus == pytest.approx(K*R)
-    assert t_minus == pytest.approx(-K*R)
-    # mirror states must turn opposite ways (they both turned right before)
-    assert t_plus == pytest.approx(-t_minus)
 
 
 # ---------------------------------------------------------------------------
@@ -406,19 +358,19 @@ def test_no_cos_factor_in_constant_mode():
 
 
 def test_walk_std_default_is_half_pi():
-    """The walk_std signature default moved 0.75pi -> 0.5pi for both models."""
+    """The walk_std signature default moved 0.75pi -> 0.5pi."""
     import inspect
-    for cls in (dm.NeuralBandModel, dm.IsingExtModel):
-        d = inspect.signature(cls.plot_walkers).parameters['walk_std'].default
-        assert d == pytest.approx(0.5 * np.pi)
+    d = inspect.signature(
+        dm.NeuralBandModel.plot_walkers).parameters['walk_std'].default
+    assert d == pytest.approx(0.5 * np.pi)
 
 
 def test_R_exp_default_is_one():
     """R_exp default is a flat 1 (the model torque) for every noise_exp -- the
     old regime-aware None -> 1/noise_exp coupling was removed."""
     import inspect
-    for cls in (dm.NeuralBandModel, dm.IsingExtModel):
-        assert inspect.signature(cls.plot_walkers).parameters['R_exp'].default == 1
+    assert inspect.signature(
+        dm.NeuralBandModel.plot_walkers).parameters['R_exp'].default == 1
     nbm = _offaxis_model(); ang = np.pi / 2
     # noise_exp=2 with std=0 (noise off -> RNG-independent, location set purely by
     # drift): the default-driven step is the model torque (R_exp=1), NOT the old

@@ -1,18 +1,16 @@
 # Tests — running convention
 
-This directory mixes **two kinds of tests by design**, plus one **slow, run-it-deliberately
-research script**. There is no `pytest.ini`/`pyproject.toml`; pytest runs on naming-convention
-defaults. [`conftest.py`](conftest.py) only adds the repo root to `sys.path` so
+This directory mixes **two kinds of tests by design**. There is no
+`pytest.ini`/`pyproject.toml`; pytest runs on naming-convention defaults. [`conftest.py`](conftest.py) only adds the repo root to `sys.path` so
 `import decision_model` resolves.
 
 ## TL;DR
 
 ```sh
-pytest tests/                      # runs the whole fast suite (everything except broad_validation)
-python tests/test_broad_validation.py   # the slow cross-model validation — run on purpose, not in routine testing
+pytest tests/                      # runs the whole suite
 ```
 
-Every file except `test_broad_validation.py` is collected and run by `pytest tests/`.
+Every file here is collected and run by `pytest tests/`.
 
 ## The two tiers
 
@@ -21,7 +19,7 @@ Discrete `test_*` functions with `assert`s. Run under pytest; some also re-invok
 their own functions from a `__main__` block, so `python tests/<file>.py` works too.
 
 - [`test_half_angle_torque.py`](test_half_angle_torque.py) — dθ/dt half-angle torque law (NBM
-  neural-angle form, IEM physical form), torque shape + the ±π branch-cut jump, the
+  neural-angle form), torque shape + the ±π branch-cut jump, the
   `convert_angles` 4π-wrap regression, K-doubling Jacobian invariance, and walker
   noise/blind-spot behavior.
 - [`test_reduced_criterion.py`](test_reduced_criterion.py) — correctness of the `'reduced'`
@@ -41,6 +39,13 @@ their own functions from a `__main__` block, so `python tests/<file>.py` works t
   the analytic `_discrim_A` free-energy Hessian with the numerically-differenced fast
   block (the only cross-check on that Hessian's β), and equivalence with the earlier
   `N/T` coupling where every target is perceived.
+- [`test_angle_distortion_nu.py`](test_angle_distortion_nu.py) —
+  `NeuralBandModel(angle_distortion_nu=...)`, the distorted cosine coupling kernel folded
+  in from the retired `IsingExtModel`. ν=None and ν=1 leave the model bit-identical to the
+  plain-cosine one; the constructor's *and* the property setter's identity-warp/uniform-weight
+  requirement (plus non-positive/non-finite ν); the kernel's zero crossing; the `convert_angles`
+  wrap regression (the ν kernel is not 2π-periodic); the `_discrim_A` numerical fallback vs the
+  analytic Hessian; and `plot_dtheta_dt`'s neutral-seed sweep not leaking `self.gamma`.
 
 ### 2. Numerics-verification scripts (also pytest-discoverable)
 These run their checks at **module import** using `check_*`/`ok`/`raises` helpers that tally
@@ -68,21 +73,6 @@ non-zero exit code. `python tests/<file>.py` and `pytest` therefore agree.
   bridging pattern. New decoupled warp/weight API: cross-family warp+weight, per-role params,
   tied-vs-uniform equivalence, respline isolation, read-only `warp_params`/`weight_params`
   views, and error paths.
-
-## ⚠️ The slow one — run deliberately
-
-[`test_broad_validation.py`](test_broad_validation.py) is a **research-grade cross-model
-comparison**, not a unit test. It compares NBM vs IEM self-consistent equilibria over a
-238-point spatial grid × {delta, circle} × {no-warp, power `c=0.5`} using
-`multiprocessing.Pool`, with worker count from [`parallel_config.py`](../parallel_config.py).
-
-- All work lives inside `if __name__ == '__main__':`, so **`pytest` imports it but runs
-  nothing** — it is intentionally excluded from the routine suite.
-- Run it **only on purpose**, with `python` (not pytest), on the many-core machine:
-  ```sh
-  python tests/test_broad_validation.py
-  ```
-- It takes a long time and saturates cores — do not fold it into a default test run or CI step.
 
 ## Why some tests aren't `assert`-style
 

@@ -8,12 +8,12 @@ Mathematical model of collective decision-making based on Ising-type dynamics on
 
 ## Codebase layout
 
-- [decision_model.py](decision_model.py) — the project's research code (~4200 lines). Two model classes (`NeuralBandModel`, `IsingExtModel`), a `PerceptionModel`, and a `Targets` helper.
+- [decision_model.py](decision_model.py) — the project's research code (~4800 lines). The `NeuralBandModel`, a `PerceptionModel`, and a `Targets` helper.
 - Jupyter notebooks (`compare_sc_vm.ipynb`, `compare_sc_beta.ipynb`, `neural_band.ipynb`, `neural_band_walker.ipynb`, `ising_workbook.ipynb`, `debug_all_unstable.ipynb`) — testing, exploration, and visualization.
 - [archive/](archive/) — retired material, not part of the active model: `early_ideas/`, `old_basin_plots/`, and `stale_coupled_model_starting_code/` (scripts written against the removed `'coupled'` criterion; kept only as starting code for an eventual `(n⃗, θ)` population-level comparison — see its README).
 - [theory/](theory/) — durable theory: the basin-of-attraction findings catalogue ([basins_of_attraction.md](theory/basins_of_attraction.md)), the F̂ free-energy derivation ([free_energy_derivation.md](theory/free_energy_derivation.md)), the block-determinant identity behind `'reduced'` ([block_determinant_identity.tex](theory/block_determinant_identity.tex)), a Lyapunov/Langevin/Kramers background tutorial ([theory_background.md](theory/theory_background.md)), and [reduced_dynamics_anatomy.py](theory/reduced_dynamics_anatomy.py) — derives the γ-bistability relaxation-oscillation period by branch integration (the paper figure for the same phenomenon is `plots/stability_comparison_figure.py`). The basin *visualization* is implemented in [decision_model.py](decision_model.py) (`NBM.plot_bifurcation_diagram(overlay_basins=True)`); see "Basin-of-attraction overlay" below.
 - [weighting_analysis/](weighting_analysis/) — warp-vs-weight "ears" analysis ([README.md](weighting_analysis/README.md)) and the anti-foveal outward-bias study ([outward_bias.md](weighting_analysis/outward_bias.md)). Also the home of `anti_foveal.py`, which preserves two weight families that were tried and then removed from the model — nothing outside this directory should import it.
-- [tests/](tests/) — unit tests (`test_broad_validation.py`, `test_intervals.py`, `test_segments.py`, `test_half_angle_torque.py`, `test_reduced_criterion.py`, …). **Running convention in [tests/README.md](tests/README.md):** `pytest tests/` runs the whole fast suite; `test_broad_validation.py` is a slow multiprocessing cross-model script excluded from pytest — run it deliberately with `python tests/test_broad_validation.py`.
+- [tests/](tests/) — unit tests (`test_intervals.py`, `test_segments.py`, `test_half_angle_torque.py`, `test_reduced_criterion.py`, `test_angle_distortion_nu.py`, …). **Running convention in [tests/README.md](tests/README.md):** `pytest tests/` runs the whole suite.
 - [Matlab/](Matlab/) — legacy prototype code, not part of the active model.
 - [PARALLEL_CONFIG.md](PARALLEL_CONFIG.md), [parallel_config.py](parallel_config.py), [machine_config.py](machine_config.py) — per-machine worker-count settings; mesh sweeps and bifurcation refinement use `multiprocessing` extensively.
 - [TODO.md](TODO.md) — engineering TODO; [TODO_Jan_2026.md](TODO_Jan_2026.md) — archived research-direction prose.
@@ -26,18 +26,21 @@ The model lives in three distinct angular coordinate frames. Keeping them straig
 2. **Egocentric** — directions relative to the observer's current heading. `egocentric = allocentric − heading`. Center of visual field is 0.
 3. **Neural** — egocentric angles passed through a neural mapping (e.g. power mapping `f(θ) = π·sign(θ)·|θ/π|^c`, or the integral-spline mapping). Models denser neural representation near the center of the visual field (foveal region).
 
-**Why this matters mathematically:** with a non-identity warp (`c ≠ 1`), `f(a+b) ≠ f(a) + f(b)`. The neural landscape is therefore *heading-dependent*: rotating the observer changes not just which direction is "center" but the relative spacing of all perceived target angles in neural space. The two model classes handle this nonlinearity differently — which is the entire reason both exist.
+**Why this matters mathematically:** with a non-identity warp (`c ≠ 1`), `f(a+b) ≠ f(a) + f(b)`. The neural landscape is therefore *heading-dependent*: rotating the observer changes not just which direction is "center" but the relative spacing of all perceived target angles in neural space. Most subtle bugs in this codebase trace back to a coordinate-frame mismatch.
 
-## Two model classes
+## The model
 
 ### `NeuralBandModel` (NBM)
 
 The current/preferred model. γ lives in **egocentric/neural** space.
 
 - The coupling kernel *and* the pull direction in `dγ/dt` both use neural (warped egocentric) angles.
-- **Neural coupling is `beta`** (default 10): `dγ/dt = Σⱼ ρⱼ e^{iθ̂ⱼ}·σ(2·β·R·cos(θ̂ⱼ−Θ)) − γ`. See "Neural temperature" below.
+- **Neural coupling is `beta`** (default 10): `dγ/dt = Σⱼ ρⱼ e^{iθ̂ⱼ}·σ(2·β·R·J(θ̂ⱼ−Θ)) − γ`, with `J` the coupling kernel — plain `cos` unless `angle_distortion_nu` is set (below). See "Neural temperature" below.
 - Walker torque: `dθ/dt = K·R·sin(Θ/2)` where `Θ = arg(γ)` is the **neural** consensus angle and `R = |γ|` — the **half-angle law in the neural angle directly**, no inverse-warp mapping. `Θ ∈ (−π, π]` is already wrapped before halving; neural angle 0 is straight ahead (the SC equilibrium), `±π` is facing-away. Default `K=2`. (Derivation + the 2026-06-02 move off the inverse-warp form: `.claude/rules/torque-and-stability.md`.)
 - Self-consistent equilibria have γ = R + 0j (real positive): heading=consensus ⇒ egocentric consensus = 0 ⇒ Θ_neural = f(0) = 0 ⇒ γ = R + 0j.
+- **`angle_distortion_nu` (default None) — the Sridhar et al. (2021) distorted cosine kernel** `J(x) = cos(π·(|x|/π)^ν)`, Eq. [2]. It bends the coupling *strength* between two perceived directions (zero crossing moves from π/2 to `π·(1/2)^{1/ν}`; **lower ν is sharper**) while leaving the `e^{iθ̂}` phase alone — a warp moves the phase too, so the two are different mechanisms and **no warp/weight can imitate ν** (every warp/weight keeps the fast γ-block symmetric; ν≠1 gives asymmetry ≈ ‖A‖). Setting it **requires `PerceptionModel(neural_angle_dist=None, angle_weight=None)`** and raises `ValueError` otherwise; with no `percep_model` supplied, one of that form is built. It is a **validating property** — must be positive, and the same perception-model check runs on later assignment (sweeping ν), against whatever `percep_model` is attached at that moment. `None` and an explicit `ν=1` are the plain cosine and are bit-identical to the model without it — every ν-specific branch keys off `_nu_active` (ν set *and* ≠ 1). See `nu_cosine` / `plot_nu_cosine`.
+  - **ν≠1 costs the gradient structure:** the fast block stops being symmetric, so F̂ and the analytic Hessian don't apply — `_discrim_A` falls back to the numerically differenced fast block (0/446 verdict disagreements against the analytic form at ν=1). `_discrim_reduced` (the default) is numerical and unaffected; so is the basin machinery, which is pure slaved-flow integration.
+  - **ν≠1 moves equilibria outward** (ν=0.5 puts them at `R ≈ 0.77–0.85`), past `sc_equilib`'s probe radii, so a **0.85 probe is added when and only when `_nu_active`**. Structure changes materially, not just in scale: ν=0.5 grids reach 5 SC equilibria where ν=1 reaches 3.
 
 Key methods:
 - [`sc_equilib`](decision_model.py#L2250) — self-consistent equilibrium finder (heading = consensus); used for bifurcation diagrams in (x, y). Returns `(allocentric_angles, stability_booleans)`.
@@ -47,16 +50,8 @@ Key methods:
 - [`convert_gamma`](decision_model.py#L2339) — inverse neural mapping from γ to `(ego_angle, R)`. Introspection only — **no longer on the torque path** (dθ/dt uses `arg(γ)` directly).
 - [`plot_walkers`](decision_model.py#L2979) — SDE walker simulation.
 - [`plot_direction_mesh`](decision_model.py#L2549), [`plot_bifurcation_diagram`](decision_model.py#L2734).
-
-### `IsingExtModel` (IEM)
-
-Closest to the published PNAS paper. γ lives in **allocentric** space.
-
-- When `ν ≠ 1`, the power transform applies only to the cosine-kernel coupling strength, not to the pull direction in `dγ/dt`. The exponential term uses physical (allocentric) angles for the pull direction.
-- Walker torque: `dθ/dt = K·|γ|·sin(convert_angles(angle(γ) − θ)/2)`. **Half-angle law.** Both `angle(γ)` and `θ` are allocentric; the egocentric argument is *not* pre-wrapped, so `convert_angles` must wrap it to `(−π, π]` before halving (`sin(x/2)` is 4π-periodic — load-bearing). Default `K=2`.
-- Self-consistent equilibria satisfy `dgamma_dt(γ, focal_angle=angle(γ)) = 0`.
-
-Key methods: [`sc_equilib`](decision_model.py#L3567) (self-consistent finder, returns gammas), [`gamma_equilib`](decision_model.py#L3502) (fixed-heading γ-finder), [`run_dgamma_dt`](decision_model.py#L3337), [`dtheta_dt`](decision_model.py#L3390), [`plot_bifurcation_diagram`](decision_model.py#L3668), [`plot_direction_mesh`](decision_model.py#L3891), [`plot_walkers`](decision_model.py#L4057).
+- `nu_cosine` / `plot_nu_cosine` — the coupling kernel and its plot.
+- `plot_dtheta_dt` — dθ/dt vs heading at a fixed location. `gamma=None` sweeps the carried γ (hysteretic through a bistable stretch); `gamma=False` re-seeds each heading from a neutral `γ = 0.1 + 0j` (the basin machinery's protocol) and restores `self.gamma`; a complex value is used directly.
 
 ### `PerceptionModel` API — warp and weight are decoupled
 
@@ -67,11 +62,9 @@ Key methods: [`sc_equilib`](decision_model.py#L3567) (self-consistent finder, re
 
 Change parameters post-init by **assigning** the generic two-slot properties `a_warp`/`b_warp`/`a_weight`/`b_weight` (`pm.a_warp = 0.55`, etc.) — this rebuilds only the affected role's splines. `warp_params`/`weight_params` are **read-only** views. Full parameter detail (`_FAMILY_INFO` per-family mapping, Old→new migration table, the strict setter / permissive getter, diagnostics) is in `.claude/rules/perception-and-solver.md`.
 
-**Planned: IEM will be folded into NBM and deleted** — it is NBM in a rotated frame (`γ_IEM = γ_NBM·e^{iθ}`) once β = N/T, and its only real extension is the ν-warped kernel. Verified plan + measurements: [theory/iem_nbm_fold.md](theory/iem_nbm_fold.md).
+**`IsingExtModel` was folded into NBM and deleted (2026-08-20).** It was NBM in a rotated frame (`γ_IEM = γ_NBM·e^{iθ}`) once β = N/T, and its only real extension — the ν kernel — now lives in NBM as `angle_distortion_nu`. To reproduce a result from it (or from Sridhar et al.), use `NeuralBandModel(PerceptionModel(neural_angle_dist=None, angle_weight=None), beta=N_total/T, angle_distortion_nu=ν)`. Exact wherever every target contributes something to perception; inside a full-occlusion shadow (`N_vis < N_total`) the old coupling silently weakened, so only `R` differs there (measured `4.5e-5` for two `r=0.5` circles) — keep β scene-independent, the physical argument under "Neural temperature" holds. Verified equivalence, caveats and measurements: [theory/iem_nbm_fold.md](theory/iem_nbm_fold.md); the surviving ν tests are [tests/test_angle_distortion_nu.py](tests/test_angle_distortion_nu.py).
 
-**IEM must be used with `neural_angle_dist=None, angle_weight=None`.** In IEM γ lives in allocentric/physical coordinates; the model assumes the observer perceives target angles directly. A non-identity `neural_angle_dist` on IEM is a category error — its `dγ/dt` math doesn't apply, and `sc_equilib` then returns near-empty diagrams (model rejecting an invalid input, not a solver bug).
-
-**NBM is the model for warped perception.** Foveal density, egocentric warping, any non-identity neural mapping → use NBM. The two are *not* substitutes under warping; they were designed to handle the warping nonlinearity in incompatible ways.
+**γ is transported through each heading step (2026-08-20).** A walker step moves the observer, not the neurons: the populations `nₖ` in `γ = Σₖ nₖ e^{iθ̂ₖ}` are unchanged by the turn itself (they relax afterwards, on the fast timescale) while every neural angle shifts by `−turn`. Re-evaluating the readout is therefore a rotation, and `_simulate_one_walk`, `_basin_destination` and `plot_dtheta_dt`'s swept mode all apply `γ *= e^{−i·turn}` after advancing the heading. Exact when the neural angles shift rigidly (identity warp); under a warp `θ̂ₖ = U(θₖ−θ)` shifts by `−U′·turn` per target, so it is the leading correction rather than exact. **Why it matters:** relaxing to equilibrium does not by itself name a γ — where the landscape is multistable the warm start selects the branch, and at a **fold**, where the branch the walker is riding ceases to exist (the compromise-breaking bifurcation the model exists to study), that selection sets the outcome. Refinement does not remove this: sub-stepping a fold crossing 1024× leaves the two conventions on opposite attractors. **Scope:** walker and basin paths only — every deterministic result sits at `θ̇=0` where there is no turn to transport through (verified bit-identical). The retired allocentric IsingExtModel transported γ implicitly through its frame, so this also brought the two walkers into agreement before it was deleted.
 
 ## Neural temperature: `beta` (NBM)
 
@@ -81,7 +74,7 @@ Change parameters post-init by **assigning** the generic two-slot properties `a_
 
 **Reading pre-β scripts and write-ups.** The earlier parameterization used a temperature `T` with the target count folded into the coupling, giving an effective `β = N/T` where `N` was the number of **currently visible** targets (`neur_angles.size`). To reproduce an old result, set `β = N_total/T` — exact wherever every target contributes to perception (partial occlusion is fine; only a target contributing *nothing*, `G == 0`, shrinks the old `N`). Under a restricted weight cone the two genuinely differ: in the 3-target foveal setups a target is fully out of view at ~34–48% of (position, heading) states, and there the old law's effective β dropped to `2/T` or lower while the new one holds. Scripts in `plots/`, `walker_analysis/`, `weighting_analysis/` carry their converted `BETA` with the arithmetic in a comment; note that a 2-target and a 3-target scene at the same old `T` need **different** β (e.g. `two_target_fly_refine.py` β=20 vs `three_target_fly_refine.py` β=30).
 
-**IEM still uses `T`** and still carries the visible-target factor (`2·N·R·cos(...)/T`); `IsingExtModel.T` and `NeuralBandModel.beta` are not the same quantity.
+The `angle_distortion_nu` path uses `beta` like every other NBM path — set `beta = N_total/T` to reproduce a Sridhar-style run, exact except inside an occlusion shadow (see the fold note above).
 
 ## Self-consistent equilibria
 
@@ -96,7 +89,7 @@ Two criteria via `stability_criterion=`, both built from the same numerically-di
 - **`'reduced'` (DEFAULT, since 2026-06-08)** — the timescale-separated test, consistent with γ slaved to equilibrium everywhere else in the model. Stable iff the fast γ block `A` is Hurwitz **and** the slow Schur complement `λ_slow < 0` (evaluated as `sign(det J)` via the block-determinant identity `det J = det A · λ_slow`, which stays well-conditioned at a γ-fold). This is the right default because the simulated walker *is* the slaved system.
 - **`'discrim_a'`** — the fast γ-block test alone (A-Hurwitz ⇔ free-energy Hessian positive-definite: transverse `A<1` **and** `det>0`); **over-counts** stable equilibria by exactly the slow heading-tracking mode it omits. Kept for comparison plots. (Until 2026-07 this checked only the transverse `A<1`, so it *additionally* over-counted on the fast layer — radial folds + off-diagonal saddles; `_discrim_A` now adds the analytic `det>0` and `_discrim_A_nu` takes the block from `_coupled_jacobian`. See `theory/free_energy_derivation.md` §6.1.)
 
-`sc_equilib`, `gamma_equilib`, `plot_direction_mesh`, `plot_bifurcation_diagram` (and the count helpers) accept both; NBM and IEM defaults are `'reduced'`. SC equilibria (γ = R+0j) are *exactly* equilibria of the full 3-eq system. Derivations, the why-reduced consistency argument, the worked over-counting example at (1.5, 0), and the half-angle/`K=2` invariance proofs are in `.claude/rules/torque-and-stability.md`.
+`sc_equilib`, `gamma_equilib`, `plot_direction_mesh`, `plot_bifurcation_diagram` (and the count helpers) accept both; the default is `'reduced'`. SC equilibria (γ = R+0j) are *exactly* equilibria of the full 3-eq system. Derivations, the why-reduced consistency argument, the worked over-counting example at (1.5, 0), and the half-angle/`K=2` invariance proofs are in `.claude/rules/torque-and-stability.md`.
 
 **There is deliberately no fully-coupled criterion (`'coupled'` removed 2026-08-19).** `dγ/dt` is not an equation of motion: it is the rank-2 readout of the K-dimensional Glauber population dynamics (one `n_k` per visible target; see the project preprint's Glauber section), obtained by differentiating `γ = Σₖ nₖ e^{iθ̂ₖ}` and keeping **only** the `dnₖ/dt` term. The dropped term `−i·θ̇·Σₖ nₖ·U′(θₖ)·e^{iθ̂ₖ}` vanishes identically at `θ̇ = 0`, so **equilibria, `'reduced'` and `'discrim_a'` are all unaffected** — but off equilibrium the γ-ODE is only valid under the timescale separation. Taking the full 3×3 eigenvalues therefore linearizes an incomplete equation, and it cannot be patched at the γ level (under a warp the dropped term is not proportional to γ, so it is not a function of γ at all). A genuine coupled analysis needs the `(n₁…n_K, θ)` system **and** an explicit neural timescale `τ₀`. See `NeuralBandModel._discrim_reduced` for the full note and the measured evidence.
 
@@ -110,7 +103,7 @@ Three target geometries: `circle`, `delta` (point), and `capsule`.
 
 ## Bifurcation diagrams — conventions
 
-[`plot_bifurcation_diagram`](decision_model.py#L2734) (NBM) / [`plot_bifurcation_diagram`](decision_model.py#L3668) (IEM) render `(x, y)` sweeps colored by stable-equilibrium count.
+[`plot_bifurcation_diagram`](decision_model.py#L2734) renders `(x, y)` sweeps colored by stable-equilibrium count.
 
 - **Default colormap is viridis keyed on stable count alone**, with a `max_count` kwarg.
 - **Don't reintroduce two-axis `(n_stable, n_unstable)` color coding** without an explicit ask — it was tried and made boundaries harder to read. (The `stability_criterion=` plumbing it introduced is preserved — a real correctness fix.)
@@ -132,7 +125,7 @@ The basin-estimation effort is complete and the visualization is **wired into th
 
 ## Open TODOs
 
-Engineering TODOs (IEM `run_dgamma_dt` LSODA port; cell-center sampling; residual heading-noise floor; foveal `angle_weight` commitment signal; basin-overlay refinement + deferred basin work) now live in **[TODO.md](TODO.md)**.
+Engineering TODOs (cell-center sampling; residual heading-noise floor; foveal `angle_weight` commitment signal; basin-overlay refinement + deferred basin work) now live in **[TODO.md](TODO.md)**.
 
 ## Common gotchas
 
@@ -152,7 +145,7 @@ Path-scoped rules under `.claude/rules/` load **only** when you open a matching 
 | Walker `plot_walkers`: state-gated noise law, `walk_std` blind-spot search, target detection, `R_exp`, loss mechanisms | `decision_model.py` | `.claude/rules/walker-dynamics.md` |
 | dθ/dt half-angle torque + `K=2` derivation, the two stability criteria (full), coupled-Jacobian proofs, SC-design history | `decision_model.py` | `.claude/rules/torque-and-stability.md` |
 | Basin overlay code-editing gotchas (basin-width; multistable-only robustness; neutral-seed protocol) | `decision_model.py` | `.claude/rules/basin-estimation.md` |
-| IEM→NBM fold: verified equivalence, the ν kernel, caveats, steps (pull-only) | — | [theory/iem_nbm_fold.md](theory/iem_nbm_fold.md) |
+| IEM→NBM fold (done): equivalence, the ν kernel, caveats, the walker carry frame (pull-only) | — | [theory/iem_nbm_fold.md](theory/iem_nbm_fold.md), [tests/test_angle_distortion_nu.py](tests/test_angle_distortion_nu.py) |
 | Basin findings, F̂ derivation, block-determinant identity, Lyapunov/Langevin/Kramers background (pull-only) | — | [theory/basins_of_attraction.md](theory/basins_of_attraction.md), [theory/free_energy_derivation.md](theory/free_energy_derivation.md), [theory/block_determinant_identity.tex](theory/block_determinant_identity.tex), [theory/theory_background.md](theory/theory_background.md) |
 | Weighting-vs-warping "ears" | `weighting_analysis/` | `.claude/rules/weighting.md`; [weighting_analysis/README.md](weighting_analysis/README.md) |
 | Engineering TODOs | — | [TODO.md](TODO.md) |
