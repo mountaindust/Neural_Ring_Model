@@ -7,11 +7,10 @@ whether a neural weight with a **dip** in the middle (rather than the usual
 foveal bump) could bias the observer OUTWARD -- the mechanism the locust
 three-target split would need. The answer was **no**, for a structural reason
 (see [outward_bias.md](outward_bias.md)), so the families were **removed from
-[decision_model.py](../decision_model.py)**: the model should not carry
-perception machinery it does not use.
+the model**: it should not carry perception machinery it does not use.
 
-They are preserved here in full, and re-registered onto `PerceptionModel` at
-run time, for two reasons:
+They are preserved here in full, and re-registered onto the model's family
+library at run time, for two reasons:
 
   1. **Reproducibility.** [outward_bias.py](outward_bias.py) needs them. Import
      this module and call `register()` and that script runs exactly as it did
@@ -21,25 +20,28 @@ run time, for two reasons:
      Anyone revisiting "what if the front were under-weighted?" should start
      from here rather than re-deriving it.
 
-This is a **shim, not part of the model.** Nothing in `decision_model.py` knows
+This is a **shim, not part of the model.** Nothing in `decision_model` knows
 about it, and nothing outside `weighting_analysis/` should import it. If these
 families are ever wanted for real, the right move is to move the four blocks
-below back into `PerceptionModel` (they were written to sit there) rather than
-to make the model depend on this file.
+below into `decision_model/angle_distributions.py` (they were written to sit
+there) rather than to make the model depend on this file.
 
 HOW THE RE-REGISTRATION WORKS
 -----------------------------
-`PerceptionModel` dispatches families by name through four places. `register()`
-patches each one to handle these two names and delegate everything else to the
-original:
+`decision_model.angle_distributions` dispatches families by name through four
+places. `register()` patches each one to handle these two names and delegate
+everything else to the original:
 
-  * `decision_model._FAMILY_INFO`   -- a module-level dict; just updated.
-  * `_validate_params`             -- per-family parameter constraints.
-  * `_eval_forward_map`            -- the CDF-like angle map F(theta).
-  * `_eval_inverse_map`            -- its inverse.
-  * `get_neural_weight`            -- the density itself.
+  * `FAMILY_INFO`      -- a module-level dict; just updated in place.
+  * `validate_params`  -- per-family parameter constraints.
+  * `eval_density`     -- the density itself (the WEIGHT role).
+  * `eval_forward_map` -- the CDF-like angle map F(theta) (the WARP role).
+  * `eval_inverse_map` -- its inverse.
 
-`_make_integral_spline` needs no patch: its final `else` already returns
+These are patched on the MODULE, not on `PerceptionModel`, which reaches them
+as `angle_distributions.<name>` precisely so that the patch is visible.
+
+`make_integral_spline` needs no patch: its final `else` already returns
 `(None, None)` for any family it does not recognise, which is correct here --
 both families are analytic and spline-free, like `lin_cutoff`.
 
@@ -69,8 +71,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
-import decision_model as model
-from decision_model import PerceptionModel
+from decision_model import angle_distributions as ad
 
 FAMILIES = ('lin_dip', 'lin_ring')
 
@@ -345,7 +346,8 @@ _registered = False
 
 def register():
     """Make 'lin_dip' and 'lin_ring' usable as `PerceptionModel` warp/weight
-    families for the lifetime of this process. Idempotent.
+    families for the lifetime of this process, by patching the model's
+    `angle_distributions` module. Idempotent.
 
     Call this at MODULE level in any script that uses them -- not inside
     ``if __name__ == '__main__'``. On Windows, `multiprocessing` spawns
@@ -355,17 +357,12 @@ def register():
     global _registered
     if _registered:
         return
-    model._FAMILY_INFO.update(_FAMILY_INFO_ADDITIONS)
+    ad.FAMILY_INFO.update(_FAMILY_INFO_ADDITIONS)
 
-    # Accessing a staticmethod on the class gives the plain function in
-    # Python 3.10+; older versions hand back a wrapper with __func__.
-    def _unwrap(f):
-        return getattr(f, '__func__', f)
-
-    _orig_validate = _unwrap(PerceptionModel._validate_params)
-    _orig_forward = _unwrap(PerceptionModel._eval_forward_map)
-    _orig_inverse = _unwrap(PerceptionModel._eval_inverse_map)
-    _orig_weight = PerceptionModel.get_neural_weight
+    _orig_validate = ad.validate_params
+    _orig_forward = ad.eval_forward_map
+    _orig_inverse = ad.eval_inverse_map
+    _orig_density = ad.eval_density
 
     def _validate(name, params, role):
         if name in FAMILIES:
@@ -386,19 +383,18 @@ def register():
             return lin_ring_int_inverse(y, params['m'], params['p'])
         return _orig_inverse(name, params, inv_spline, y)
 
-    def _weight(self, theta):
-        p = self._weight_params
-        if self.weight_name == 'lin_dip':
-            return lin_dip(theta, p['m'], p['b'])
-        if self.weight_name == 'lin_ring':
-            return lin_ring(theta, p['m'], p['p'])
-        return _orig_weight(self, theta)
+    def _density(name, params, theta):
+        if name == 'lin_dip':
+            return lin_dip(theta, params['m'], params['b'])
+        if name == 'lin_ring':
+            return lin_ring(theta, params['m'], params['p'])
+        return _orig_density(name, params, theta)
 
-    PerceptionModel._validate_params = staticmethod(_validate)
-    PerceptionModel._eval_forward_map = staticmethod(_forward)
-    PerceptionModel._eval_inverse_map = staticmethod(_inverse)
-    PerceptionModel.get_neural_weight = _weight
-    # _make_integral_spline needs no patch: its final `else` already returns
+    ad.validate_params = _validate
+    ad.eval_forward_map = _forward
+    ad.eval_inverse_map = _inverse
+    ad.eval_density = _density
+    # make_integral_spline needs no patch: its final `else` already returns
     # (None, None) for unrecognised families, which is correct -- both of
     # these are analytic and spline-free, like lin_cutoff.
     _registered = True

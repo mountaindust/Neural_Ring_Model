@@ -49,7 +49,7 @@ every input that affects the result (geometry, grid, criterion, warp family,
 weight selector, and the per-row a/b values). The cache is invalidated
 automatically whenever any of those change; CACHE_VERSION is the manual
 backstop for changes the fingerprint fields don't capture (npz layout, or a
-correctness fix inside decision_model.py).
+correctness fix inside the model).
 
 Bifurcation panels are pinned to ``max_count=3`` for color comparability; any
 parameterization whose data exceeds that triggers a captured warning reported
@@ -74,6 +74,7 @@ from matplotlib.colors import BoundaryNorm
 from multiprocessing import Pool
 
 import decision_model as model
+from decision_model import angle_distributions as ad
 from parallel_config import get_n_workers
 
 
@@ -129,7 +130,7 @@ OUT_NAME = None
 # fingerprint fields below don't already capture. 1 = first merged-script
 # version (fresh fingerprint schema + filenames; old per-figure caches from the
 # two predecessor scripts never match and are simply ignored). 2 = the
-# _get_target_signals wrapping-extent fix in decision_model.py: the closest
+# _get_target_signals wrapping-extent fix in perception_model.py: the closest
 # target's angular extent is now unwrapped before the neural weight is
 # integrated, so a target straddling the rear branch cut is no longer dropped
 # from perception. Changes stable counts near the targets under uniform weight.
@@ -180,16 +181,16 @@ def _as_list(v):
 def _uses_b(family):
     """True if `family` has a second (b) parameter slot."""
     return (family is not None
-            and model._FAMILY_INFO[family]['slots'][1] is not None)
+            and model.FAMILY_INFO[family]['slots'][1] is not None)
 
 
 # ---- config validation (fail fast with a clear message) ----
 
 def validate_config():
     # WARP role
-    if WARP_FAMILY is not None and WARP_FAMILY not in model._FAMILY_INFO:
+    if WARP_FAMILY is not None and WARP_FAMILY not in model.FAMILY_INFO:
         raise ValueError(
-            f"WARP_FAMILY must be a family key {sorted(model._FAMILY_INFO)} "
+            f"WARP_FAMILY must be a family key {sorted(model.FAMILY_INFO)} "
             f"or None, got {WARP_FAMILY!r}.")
     if WARP_FAMILY is None:
         if A_WARP is not None or B_WARP is not None:
@@ -217,7 +218,7 @@ def validate_config():
             raise ValueError(
                 "WEIGHT='neural_angle_dist' requires WARP_FAMILY to be a "
                 f"density family, got {WARP_FAMILY!r}.")
-    elif WEIGHT in model._FAMILY_INFO:
+    elif WEIGHT in model.FAMILY_INFO:
         if not _uses_b(WEIGHT) and B_WEIGHT is not None:
             raise ValueError(
                 f"B_WEIGHT must be None: the {WEIGHT!r} weight has a single "
@@ -225,7 +226,7 @@ def validate_config():
     else:
         raise ValueError(
             f"WEIGHT must be None, 'neural_angle_dist', or a family key "
-            f"{sorted(k for k in model._FAMILY_INFO if k != 'direct_power')}, "
+            f"{sorted(k for k in model.FAMILY_INFO if k != 'direct_power')}, "
             f"got {WEIGHT!r}.")
 
     if STABILITY_CRITERION not in ('reduced', 'discrim_a'):
@@ -273,7 +274,7 @@ def build_models(row):
 
 # Human-readable family names for titles/legends (the raw keys stay in
 # filenames and the config). Add new families here when they are added to
-# the model's _FAMILY_INFO.
+# the model's FAMILY_INFO.
 _FAMILY_DISPLAY = {
     'cutoff': 'smooth cutoff',
     'lin_cutoff': 'linear cutoff',
@@ -299,7 +300,7 @@ def _role_label(family, a_val, b_val, role):
     """'family (key=val, key=val)' with family-default fill-in for None slots."""
     if family is None:
         return 'identity' if role == 'warp' else 'uniform'
-    info = model._FAMILY_INFO[family]
+    info = model.FAMILY_INFO[family]
     a_key, b_key = info['slots']
     defs = info['defaults']
     a_show = a_val if a_val is not None else defs[a_key]
@@ -463,15 +464,15 @@ def _warp_density(percep, theta):
     name = percep.warp_name
     p = percep.warp_params
     if name == 'cutoff':
-        d = percep._smooth_cutoff(theta, p['a'], p['b'])
+        d = ad.smooth_cutoff(theta, p['a'], p['b'])
     elif name == 'lin_cutoff':
-        d = percep._lin_cutoff(theta, p['a'], p['b'])
+        d = ad.lin_cutoff(theta, p['a'], p['b'])
     elif name == 'vonmises':
-        d = percep._vonmises(theta, p['k'])
+        d = ad.vonmises(theta, p['k'])
     elif name == 'symmetric_beta':
-        d = percep._symmetric_beta(theta, p['alpha'], p['b'])
+        d = ad.symmetric_beta(theta, p['alpha'], p['b'])
     elif name == 'reg_power':
-        d = percep._reg_power(theta, p['d'], p['e'])
+        d = ad.reg_power(theta, p['d'], p['e'])
     else:   # identity (None) or direct_power: density = d(angle map)/dtheta
         d = np.gradient(percep.get_neural_angle(theta), theta)
     d = np.asarray(d, dtype=float)

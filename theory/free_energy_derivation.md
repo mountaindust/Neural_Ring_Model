@@ -7,7 +7,7 @@ amplitude.
 
 **Independence note.** This derivation uses the project Hamiltonian and the
 Glauber route to the γ-ODE from the project preprint (which matches
-`decision_model.py`'s `dgamma_dt`). It does **not** reuse any free-energy
+`neural_band_model.py`'s `dgamma_dt`). It does **not** reuse any free-energy
 expression from earlier notes.
 
 **Status — validated.** Every numerical check in §9 passed: the
@@ -217,7 +217,7 @@ $$H_{F̂}(R{+}0j) = \begin{bmatrix} 1 - \sum_k w_k \cos^2 θ̂_k & -\sum_k w_k \
 is the radial curvature (`g` = the self-consistency map `g(R) = Σ_k ρ_k
 cos θ̂_k σ(u_k)`); `H_xy` is the R–Θ coupling. Because dγ/dt = −∇F̂ is
 gradient flow, `H_{F̂}` equals **−(the 2×2 fast block A** in
-[`_coupled_jacobian`](../decision_model.py)**)**: numerically confirmed
+[`_coupled_jacobian`](../decision_model/neural_band_model.py)**)**: numerically confirmed
 `max|H_{F̂} − (−A_block)| = 2.5e-9` over 3777 SC equilibria. So this is
 literally the fast block, and "γ-stable" ⇔ `A_block` Hurwitz ⇔
 `H_{F̂} ≻ 0`.

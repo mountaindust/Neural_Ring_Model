@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 from scipy.integrate import quad
 from decision_model import PerceptionModel as PM, Targets
+from decision_model import angle_distributions as ad
 
 pi = np.pi
 
@@ -93,7 +94,7 @@ def F_ref(theta, a, b):
     norm = 2 * pi / (a + b)
     ub = min(abs(theta), b)
     pts = [a] if 0 < a < ub else None
-    val, _ = quad(PM._lin_cutoff, 0.0, ub, args=(a, b), points=pts)
+    val, _ = quad(ad.lin_cutoff, 0.0, ub, args=(a, b), points=pts)
     return np.sign(theta) * norm * val
 
 
@@ -109,14 +110,14 @@ for a, b in PARAMS:
     # Plateau == 1 inside [-a, a]; ramp value at midpoint; 0 outside [-b, b].
     xs = np.array([0.0, 0.5 * a, a, 0.5 * (a + b), b, 0.5 * (b + pi + 1e-9),
                    -a, -0.5 * (a + b), -b])
-    g = PM._lin_cutoff(xs, a, b)
+    g = ad.lin_cutoff(xs, a, b)
     expected = np.array([
         1.0, 1.0, 1.0, (b - 0.5 * (a + b)) / (b - a), 0.0, 0.0,
         1.0, (b - 0.5 * (a + b)) / (b - a), 0.0])
     check_array(f"density values a={a:.3g} b={b:.3g}", g, expected)
     # Even function.
     check_array(f"density even a={a:.3g} b={b:.3g}",
-                PM._lin_cutoff(xs, a, b), PM._lin_cutoff(-xs, a, b))
+                ad.lin_cutoff(xs, a, b), ad.lin_cutoff(-xs, a, b))
 
 # ========================================================
 print("\n=== Forward map vs numeric quad reference ===")
@@ -126,7 +127,7 @@ for a, b in PARAMS:
                             pi, -pi, 0.99 * b, 1.0, -2.0])
     theta_rand = rng.uniform(-pi, pi, size=4000)
     theta = np.concatenate([theta_fixed, theta_rand])
-    got = PM._lin_cutoff_integral(theta, a, b)
+    got = ad.lin_cutoff_integral(theta, a, b)
     ref = np.array([F_ref(t, a, b) for t in theta])
     check_array(f"forward vs quad a={a:.3g} b={b:.3g}", got, ref, tol=1e-11)
 
@@ -135,23 +136,23 @@ print("\n=== Forward map conventions (endpoints, saturation, oddness) ===")
 # ========================================================
 for a, b in PARAMS:
     norm = 2 * pi / (a + b)
-    check_scalar(f"F(0)=0 a={a:.3g}", PM._lin_cutoff_integral(0.0, a, b), 0.0)
-    check_scalar(f"F(b)=pi a={a:.3g}", PM._lin_cutoff_integral(b, a, b), pi)
-    check_scalar(f"F(-b)=-pi a={a:.3g}", PM._lin_cutoff_integral(-b, a, b), -pi)
+    check_scalar(f"F(0)=0 a={a:.3g}", ad.lin_cutoff_integral(0.0, a, b), 0.0)
+    check_scalar(f"F(b)=pi a={a:.3g}", ad.lin_cutoff_integral(b, a, b), pi)
+    check_scalar(f"F(-b)=-pi a={a:.3g}", ad.lin_cutoff_integral(-b, a, b), -pi)
     check_scalar(f"F(a)=norm*a a={a:.3g}",
-                 PM._lin_cutoff_integral(a, a, b), norm * a)
+                 ad.lin_cutoff_integral(a, a, b), norm * a)
     # Saturation beyond b (use b<pi sets only).
     if b < pi:
         check_scalar(f"F(pi)=pi (b<pi) a={a:.3g}",
-                     PM._lin_cutoff_integral(pi, a, b), pi)
+                     ad.lin_cutoff_integral(pi, a, b), pi)
     # Oddness.
     ts = rng.uniform(-pi, pi, size=500)
-    check_array(f"F odd a={a:.3g}", PM._lin_cutoff_integral(ts, a, b),
-                -PM._lin_cutoff_integral(-ts, a, b))
+    check_array(f"F odd a={a:.3g}", ad.lin_cutoff_integral(ts, a, b),
+                -ad.lin_cutoff_integral(-ts, a, b))
     # Scalar vs vector consistency.
     check_scalar(f"F scalar==vector a={a:.3g}",
-                 PM._lin_cutoff_integral(0.7, a, b),
-                 float(PM._lin_cutoff_integral(np.array([0.7]), a, b)[0]))
+                 ad.lin_cutoff_integral(0.7, a, b),
+                 float(ad.lin_cutoff_integral(np.array([0.7]), a, b)[0]))
 
 # ========================================================
 print("\n=== Inverse: round-trips to machine precision ===")
@@ -161,8 +162,8 @@ for a, b in PARAMS:
     theta = np.concatenate([
         np.array([0.0, a, -a, b, -b, 0.5 * (a + b), -0.5 * (a + b)]),
         rng.uniform(-b, b, size=4000)])
-    y = PM._lin_cutoff_integral(theta, a, b)
-    theta_rt = PM._lin_cutoff_int_inverse(y, a, b)
+    y = ad.lin_cutoff_integral(theta, a, b)
+    theta_rt = ad.lin_cutoff_int_inverse(y, a, b)
     # The sqrt inverse is condition-limited at the fold (theta -> b, disc -> 0),
     # so allow ~1e-10 there; F(Finv(y))=y below is exact (~1e-16) everywhere.
     check_array(f"Finv(F(theta))=theta on [-b,b] a={a:.3g} b={b:.3g}",
@@ -172,17 +173,17 @@ for a, b in PARAMS:
     yvals = np.concatenate([
         np.array([0.0, pi, -pi]),
         rng.uniform(-pi, pi, size=4000)])
-    y_rt = PM._lin_cutoff_integral(PM._lin_cutoff_int_inverse(yvals, a, b), a, b)
+    y_rt = ad.lin_cutoff_integral(ad.lin_cutoff_int_inverse(yvals, a, b), a, b)
     check_array(f"F(Finv(y))=y on [-pi,pi] a={a:.3g} b={b:.3g}",
                 y_rt, yvals, tol=1e-12)
 
     # Inverse endpoints.
     check_scalar(f"Finv(pi)=b a={a:.3g}",
-                 PM._lin_cutoff_int_inverse(pi, a, b), b)
+                 ad.lin_cutoff_int_inverse(pi, a, b), b)
     check_scalar(f"Finv(-pi)=-b a={a:.3g}",
-                 PM._lin_cutoff_int_inverse(-pi, a, b), -b)
+                 ad.lin_cutoff_int_inverse(-pi, a, b), -b)
     check_scalar(f"Finv(0)=0 a={a:.3g}",
-                 PM._lin_cutoff_int_inverse(0.0, a, b), 0.0)
+                 ad.lin_cutoff_int_inverse(0.0, a, b), 0.0)
 
 # ========================================================
 print("\n=== Shared conventions with smooth 'cutoff' ===")
@@ -191,23 +192,23 @@ a, b = pi / 3, 4 * pi / 5
 # Agree exactly at 0, a, b (same plateau + normalization); differ on the ramp.
 for t in [0.0, a, b]:
     check_scalar(f"lin vs smooth agree at t={t:.3g}",
-                 PM._lin_cutoff_integral(t, a, b),
-                 PM._smooth_cutoff_integral(t, a, b), tol=1e-9)
+                 ad.lin_cutoff_integral(t, a, b),
+                 ad.smooth_cutoff_integral(t, a, b), tol=1e-9)
 mid = 0.5 * (a + b)
-ok(abs(PM._lin_cutoff_integral(mid, a, b)
-       - PM._smooth_cutoff_integral(mid, a, b)) > 1e-3,
+ok(abs(ad.lin_cutoff_integral(mid, a, b)
+       - ad.smooth_cutoff_integral(mid, a, b)) > 1e-3,
    "lin and smooth cutoff differ on the ramp interior")
 
 # ========================================================
 print("\n=== Validation and inverse domain ===")
 # ========================================================
-raises(lambda: PM._lin_cutoff_integral(0.5, 1.0, 1.0), "0 <= a < b",
+raises(lambda: ad.lin_cutoff_integral(0.5, 1.0, 1.0), "0 <= a < b",
        "forward rejects a == b")
-raises(lambda: PM._lin_cutoff_integral(0.5, -0.1, 1.0), "0 <= a < b",
+raises(lambda: ad.lin_cutoff_integral(0.5, -0.1, 1.0), "0 <= a < b",
        "forward rejects a < 0")
-raises(lambda: PM._lin_cutoff_int_inverse(0.5, 2.0, 1.0), "0 <= a < b",
+raises(lambda: ad.lin_cutoff_int_inverse(0.5, 2.0, 1.0), "0 <= a < b",
        "inverse rejects a > b")
-raises(lambda: PM._lin_cutoff_int_inverse(4.0, 0.5, 1.2), "-pi <= y <= pi",
+raises(lambda: ad.lin_cutoff_int_inverse(4.0, 0.5, 1.2), "-pi <= y <= pi",
        "inverse rejects y > pi")
 
 # ========================================================

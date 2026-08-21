@@ -1,11 +1,11 @@
 ---
 paths:
-  - "decision_model.py"
+  - "decision_model/_nbm_basins.py"
 ---
 
 # Basin-of-attraction overlay — code-editing gotchas
 
-Auto-loads with `decision_model.py`. This is the thin "don't break it while
+Auto-loads with `decision_model/_nbm_basins.py`. This is the thin "don't break it while
 coding" note for the basin-wheel overlay (`plot_bifurcation_diagram(overlay_basins=True)`,
 `basin_arcs_at_focal_loc`, `_basin_destination`, `_overlay_basin_wheels`).
 **Full theory, findings, and derivations are in

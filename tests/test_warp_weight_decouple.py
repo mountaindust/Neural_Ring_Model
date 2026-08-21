@@ -16,6 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 from decision_model import PerceptionModel as PM, Targets
+from decision_model import angle_distributions as ad
 
 pi = np.pi
 TLOCS = np.array([[4.33, 2.5], [4.33, -2.5]])
@@ -91,7 +92,7 @@ ok(pm2.warp_params == {"k": 0.55} and pm2.weight_params == {"k": 0.9},
    "same-family: independent k per role stored")
 # warp uses k=0.55, weight uses k=0.9: weight density at pi/2 must equal a
 # vonmises(0.9) pdf there, not vonmises(0.55).
-w_ref_09 = PM._vonmises(pi / 2, 0.9)
+w_ref_09 = ad.vonmises(pi / 2, 0.9)
 ok(abs(pm2.get_neural_weight(pi / 2) - w_ref_09) < 1e-13,
    "same-family: weight pdf uses its own k=0.9")
 warp_ref_055 = PM(tg(), neural_angle_dist="vonmises", a_warp=0.55,

@@ -657,7 +657,7 @@ conversation.
   for `free_energy_derivation.md`. (The original step-by-step vetting
   log lived in `basin_estimation/`, retired 2026-06; recover from git
   history if needed.)
-- Code: `decision_model.py` (NeuralBandModel class, especially
+- Code: `decision_model/neural_band_model.py` (NeuralBandModel class, especially
   `dgamma_dt`, `sc_equilib`, `_discrim_reduced`).
 
 A fresh session can load `CLAUDE.md`, `theory/theory_background.md`, and

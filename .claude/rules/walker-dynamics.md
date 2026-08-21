@@ -1,11 +1,11 @@
 ---
 paths:
-  - "decision_model.py"
+  - "decision_model/_nbm_walkers.py"
 ---
 
 # Walker dynamics (`plot_walkers`) — noise law, blind-spot search, target detection
 
-Deep detail for the SDE walker simulation in `decision_model.py` (`NBM.plot_walkers`). Auto-loads with `decision_model.py`. The deterministic stability machinery (SC equilibria, Jacobians, bifurcation rasters) is noise-free and untouched by everything here — see [torque-and-stability.md](torque-and-stability.md) for that.
+Deep detail for the SDE walker simulation in `decision_model/_nbm_walkers.py` (`NBM.plot_walkers`). Auto-loads with that file. The deterministic stability machinery (SC equilibria, Jacobians, bifurcation rasters) is noise-free and untouched by everything here — see [torque-and-stability.md](torque-and-stability.md) for that.
 
 ## Carrying γ between heading steps
 

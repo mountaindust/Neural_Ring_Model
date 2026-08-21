@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 from decision_model import PerceptionModel as PM
+from decision_model import angle_distributions as ad
 
 sub = PM._subtract_intervals_circle
 unwrap = PM._unwrap_interval
@@ -367,23 +368,23 @@ check_scalar("cutoff: flat region [0, a/2]",
              (a_val/2) * norm)
 
 # Symmetric interval [-a/2, a/2]: both in flat region
-F_pos = PM._smooth_cutoff_integral(a_val/2, a_val, b_val)
-F_neg = PM._smooth_cutoff_integral(-a_val/2, a_val, b_val)
+F_pos = ad.smooth_cutoff_integral(a_val/2, a_val, b_val)
+F_neg = ad.smooth_cutoff_integral(-a_val/2, a_val, b_val)
 check_scalar("cutoff: symmetric flat [-a/2, a/2]",
              pm_cutoff._integrate_neural_weight([(-a_val/2, a_val/2)]),
              F_pos - F_neg)
 
 # Interval spanning flat and transition region [0, (a+b)/2]
 mid = (a_val + b_val) / 2
-F_mid = PM._smooth_cutoff_integral(mid, a_val, b_val)
-F_zero = PM._smooth_cutoff_integral(0.0, a_val, b_val)
+F_mid = ad.smooth_cutoff_integral(mid, a_val, b_val)
+F_zero = ad.smooth_cutoff_integral(0.0, a_val, b_val)
 check_scalar("cutoff: flat+transition [0, (a+b)/2]",
              pm_cutoff._integrate_neural_weight([(0.0, mid)]),
              F_mid - F_zero)
 
 # Full support [-b, b]
-F_b = PM._smooth_cutoff_integral(b_val, a_val, b_val)
-F_nb = PM._smooth_cutoff_integral(-b_val, a_val, b_val)
+F_b = ad.smooth_cutoff_integral(b_val, a_val, b_val)
+F_nb = ad.smooth_cutoff_integral(-b_val, a_val, b_val)
 check_scalar("cutoff: full support [-b, b]",
              pm_cutoff._integrate_neural_weight([(-b_val, b_val)]),
              F_b - F_nb)
@@ -398,12 +399,12 @@ check_scalar("cutoff: additivity of disjoint intervals",
 # Interval in zero region (|theta| > b => weight=0)
 check_scalar("cutoff: zero region [b, pi]",
              pm_cutoff._integrate_neural_weight([(b_val, pi)]),
-             PM._smooth_cutoff_integral(pi, a_val, b_val) -
-             PM._smooth_cutoff_integral(b_val, a_val, b_val))
+             ad.smooth_cutoff_integral(pi, a_val, b_val) -
+             ad.smooth_cutoff_integral(b_val, a_val, b_val))
 
 # Negative side interval
-F_na = PM._smooth_cutoff_integral(-a_val, a_val, b_val)
-F_nb2 = PM._smooth_cutoff_integral(-b_val, a_val, b_val)
+F_na = ad.smooth_cutoff_integral(-a_val, a_val, b_val)
+F_nb2 = ad.smooth_cutoff_integral(-b_val, a_val, b_val)
 check_scalar("cutoff: negative transition [-b, -a]",
              pm_cutoff._integrate_neural_weight([(-b_val, -a_val)]),
              F_na - F_nb2)

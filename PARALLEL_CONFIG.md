@@ -70,7 +70,7 @@ without editing files, set `NR_N_WORKERS` in the shell.
 | [weighting_analysis/outward_bias.py](weighting_analysis/outward_bias.py) | `N_WORKERS = get_n_workers()` |
 | [tests/test_broad_validation.py](tests/test_broad_validation.py) | `with Pool(get_n_workers()) as pool:` |
 
-Note: [decision_model.py](decision_model.py) does **not** create its own
+Note: [decision_model/](decision_model/) does **not** create its own
 pool; several of its methods accept a `pool=` keyword argument and the
 caller (one of the scripts above) is responsible for sizing it.
 

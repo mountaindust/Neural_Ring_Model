@@ -4,7 +4,7 @@ The original 2026-05 figures were produced by throwaway scripts that were never
 committed (README.md, "Reproduction", said the code lived in the conversation
 transcript). They are now stale for two independent reasons:
 
-  1. **The wrapping-extent fix** (decision_model.py, 2026-08-04). The closest
+  1. **The wrapping-extent fix** (perception_model.py, 2026-08-04). The closest
      target's angular extent is now unwrapped before the neural weight is
      integrated, so a target straddling the rear branch cut is no longer
      silently dropped from perception. That bug bit precisely where the ears

@@ -69,7 +69,7 @@ from parallel_config import get_n_workers
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import anti_foveal
 
-# The two anti-foveal families were REMOVED from decision_model.py once this
+# The two anti-foveal families were REMOVED from the model once this
 # analysis came back negative; anti_foveal.py preserves them and re-registers
 # them onto PerceptionModel. This must run at module level, not under
 # `if __name__ == '__main__'`: multiprocessing workers re-import the main

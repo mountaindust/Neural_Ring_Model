@@ -12,7 +12,7 @@ uses.
 These scripts were written to compare the `'reduced'` (timescale-separated)
 stability criterion against a `'coupled'` criterion that took the **full 3×3
 eigenvalues** of the `(γ_re, γ_im, θ)` Jacobian. **That criterion was removed
-from `decision_model.py` on 2026-08-19, because it is not a stability test for
+from `decision_model` on 2026-08-19, because it is not a stability test for
 the model.**
 
 `dγ/dt` is not an equation of motion. It is the rank-2 *readout* of the

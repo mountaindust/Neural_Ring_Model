@@ -119,7 +119,7 @@ No merge step is needed — the three leaves ride distinct branches to distinct 
   approximate; the fly heatmap posts equal the model targets, so the fly aligns
   ~exactly.
 - The branch diagram needs R alongside θ; `NeuralBandModel.sc_equilib(..., return_R=True)`
-  ([../decision_model.py](../decision_model.py)) returns it directly, so there is no
+  ([../decision_model/](../decision_model/)) returns it directly, so there is no
   separate copy of the solver to keep in sync.
 
 ## Public API

@@ -8,10 +8,25 @@ Mathematical model of collective decision-making based on Ising-type dynamics on
 
 ## Codebase layout
 
-- [decision_model.py](decision_model.py) — the project's research code (~4800 lines). The `NeuralBandModel`, a `PerceptionModel`, and a `Targets` helper.
+- [decision_model/](decision_model/) — the project's research code (~4900 lines), a package split by concern. `import decision_model as model` and `from decision_model import Targets` both work as before; everything is re-exported from [`__init__.py`](decision_model/__init__.py).
+
+  | module | holds |
+  |---|---|
+  | [angles.py](decision_model/angles.py) | `convert_angles`, `_smallest_enclosing_arc` — frame-agnostic angle helpers |
+  | [targets.py](decision_model/targets.py) | `Targets`: geometry, apparent extent, occlusion, trajectory intersection |
+  | [angle_distributions.py](decision_model/angle_distributions.py) | the warp/weight family library — `FAMILY_INFO`, every family's density/integral/inverse, and **all** dispatch on family name |
+  | [perception_model.py](decision_model/perception_model.py) | `PerceptionModel`: egocentric→neural mapping, ρ, the interval arithmetic |
+  | [neural_band_model.py](decision_model/neural_band_model.py) | `NeuralBandModel` **core**: γ dynamics, equilibria, the two stability criteria |
+  | [_nbm_plots.py](decision_model/_nbm_plots.py) | its rasters and diagnostic plots (mixin) |
+  | [_nbm_basins.py](decision_model/_nbm_basins.py) | its heading-basin wheels (mixin) |
+  | [_nbm_walkers.py](decision_model/_nbm_walkers.py) | its SDE walker ensemble (mixin) |
+
+  The three `_nbm_*` modules are **mixins** composed into `NeuralBandModel`; they hold no state and override nothing, so the class behaves exactly as a single definition would. A manifest in the class body lists what each contributes. The split follows the call graph: everything in a mixin calls into the core, and the mixins call each other exactly once (`plot_bifurcation_diagram → _overlay_basin_wheels`).
+
+  **Family functions are reached as `angle_distributions.<name>`, never imported by value** — `weighting_analysis/anti_foveal.py` registers extra families by patching those module attributes, and a from-import would bind early and silently defeat it.
 - Jupyter notebooks (`compare_sc_vm.ipynb`, `compare_sc_beta.ipynb`, `neural_band.ipynb`, `neural_band_walker.ipynb`, `ising_workbook.ipynb`, `debug_all_unstable.ipynb`) — testing, exploration, and visualization.
 - [archive/](archive/) — retired material, not part of the active model: `early_ideas/`, `old_basin_plots/`, and `stale_coupled_model_starting_code/` (scripts written against the removed `'coupled'` criterion; kept only as starting code for an eventual `(n⃗, θ)` population-level comparison — see its README).
-- [theory/](theory/) — durable theory: the basin-of-attraction findings catalogue ([basins_of_attraction.md](theory/basins_of_attraction.md)), the F̂ free-energy derivation ([free_energy_derivation.md](theory/free_energy_derivation.md)), the block-determinant identity behind `'reduced'` ([block_determinant_identity.tex](theory/block_determinant_identity.tex)), a Lyapunov/Langevin/Kramers background tutorial ([theory_background.md](theory/theory_background.md)), and [reduced_dynamics_anatomy.py](theory/reduced_dynamics_anatomy.py) — derives the γ-bistability relaxation-oscillation period by branch integration (the paper figure for the same phenomenon is `plots/stability_comparison_figure.py`). The basin *visualization* is implemented in [decision_model.py](decision_model.py) (`NBM.plot_bifurcation_diagram(overlay_basins=True)`); see "Basin-of-attraction overlay" below.
+- [theory/](theory/) — durable theory: the basin-of-attraction findings catalogue ([basins_of_attraction.md](theory/basins_of_attraction.md)), the F̂ free-energy derivation ([free_energy_derivation.md](theory/free_energy_derivation.md)), the block-determinant identity behind `'reduced'` ([block_determinant_identity.tex](theory/block_determinant_identity.tex)), a Lyapunov/Langevin/Kramers background tutorial ([theory_background.md](theory/theory_background.md)), and [reduced_dynamics_anatomy.py](theory/reduced_dynamics_anatomy.py) — derives the γ-bistability relaxation-oscillation period by branch integration (the paper figure for the same phenomenon is `plots/stability_comparison_figure.py`). The basin *visualization* is implemented in [decision_model/_nbm_basins.py](decision_model/_nbm_basins.py) (`NBM.plot_bifurcation_diagram(overlay_basins=True)`); see "Basin-of-attraction overlay" below.
 - [weighting_analysis/](weighting_analysis/) — warp-vs-weight "ears" analysis ([README.md](weighting_analysis/README.md)) and the anti-foveal outward-bias study ([outward_bias.md](weighting_analysis/outward_bias.md)). Also the home of `anti_foveal.py`, which preserves two weight families that were tried and then removed from the model — nothing outside this directory should import it.
 - [tests/](tests/) — unit tests (`test_intervals.py`, `test_segments.py`, `test_half_angle_torque.py`, `test_reduced_criterion.py`, `test_angle_distortion_nu.py`, …). **Running convention in [tests/README.md](tests/README.md):** `pytest tests/` runs the whole suite.
 - [Matlab/](Matlab/) — legacy prototype code, not part of the active model.
@@ -43,13 +58,13 @@ The current/preferred model. γ lives in **egocentric/neural** space.
   - **ν≠1 moves equilibria outward** (ν=0.5 puts them at `R ≈ 0.77–0.85`), past `sc_equilib`'s probe radii, so a **0.85 probe is added when and only when `_nu_active`**. Structure changes materially, not just in scale: ν=0.5 grids reach 5 SC equilibria where ν=1 reaches 3.
 
 Key methods:
-- [`sc_equilib`](decision_model.py#L2250) — self-consistent equilibrium finder (heading = consensus); used for bifurcation diagrams in (x, y). Returns `(allocentric_angles, stability_booleans)`.
-- [`gamma_equilib`](decision_model.py#L2181) — γ-equilibrium finder at a fixed observer heading. *Not* the self-consistent finder.
-- [`run_dgamma_dt`](decision_model.py#L2360) — ODE to steady state.
-- [`dtheta_dt`](decision_model.py#L2411) — heading dynamics.
-- [`convert_gamma`](decision_model.py#L2339) — inverse neural mapping from γ to `(ego_angle, R)`. Introspection only — **no longer on the torque path** (dθ/dt uses `arg(γ)` directly).
-- [`plot_walkers`](decision_model.py#L2979) — SDE walker simulation.
-- [`plot_direction_mesh`](decision_model.py#L2549), [`plot_bifurcation_diagram`](decision_model.py#L2734).
+- [`sc_equilib`](decision_model/neural_band_model.py#L487) — self-consistent equilibrium finder (heading = consensus); used for bifurcation diagrams in (x, y). Returns `(allocentric_angles, stability_booleans)`.
+- [`gamma_equilib`](decision_model/neural_band_model.py#L412) — γ-equilibrium finder at a fixed observer heading. *Not* the self-consistent finder.
+- [`run_dgamma_dt`](decision_model/neural_band_model.py#L686) — ODE to steady state.
+- [`dtheta_dt`](decision_model/neural_band_model.py#L747) — heading dynamics.
+- [`convert_gamma`](decision_model/neural_band_model.py#L665) — inverse neural mapping from γ to `(ego_angle, R)`. Introspection only — **no longer on the torque path** (dθ/dt uses `arg(γ)` directly).
+- [`plot_walkers`](decision_model/_nbm_walkers.py#L142) — SDE walker simulation.
+- [`plot_direction_mesh`](decision_model/_nbm_plots.py#L148), [`plot_bifurcation_diagram`](decision_model/_nbm_plots.py#L333).
 - `nu_cosine` / `plot_nu_cosine` — the coupling kernel and its plot.
 - `plot_dtheta_dt` — dθ/dt vs heading at a fixed location. `gamma=None` sweeps the carried γ (hysteretic through a bistable stretch); `gamma=False` re-seeds each heading from a neutral `γ = 0.1 + 0j` (the basin machinery's protocol) and restores `self.gamma`; a complex value is used directly.
 
@@ -103,7 +118,7 @@ Three target geometries: `circle`, `delta` (point), and `capsule`.
 
 ## Bifurcation diagrams — conventions
 
-[`plot_bifurcation_diagram`](decision_model.py#L2734) renders `(x, y)` sweeps colored by stable-equilibrium count.
+[`plot_bifurcation_diagram`](decision_model/_nbm_plots.py#L333) renders `(x, y)` sweeps colored by stable-equilibrium count.
 
 - **Default colormap is viridis keyed on stable count alone**, with a `max_count` kwarg.
 - **Don't reintroduce two-axis `(n_stable, n_unstable)` color coding** without an explicit ask — it was tried and made boundaries harder to read. (The `stability_criterion=` plumbing it introduced is preserved — a real correctness fix.)
@@ -117,7 +132,7 @@ Three target geometries: `circle`, `delta` (point), and `capsule`.
 - **0-stable "decision paralysis" band under power warping** (`c=0.5`): a transition band between the 1- and 2-stable regions with **no** stable equilibrium — a genuine pitchfork-like bifurcation, not a numerical artifact. Power warping stretches the physical angles to ~112–138° of neural separation, destabilizing the transverse mode. **Caveat:** the old supporting "full coupled 3×3 also shows instability" check used the removed `'coupled'` criterion and no longer counts; the fast-block and `'reduced'` evidence stands on its own, but whether the exact `(n⃗, θ)` system also lacks a stable equilibrium here is **unchecked**.
 - **No γ–θ Hopf / head-bobbing** (vonmises k=0.55, two-target, near (2.1, ±2.45)): the "Hopf island with stable limit cycle" reported here through 2026-08 was an **artifact of the removed `'coupled'` criterion**, which took the full eigenvalues of the γ-level `(γ_re, γ_im, θ)` Jacobian — an incomplete equation off `θ̇ = 0`. The exact `(n⃗, θ)` population system is stable at every equilibrium the γ-3×3 flagged (6 → 0 under the current law, 7 → 0 under both older torque laws). **Don't re-derive a coupled γ-ODE and rediscover it**; a genuine coupled analysis needs the population system plus an explicit `τ₀` (see "Stability criterion" above). The cells are still 0-stable under `'reduced'` — the γ-block has a positive eigenvalue there — and the slaved walker does a small γ-bistability *relaxation* oscillation, not head-bobbing. → [archive/stale_coupled_model_starting_code/README.md](archive/stale_coupled_model_starting_code/README.md).
 - **Weighting vs warping — the "ears":** warping alone reproduces full-weighting bifurcation structure *except* two "ears" of extra far-target bistability behind two circle targets — present under non-uniform `angle_weight`, absent under uniform (the default), hence now opt-in. → [weighting_analysis/README.md](weighting_analysis/README.md).
-- **An anti-foveal (centre-dip) `angle_weight` cannot bias the observer outward** — the mechanism the locust 3-target split (29% centre vs the fly's 45%) would need. A weight is a function of *egocentric* angle, so a dip at ego 0 suppresses **whatever the observer currently faces**, penalizing every single-target commitment equally; since the outer-target branches are the fragile ones (marginal Ising saddle-nodes) they die first, annihilating entirely below a floor of ~0.5. Walker census goes to **100% centre** (data 29%, shipped foveal 65%). Second, independent penalty: spreading ρ lowers `R`, and the gated walker drift `K·R^{R_exp}` collapses with it, so the ensemble gets *narrower*, not wider. **Concentrate the weight, don't spread it** — the same direction the foveal commitment-signal question wants. The locust gap therefore stays in the **recapture mechanism**, not the perception weighting. The two families written to test this (`lin_dip`, `lin_ring`) were **removed from `decision_model.py`** afterwards and preserved, with their tests, in [weighting_analysis/anti_foveal.py](weighting_analysis/anti_foveal.py). → [weighting_analysis/outward_bias.md](weighting_analysis/outward_bias.md).
+- **An anti-foveal (centre-dip) `angle_weight` cannot bias the observer outward** — the mechanism the locust 3-target split (29% centre vs the fly's 45%) would need. A weight is a function of *egocentric* angle, so a dip at ego 0 suppresses **whatever the observer currently faces**, penalizing every single-target commitment equally; since the outer-target branches are the fragile ones (marginal Ising saddle-nodes) they die first, annihilating entirely below a floor of ~0.5. Walker census goes to **100% centre** (data 29%, shipped foveal 65%). Second, independent penalty: spreading ρ lowers `R`, and the gated walker drift `K·R^{R_exp}` collapses with it, so the ensemble gets *narrower*, not wider. **Concentrate the weight, don't spread it** — the same direction the foveal commitment-signal question wants. The locust gap therefore stays in the **recapture mechanism**, not the perception weighting. The two families written to test this (`lin_dip`, `lin_ring`) were **removed from the model** afterwards and preserved, with their tests, in [weighting_analysis/anti_foveal.py](weighting_analysis/anti_foveal.py). → [weighting_analysis/outward_bias.md](weighting_analysis/outward_bias.md).
 
 ## Basin-of-attraction overlay (vetted and implemented)
 
@@ -141,10 +156,10 @@ Path-scoped rules under `.claude/rules/` load **only** when you open a matching 
 
 | Topic | Auto-loads when you open… | Full detail |
 |---|---|---|
-| PerceptionModel deep API, interval arithmetic, integral splines, `sc_equilib` solvers, `run_dgamma_dt` LSODA, `R<0.01` filter | `decision_model.py` | `.claude/rules/perception-and-solver.md` |
-| Walker `plot_walkers`: state-gated noise law, `walk_std` blind-spot search, target detection, `R_exp`, loss mechanisms | `decision_model.py` | `.claude/rules/walker-dynamics.md` |
-| dθ/dt half-angle torque + `K=2` derivation, the two stability criteria (full), coupled-Jacobian proofs, SC-design history | `decision_model.py` | `.claude/rules/torque-and-stability.md` |
-| Basin overlay code-editing gotchas (basin-width; multistable-only robustness; neutral-seed protocol) | `decision_model.py` | `.claude/rules/basin-estimation.md` |
+| PerceptionModel deep API, interval arithmetic, integral splines, `sc_equilib` solvers, `run_dgamma_dt` LSODA, `R<0.01` filter | `decision_model/perception_model.py`, `angle_distributions.py`, `targets.py`, `neural_band_model.py` | `.claude/rules/perception-and-solver.md` |
+| Walker `plot_walkers`: state-gated noise law, `walk_std` blind-spot search, target detection, `R_exp`, loss mechanisms | `decision_model/_nbm_walkers.py` | `.claude/rules/walker-dynamics.md` |
+| dθ/dt half-angle torque + `K=2` derivation, the two stability criteria (full), coupled-Jacobian proofs, SC-design history | `decision_model/neural_band_model.py` | `.claude/rules/torque-and-stability.md` |
+| Basin overlay code-editing gotchas (basin-width; multistable-only robustness; neutral-seed protocol) | `decision_model/_nbm_basins.py` | `.claude/rules/basin-estimation.md` |
 | IEM→NBM fold (done): equivalence, the ν kernel, caveats, the walker carry frame (pull-only) | — | [theory/iem_nbm_fold.md](theory/iem_nbm_fold.md), [tests/test_angle_distortion_nu.py](tests/test_angle_distortion_nu.py) |
 | Basin findings, F̂ derivation, block-determinant identity, Lyapunov/Langevin/Kramers background (pull-only) | — | [theory/basins_of_attraction.md](theory/basins_of_attraction.md), [theory/free_energy_derivation.md](theory/free_energy_derivation.md), [theory/block_determinant_identity.tex](theory/block_determinant_identity.tex), [theory/theory_background.md](theory/theory_background.md) |
 | Weighting-vs-warping "ears" | `weighting_analysis/` | `.claude/rules/weighting.md`; [weighting_analysis/README.md](weighting_analysis/README.md) |

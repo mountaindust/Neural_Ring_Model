@@ -1,5 +1,5 @@
 '''
-For this to work, in decision_model.py you need gamma noise:
+For this to work, in the model you need gamma noise:
 init_gamma = self.gamma + self.rng.normal()*1e-2 + 1j*self.rng.normal()*1e-2
 '''
 import os

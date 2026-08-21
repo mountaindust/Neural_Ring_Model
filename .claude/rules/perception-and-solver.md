@@ -1,11 +1,14 @@
 ---
 paths:
-  - "decision_model.py"
+  - "decision_model/perception_model.py"
+  - "decision_model/angle_distributions.py"
+  - "decision_model/targets.py"
+  - "decision_model/neural_band_model.py"
 ---
 
 # Perception model & solver numerics
 
-Deep detail for `PerceptionModel`, the interval-arithmetic blocking path, the integral-spline maps, and the equilibrium/ODE solvers in `decision_model.py`. The durable summary is in [CLAUDE.md](../../CLAUDE.md); this rule auto-loads whenever `decision_model.py` is open.
+Deep detail for `PerceptionModel`, the interval-arithmetic blocking path, the integral-spline maps, and the equilibrium/ODE solvers. The durable summary is in [CLAUDE.md](../../CLAUDE.md); this rule auto-loads with `decision_model/perception_model.py`, `angle_distributions.py`, `targets.py` and `neural_band_model.py`.
 
 ## `PerceptionModel` API — full parameter detail
 
@@ -16,10 +19,10 @@ Per-role parameters use generic two-slot kwargs `a_warp/b_warp` and `a_weight/b_
 
 ## Perception: exact interval arithmetic for blocking
 
-[`PerceptionModel._get_target_signals`](../../decision_model.py#L1650) uses exact interval arithmetic, not a mesh discretization:
+[`PerceptionModel._get_target_signals`](../../decision_model/perception_model.py#L619) uses exact interval arithmetic, not a mesh discretization:
 
-- [`_subtract_intervals_circle`](../../decision_model.py#L1457) computes visible angular intervals after blocking by closer targets.
-- [`_integrate_neural_weight`](../../decision_model.py#L1497) integrates neural weight (cutoff or vonmises) over those intervals analytically.
+- [`_subtract_intervals_circle`](../../decision_model/perception_model.py#L464) computes visible angular intervals after blocking by closer targets.
+- [`_integrate_neural_weight`](../../decision_model/perception_model.py#L504) integrates neural weight (cutoff or vonmises) over those intervals analytically.
 
 The original implementation Riemann-summed over a discrete θ-mesh and produced equilibrium residuals of ~1e-3 — not roundoff but genuine discretization error that caused convergence failures in `sc_equilib`. Switching to interval arithmetic dropped residuals to machine precision (~1e-14) and gave a 4.5× speedup for circle targets.
 
@@ -51,7 +54,7 @@ Simplified from an earlier two-pass `brentq + multistart` to a single-pass strat
 
 ## `run_dgamma_dt`: LSODA with real-valued reformulation
 
-[`NBM.run_dgamma_dt`](../../decision_model.py#L2360) reformulates the complex γ ODE as a real 2D system (scipy's stiff solvers reject complex `y0`), uses a single LSODA call (not restarted RK45 windows), and checks convergence via the actual `|dgamma_dt|` at the endpoint. **Preserve the real-valued reformulation when modifying this** (LSODA compatibility).
+[`NBM.run_dgamma_dt`](../../decision_model/neural_band_model.py#L686) reformulates the complex γ ODE as a real 2D system (scipy's stiff solvers reject complex `y0`), uses a single LSODA call (not restarted RK45 windows), and checks convergence via the actual `|dgamma_dt|` at the endpoint. **Preserve the real-valued reformulation when modifying this** (LSODA compatibility).
 
 **Why:** at certain walker positions (e.g. `x ~ 1.1` with two symmetric targets at `~±30°`), `dgamma_dt` has 3 equilibria with a **near-saddle slow manifold** between them where a Jacobian eigenvalue is `~−1.7e-5`. Trajectories crossing this manifold need 60–150 time units to escape. The previous restarted-RK45 implementation had `t_Final=30` (too short), lost adaptive step history at each restart, and used a less reliable finite-difference convergence check. Default `t_Final` is now 100 in both `run_dgamma_dt` and `dtheta_dt`. LSODA uses ~170 nfev (~10ms) for hard cases — comparable to or faster than the old approach when it succeeded.
 

@@ -11,7 +11,7 @@ retired — its step-by-step vetting log lives in git history). Companion docs:
   stat-mech / Langevin / Kramers tutorial behind the math here.
 
 The visualization this work fed is **implemented**: `NBM.plot_bifurcation_diagram(overlay_basins=True)`
-([decision_model.py](../decision_model.py)). See **"What the code does now"** below.
+([decision_model/_nbm_basins.py](../decision_model/_nbm_basins.py)). See **"What the code does now"** below.
 
 > **Scope of validity (read first).** The model splits cleanly into a
 > Hamiltonian/Glauber-derived **γ-side** (neural coherence dynamics) and a
@@ -308,7 +308,7 @@ Engineering follow-ups are tracked in [TODO.md](../TODO.md).
 
 The basin visualization is **live in the model** (no separate `basin_estimation/`
 module): `NBM.plot_bifurcation_diagram(overlay_basins=True)` in
-[decision_model.py](../decision_model.py).
+[decision_model/_nbm_basins.py](../decision_model/_nbm_basins.py).
 
 - **Single-panel wheel overlay.** The count colormap is dimmed
   (`basin_bg_alpha`, default 0.7) and a basin **wheel** is drawn per region.

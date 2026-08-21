@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import numpy as np
 from scipy.integrate import quad
 from decision_model import PerceptionModel as PM, Targets
+from decision_model import angle_distributions as ad
 
 import anti_foveal
 from anti_foveal import (lin_dip, lin_dip_integral, lin_dip_int_inverse,
@@ -224,7 +225,7 @@ check_array("m -> 1 forward map is the identity",
 # lin_dip and lin_cutoff are complementary in shape: where one has its plateau
 # the other has its floor.
 ok(lin_dip(0.0, 0.25, pi / 2) < lin_dip(pi, 0.25, pi / 2)
-   and PM._lin_cutoff(0.0, 0.5, 2.0) > PM._lin_cutoff(1.9, 0.5, 2.0),
+   and ad.lin_cutoff(0.0, 0.5, 2.0) > ad.lin_cutoff(1.9, 0.5, 2.0),
    "lin_dip peaks outward where lin_cutoff peaks forward")
 
 # ========================================================
