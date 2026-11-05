@@ -424,21 +424,23 @@ class Targets:
         return dist_list
 
 
-    def plot_targets_to_axis(self, ax, zorder=5):
+    def plot_targets_to_axis(self, ax, target_color='0.5', zorder=5):
         '''Plots the targets on a given axis object.
+
+        target_color sets the color of the targets as a matplotlib color 
+        specification (default medium grey).
 
         zorder sets the draw layer (default 5, above direction-mesh quivers);
         pass a higher value to draw the targets on top of e.g. basin wheels.
         '''
 
-        target_color = '0.5'  # medium grey
         # Render targets above other layers (e.g., direction-mesh quivers)
         # and fully opaque so they hide arrows passing through them.
         zo = zorder
 
         if self.geom_name is None:
             # delta functions
-            ax.plot(self.locs[:,0],self.locs[:,1],'.', color=target_color,
+            ax.plot(self.locs[:,0],self.locs[:,1],'x', color=target_color,
                     zorder=zo)
         elif self.geom_name == 'circle':
             for n,pos in enumerate(self.locs):

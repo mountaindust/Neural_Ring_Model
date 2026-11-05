@@ -158,7 +158,8 @@ class _WalkerMixin:
     def plot_walkers(self, dt=0.1, v=1, std=None, walk_std=0.5*np.pi,
                      noise_exp=0, R_exp=1, repetitions=20, max_steps=1500,
                      start_loc=None, start_angle=None, target_tol=None,
-                     alpha=1.0, pool=None, ax=None, title=None, wb_plot=False):
+                     target_color='0.5', alpha=1.0, 
+                     pool=None, ax=None, title=None, wb_plot=False):
         '''Plot a walker that starts at a specified location looking in a
         specified angle (defaults to the focal_loc and focal_angle in attached
         PerceptionModel) and moves according to the neural band torque model on
@@ -299,6 +300,8 @@ class _WalkerMixin:
             Proximity threshold for declaring a target "found". The walker
             stops when the distance to any target surface is less than this
             value. If None (default), uses v*dt (one step size).
+        target_color : matplotlib color spec, optional (default 0.5)
+            Color of the targets in the plot. Can be any valid matplotlib color
         alpha : float, optional (default 1.0)
             Opacity passed to the track plotting call (0 = fully transparent,
             1 = fully opaque). Lower values let overlapping trajectories reveal
@@ -400,7 +403,7 @@ class _WalkerMixin:
         else:
             ax.set_title('Random walker paths')
 
-        self.percep_model.targets.plot_targets_to_axis(ax)
+        self.percep_model.targets.plot_targets_to_axis(ax, target_color=target_color)
 
         # Plot each walker trajectory (already column-stacked by the walk
         # helper). alpha sets track opacity: lower values let overlapping paths
